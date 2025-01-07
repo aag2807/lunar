@@ -198,3 +198,269 @@ local y = 10`
 		}
 	}
 }
+
+func TestOperators(t *testing.T) {
+	input := `+ - * / %
+== ~= != < > <= >=
+and or not
+.. "concat" .. "strings"`
+
+	tests := []struct {
+		expectedType    TokenType
+		expectedLiteral string
+	}{
+		{TokenType(PLUS), "+"},
+		{TokenType(MINUS), "-"},
+		{TokenType(ASTERISK), "*"},
+		{TokenType(SLASH), "/"},
+		{TokenType(MODULO), "%"},
+		{TokenType(EQ), "=="},
+		{TokenType(NOT_EQ_LUA), "~="},
+		{TokenType(NOT_EQ), "!="},
+		{TokenType(LT), "<"},
+		{TokenType(GT), ">"},
+		{TokenType(LT_EQ), "<="},
+		{TokenType(GT_EQ), ">="},
+		{TokenType(AND), "and"},
+		{TokenType(OR), "or"},
+		{TokenType(NOT), "not"},
+		{TokenType(CONCAT), ".."},
+		{TokenType(STRING), "concat"},
+		{TokenType(CONCAT), ".."},
+		{TokenType(STRING), "strings"},
+		{TokenType(EOF), ""},
+	}
+
+	l := New(input)
+
+	for i, tt := range tests {
+		tok := l.NextToken()
+
+		if tok.Type != tt.expectedType {
+			t.Errorf("tests[%d] - tokentype wrong. expected=%q, got=%q",
+				i, tt.expectedType, tok.Type)
+		}
+
+		if tok.Literal != tt.expectedLiteral {
+			t.Errorf("tests[%d] - literal wrong. expected=%q, got=%q",
+				i, tt.expectedLiteral, tok.Literal)
+		}
+	}
+}
+
+func TestDelimiters(t *testing.T) {
+	input := `([]),:
+local point: Point = {x: 10, y: 20}`
+
+	tests := []struct {
+		expectedType    TokenType
+		expectedLiteral string
+	}{
+		{TokenType(LPAREN), "("},   //0
+		{TokenType(LBRACKET), "["}, //1
+		{TokenType(RBRACKET), "]"}, //2
+		{TokenType(RPAREN), ")"},   //3
+		{TokenType(COMMA), ","},    //4
+		{TokenType(COLON), ":"},    //5
+
+		{TokenType(LOCAL), "local"}, //6
+		{TokenType(IDENT), "point"}, //7
+		{TokenType(COLON), ":"},     //8
+		{TokenType(IDENT), "Point"}, //9
+		{TokenType(ASSIGN), "="},    //10
+
+		{TokenType(LBRACE), "{"},  //11
+		{TokenType(IDENT), "x"},   //12
+		{TokenType(COLON), ":"},   //13
+		{TokenType(NUMBER), "10"}, //14
+		{TokenType(COMMA), ","},   //15
+
+		{TokenType(IDENT), "y"},   //16
+		{TokenType(COLON), ":"},   // 17
+		{TokenType(NUMBER), "20"}, //18
+		{TokenType(RBRACE), "}"},  // 19
+		{TokenType(EOF), ""},      // 20
+	}
+
+	l := New(input)
+
+	for i, tt := range tests {
+		tok := l.NextToken()
+
+		if tok.Type != tt.expectedType {
+			t.Errorf("tests[%d] - tokentype wrong. expected=%q, got=%q",
+				i, tt.expectedType, tok.Type)
+		}
+
+		if tok.Literal != tt.expectedLiteral {
+			t.Errorf("tests[%d] - literal wrong. expected=%q, got=%q",
+				i, tt.expectedLiteral, tok.Literal)
+		}
+	}
+}
+
+func TestInterfaceDeclaration(t *testing.T) {
+	input := `interface Vehicle
+		brand: string 
+		year: number
+		start(): void
+		stop(): void
+	end
+ 
+	interface ElectricVehicle extends Vehicle
+		batteryLevel: number
+		charge(duration: number): void
+	end`
+
+	tests := []struct {
+		expectedType    TokenType
+		expectedLiteral string
+	}{
+		{INTERFACE, "interface"}, // 1
+		{IDENT, "Vehicle"},       // 2
+		{IDENT, "brand"},         // 3
+		{COLON, ":"},             // 4
+		{IDENT, "string"},        // 5
+		{IDENT, "year"},          // 6
+		{COLON, ":"},             // 7
+		{IDENT, "number"},        // 8
+		{IDENT, "start"},         // 9
+		{LPAREN, "("},            // 10
+		{RPAREN, ")"},            // 11
+		{COLON, ":"},             // 12
+		{VOID, "void"},           // 13
+		{IDENT, "stop"},          // 14
+		{LPAREN, "("},            // 15
+		{RPAREN, ")"},            // 16
+		{COLON, ":"},             // 17
+		{VOID, "void"},           // 18
+		{END, "end"},             // 19
+
+		{INTERFACE, "interface"},   // 20
+		{IDENT, "ElectricVehicle"}, // 21
+		{EXTENDS, "extends"},       // 22
+		{IDENT, "Vehicle"},         // 23
+		{IDENT, "batteryLevel"},    // 24
+		{COLON, ":"},               // 25
+		{IDENT, "number"},          // 26
+		{IDENT, "charge"},          // 27
+		{LPAREN, "("},              // 28
+		{IDENT, "duration"},        // 29
+		{COLON, ":"},               // 30
+		{IDENT, "number"},          // 31
+		{RPAREN, ")"},              // 32
+		{COLON, ":"},               // 33
+		{VOID, "void"},             // 34
+		{END, "end"},               // 35
+		{EOF, ""},                  // 36
+	}
+
+	l := New(input)
+	for i, tt := range tests {
+		tok := l.NextToken()
+		if tok.Type != tt.expectedType {
+			t.Fatalf("tests[%d] - tokentype wrong. expected=%q, got=%q",
+				i, tt.expectedType, tok.Type)
+		}
+	}
+}
+
+func TestClassDeclaration(t *testing.T) {
+	input := `class Car implements Vehicle
+		private brand: string
+		private year: number
+		private running: boolean
+
+		constructor(brand: string, year: number)
+			self.brand = brand
+			self.year = year
+			self.running = false
+		end
+
+		public start(): void 
+			self.running = true
+		end
+	end`
+
+	tests := []struct {
+		expectedType    TokenType
+		expectedLiteral string
+	}{
+		{TokenType(CLASS), "class"},
+		{TokenType(IDENT), "Car"},
+		{TokenType(IMPLEMENTS), "implements"},
+		{TokenType(IDENT), "Vehicle"},
+
+		{TokenType(PRIVATE), "private"},
+		{TokenType(IDENT), "brand"},
+		{TokenType(COLON), ":"},
+		{TokenType(IDENT), "string"},
+
+		{TokenType(PRIVATE), "private"},
+		{TokenType(IDENT), "year"},
+		{TokenType(COLON), ":"},
+		{TokenType(IDENT), "number"},
+
+		{TokenType(PRIVATE), "private"},
+		{TokenType(IDENT), "running"},
+		{TokenType(COLON), ":"},
+		{TokenType(IDENT), "boolean"},
+
+		{TokenType(CONSTRUCTOR), "constructor"},
+		{TokenType(LPAREN), "("},
+		{TokenType(IDENT), "brand"},
+		{TokenType(COLON), ":"},
+		{TokenType(IDENT), "string"},
+		{TokenType(COMMA), ","},
+		{TokenType(IDENT), "year"},
+		{TokenType(COLON), ":"},
+		{TokenType(IDENT), "number"},
+		{TokenType(RPAREN), ")"},
+
+		{TokenType(SELF), "self"},
+		{TokenType(DOT), "."},
+		{TokenType(IDENT), "brand"},
+		{TokenType(ASSIGN), "="},
+		{TokenType(IDENT), "brand"},
+
+		{TokenType(SELF), "self"},
+		{TokenType(DOT), "."},
+		{TokenType(IDENT), "year"},
+		{TokenType(ASSIGN), "="},
+		{TokenType(IDENT), "year"},
+
+		{TokenType(SELF), "self"},
+		{TokenType(DOT), "."},
+		{TokenType(IDENT), "running"},
+		{TokenType(ASSIGN), "="},
+		{TokenType(IDENT), "false"},
+
+		{TokenType(END), "end"},
+
+		{TokenType(PUBLIC), "public"},
+		{TokenType(IDENT), "start"},
+		{TokenType(LPAREN), "("},
+		{TokenType(RPAREN), ")"},
+		{TokenType(COLON), ":"},
+		{TokenType(VOID), "void"},
+
+		{TokenType(SELF), "self"},
+		{TokenType(DOT), "."},
+		{TokenType(IDENT), "running"},
+		{TokenType(ASSIGN), "="},
+		{TokenType(IDENT), "true"},
+		{TokenType(END), "end"},
+
+		{TokenType(END), "end"},
+		{TokenType(EOF), ""},
+	}
+
+	l := New(input)
+	for i, tt := range tests {
+		tok := l.NextToken()
+		if tok.Type != tt.expectedType {
+			t.Fatalf("tests[%d] - tokentype wrong. expected=%q, got=%q",
+				i, tt.expectedType, tok.Type)
+		}
+	}
+}

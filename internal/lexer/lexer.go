@@ -1,7 +1,5 @@
 package lexer
 
-import "fmt"
-
 type Lexer struct {
 	input        string
 	position     int
@@ -19,7 +17,6 @@ func New(input string) *Lexer {
 }
 
 func (l *Lexer) readChar() {
-	fmt.Printf("Position: %d, Next char: %c\n", l.position, l.ch)
 	if l.readPosition >= len(l.input) {
 		l.ch = 0 // ASCII code for "NUL"
 	} else {
@@ -37,7 +34,6 @@ func (l *Lexer) readChar() {
 }
 
 func (l *Lexer) NextToken() Token {
-	fmt.Printf("NextToken() starting at pos %d, char %q\n", l.position, l.ch)
 	var tok Token
 	l.skipWhitespace()
 

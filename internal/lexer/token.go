@@ -69,6 +69,7 @@ const (
 	IMPLEMENTS  = "implements"
 	CONSTRUCTOR = "constructor"
 	SELF        = "self"
+	VOID        = "void"
 )
 
 // Map of keywords
@@ -96,6 +97,7 @@ var keywords = map[string]TokenType{
 	"and":         AND,
 	"or":          OR,
 	"not":         NOT,
+	"void":        VOID,
 }
 
 type Token struct {

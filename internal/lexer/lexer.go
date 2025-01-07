@@ -1,5 +1,7 @@
 package lexer
 
+import "fmt"
+
 type Lexer struct {
 	input        string
 	position     int
@@ -17,6 +19,7 @@ func New(input string) *Lexer {
 }
 
 func (l *Lexer) readChar() {
+	fmt.Printf("Position: %d, Next char: %c\n", l.position, l.ch)
 	if l.readPosition >= len(l.input) {
 		l.ch = 0 // ASCII code for "NUL"
 	} else {
@@ -34,50 +37,90 @@ func (l *Lexer) readChar() {
 }
 
 func (l *Lexer) NextToken() Token {
+	fmt.Printf("NextToken() starting at pos %d, char %q\n", l.position, l.ch)
 	var tok Token
-
-	//skip whitespace
 	l.skipWhitespace()
 
 	tok.Line = l.line
 	tok.Column = l.column
 
 	switch l.ch {
-	case '"':
-		tok.Type = TokenType(STRING)
-		tok.Literal = l.readString()
-		l.readChar() //closing quote
-		return tok
+	case '+':
+		tok = newToken(PLUS, l.ch, l.line, l.column)
+	case '-':
+		if l.peekChar() == '-' {
+			l.skipComment()
+			return l.NextToken()
+		}
+		tok = newToken(MINUS, l.ch, l.line, l.column)
+	case '~':
+		if l.peekChar() == '=' {
+			l.readChar()
+			tok = Token{Type: NOT_EQ_LUA, Literal: "~=", Line: l.line, Column: l.column}
+		} else {
+			tok = newToken(ILLEGAL, l.ch, l.line, l.column)
+		}
+	case '!':
+		if l.peekChar() == '=' {
+			l.readChar()
+			tok = Token{Type: NOT_EQ, Literal: "!=", Line: l.line, Column: l.column}
+		} else {
+			tok = newToken(ILLEGAL, l.ch, l.line, l.column)
+		}
 	case '=':
-		tok = newToken(TokenType(ASSIGN), l.ch, l.line, l.column)
-		break
-	case ':':
-		tok = newToken(TokenType(COLON), l.ch, l.line, l.column)
-		break
-	case '(':
-		tok = newToken(TokenType(LPAREN), l.ch, l.line, l.column)
-		break
-	case ')':
-		tok = newToken(TokenType(RPAREN), l.ch, l.line, l.column)
-		break
+		if l.peekChar() == '=' {
+			l.readChar()
+			tok = Token{Type: EQ, Literal: "==", Line: l.line, Column: l.column}
+		} else {
+			tok = newToken(ASSIGN, l.ch, l.line, l.column)
+		}
+	case '*':
+		tok = newToken(ASTERISK, l.ch, l.line, l.column)
+	case '/':
+		tok = newToken(SLASH, l.ch, l.line, l.column)
+	case '%':
+		tok = newToken(MODULO, l.ch, l.line, l.column)
+	case '.':
+		if l.peekChar() == '.' {
+			l.readChar()
+			tok = Token{Type: CONCAT, Literal: "..", Line: l.line, Column: l.column}
+		} else {
+			tok = newToken(DOT, l.ch, l.line, l.column)
+		}
 	case ',':
-		tok = newToken(TokenType(COMMA), l.ch, l.line, l.column)
-		break
+		tok = newToken(COMMA, l.ch, l.line, l.column)
+	case ':':
+		tok = newToken(COLON, l.ch, l.line, l.column)
+	case '(':
+		tok = newToken(LPAREN, l.ch, l.line, l.column)
+	case ')':
+		tok = newToken(RPAREN, l.ch, l.line, l.column)
+	case '[':
+		tok = newToken(LBRACKET, l.ch, l.line, l.column)
+	case ']':
+		tok = newToken(RBRACKET, l.ch, l.line, l.column)
+	case '{':
+		tok = newToken(LBRACE, l.ch, l.line, l.column)
+	case '}':
+		tok = newToken(RBRACE, l.ch, l.line, l.column)
+	case '"':
+		tok.Type = STRING
+		tok.Literal = l.readString()
+		return tok
 	case 0:
+		tok.Type = EOF
 		tok.Literal = ""
-		tok.Type = TokenType(EOF)
-		break
 	default:
 		if isLetter(l.ch) {
 			tok.Literal = l.readIdentifier()
 			tok.Type = LookupIdent(tok.Literal)
 			return tok
-
 		} else if isDigit(l.ch) {
+			tok.Type = NUMBER
 			tok.Literal = l.readNumber()
-			tok.Type = TokenType(NUMBER)
+			return tok
 		} else {
-			tok = newToken(TokenType(ILLEGAL), l.ch, l.line, l.column)
+			tok = newToken(ILLEGAL, l.ch, l.line, l.column)
 		}
 	}
 
@@ -86,40 +129,24 @@ func (l *Lexer) NextToken() Token {
 }
 
 func (l *Lexer) skipWhitespace() {
-	for {
-		switch l.ch {
-		case ' ', '\t', '\r':
-			l.readChar()
-		case '\n':
+	for l.ch == ' ' || l.ch == '\t' || l.ch == '\r' || l.ch == '\n' {
+		if l.ch == '\n' {
 			l.line++
-			l.readChar()
-		case '-':
-			if l.peekChar() == '-' {
-				l.skipComment()
-				if l.ch == '\n' {
-					l.line++
-					l.readChar()
-				}
-			} else {
-				return
-			}
-		default:
-			return
+			l.column = 0
 		}
+		l.readChar()
 	}
 }
 
 func (l *Lexer) skipComment() {
-	if l.ch == '-' && l.peekChar() == '-' {
-		l.readChar() // move past first '-'
-		l.readChar() // move past '--'
+	l.readChar() // skip first '-'
+	l.readChar() // skip second '-'
 
-		if l.ch == '[' && l.peekChar() == '[' {
-			l.readChar() // consume second '['
-			l.skipMultiLineComment()
-		} else {
-			l.skipSingleLineComment()
-		}
+	// Check for multiline comment
+	if l.ch == '[' && l.peekChar() == '[' {
+		l.skipMultiLineComment()
+	} else {
+		l.skipSingleLineComment()
 	}
 }
 
@@ -145,12 +172,10 @@ func (l *Lexer) skipMultiLineComment() {
 }
 
 func (l *Lexer) skipSingleLineComment() {
-	// Read until end of line or EOF
+	// Skip until newline but don't consume it
 	for l.ch != '\n' && l.ch != 0 {
 		l.readChar()
 	}
-	// Now we're at the newline or EOF
-	// Don't consume the newline - let skipWhitespace handle it
 }
 
 func (l *Lexer) readIdentifier() string {
@@ -179,51 +204,36 @@ func (l *Lexer) readNumber() string {
 }
 
 func (l *Lexer) readString() string {
-	position := l.position + 1 // skips the opening quote
-	escapeNext := false
 	var result []byte
 
 	for {
 		l.readChar()
-		if l.ch == 0 {
-			return string(result)
-		}
 
-		if escapeNext {
+		if l.ch == '\\' {
+			l.readChar()
 			switch l.ch {
 			case 'n':
 				result = append(result, '\n')
 			case 't':
 				result = append(result, '\t')
-			case 'r':
-				result = append(result, '\r')
 			case '"':
 				result = append(result, '"')
 			case '\\':
 				result = append(result, '\\')
 			default:
-				// Invalid escape sequence, just add the character
 				result = append(result, l.ch)
 			}
-			escapeNext = false
-			continue
-		}
-
-		if l.ch == '\\' {
-			escapeNext = true
 			continue
 		}
 
 		if l.ch == '"' {
+			l.readChar()
 			break
 		}
 
-		result = append(result, l.ch)
-	}
-
-	if l.ch == 0 {
-		//unterminated string
-		return l.input[position:l.position]
+		if l.ch != 0 {
+			result = append(result, l.ch)
+		}
 	}
 
 	return string(result)

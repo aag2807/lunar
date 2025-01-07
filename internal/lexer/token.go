@@ -12,12 +12,30 @@ const (
 	STRING = "STRING"
 
 	//operators
-	ASSIGN    = "="
-	PLUS      = "+"
-	MINUS     = "-"
-	BANG      = "!"
-	ASTEROISK = "*"
-	SLASH     = "/"
+	ASSIGN   = "="
+	PLUS     = "+"
+	MINUS    = "-"
+	BANG     = "!"
+	ASTERISK = "*"
+	SLASH    = "/"
+	MODULO   = "%"
+
+	//comparison
+	EQ         = "=="
+	NOT_EQ_LUA = "~="
+	NOT_EQ     = "!="
+	LT         = "<"
+	GT         = ">"
+	LT_EQ      = "<="
+	GT_EQ      = ">="
+
+	//logical
+	AND = "and"
+	OR  = "or"
+	NOT = "not"
+
+	//concat operator
+	CONCAT = ".."
 
 	//delimeters
 	COMMA    = ","
@@ -27,6 +45,8 @@ const (
 	RPAREN   = ")"
 	LBRACKET = "["
 	RBRACKET = "]"
+	LBRACE   = "{"
+	RBRACE   = "}"
 
 	// keywords specific to lunar
 	CLASS       = "class"
@@ -73,6 +93,9 @@ var keywords = map[string]TokenType{
 	"implements":  IMPLEMENTS,
 	"constructor": CONSTRUCTOR,
 	"self":        SELF,
+	"and":         AND,
+	"or":          OR,
+	"not":         NOT,
 }
 
 type Token struct {

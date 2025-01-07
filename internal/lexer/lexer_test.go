@@ -81,10 +81,10 @@ func TestNumberTokens(t *testing.T) {
 		expectedLine    int
 	}{
 		{TokenType(NUMBER), "42", 1},
-		{TokenType(NUMBER), "3.14", 1},
-		{TokenType(NUMBER), "100", 1},
-		{TokenType(NUMBER), "0.123", 1},
-		{TokenType(EOF), "", 1},
+		{TokenType(NUMBER), "3.14", 2},
+		{TokenType(NUMBER), "100", 3},
+		{TokenType(NUMBER), "0.123", 4},
+		{TokenType(EOF), "", 4},
 	}
 
 	l := New(input)

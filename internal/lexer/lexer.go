@@ -67,9 +67,20 @@ func (l *Lexer) NextToken() Token {
 		if l.peekChar() == '=' {
 			l.readChar()
 			tok = Token{Type: EQ, Literal: "==", Line: l.line, Column: l.column}
+		} else if l.peekChar() == '>' {
+			l.readChar()
+			tok = Token{Type: ARROW, Literal: "=>"}
 		} else {
 			tok = newToken(ASSIGN, l.ch, l.line, l.column)
 		}
+	case '?':
+		tok = newToken(QUESTION, l.ch, l.line, l.column)
+	case '|':
+		tok = newToken(PIPE, l.ch, l.line, l.column)
+	case '<':
+		tok = newToken(LT, l.ch, l.line, l.column)
+	case '>':
+		tok = newToken(GT, l.ch, l.line, l.column)
 	case '*':
 		tok = newToken(ASTERISK, l.ch, l.line, l.column)
 	case '/':

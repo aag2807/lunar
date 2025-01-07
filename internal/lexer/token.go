@@ -70,6 +70,18 @@ const (
 	CONSTRUCTOR = "constructor"
 	SELF        = "self"
 	VOID        = "void"
+
+	//types
+	ANY         = "any"
+	STRING_TYPE = "string"
+	NUMBER_TYPE = "number"
+	BOOLEAN     = "boolean"
+	NIL         = "nil"
+
+	ARROW    = "=>"
+	QUESTION = "?"
+	TABLE    = "table"
+	PIPE     = "|"
 )
 
 // Map of keywords
@@ -98,6 +110,12 @@ var keywords = map[string]TokenType{
 	"or":          OR,
 	"not":         NOT,
 	"void":        VOID,
+	"table":       TABLE,
+	"any":         ANY,
+	"string":      STRING_TYPE,
+	"number":      NUMBER_TYPE,
+	"boolean":     BOOLEAN,
+	"nil":         NIL,
 }
 
 type Token struct {

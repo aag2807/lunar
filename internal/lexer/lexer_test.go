@@ -43,7 +43,7 @@ func TestNextToken(t *testing.T) {
 		{TokenType(PRIVATE), "private", 2},
 		{TokenType(IDENT), "x", 2},
 		{TokenType(COLON), ":", 2},
-		{TokenType(IDENT), "number", 2},
+		{TokenType(NUMBER_TYPE), "number", 2},
 		{TokenType(EOF), "", 2},
 	}
 
@@ -320,10 +320,10 @@ func TestInterfaceDeclaration(t *testing.T) {
 		{IDENT, "Vehicle"},       // 2
 		{IDENT, "brand"},         // 3
 		{COLON, ":"},             // 4
-		{IDENT, "string"},        // 5
+		{STRING_TYPE, "string"},  // 5
 		{IDENT, "year"},          // 6
 		{COLON, ":"},             // 7
-		{IDENT, "number"},        // 8
+		{NUMBER_TYPE, "number"},  // 8
 		{IDENT, "start"},         // 9
 		{LPAREN, "("},            // 10
 		{RPAREN, ")"},            // 11
@@ -342,12 +342,12 @@ func TestInterfaceDeclaration(t *testing.T) {
 		{IDENT, "Vehicle"},         // 23
 		{IDENT, "batteryLevel"},    // 24
 		{COLON, ":"},               // 25
-		{IDENT, "number"},          // 26
+		{NUMBER_TYPE, "number"},    // 26
 		{IDENT, "charge"},          // 27
 		{LPAREN, "("},              // 28
 		{IDENT, "duration"},        // 29
 		{COLON, ":"},               // 30
-		{IDENT, "number"},          // 31
+		{NUMBER_TYPE, "number"},    // 31
 		{RPAREN, ")"},              // 32
 		{COLON, ":"},               // 33
 		{VOID, "void"},             // 34
@@ -394,27 +394,27 @@ func TestClassDeclaration(t *testing.T) {
 		{TokenType(PRIVATE), "private"},
 		{TokenType(IDENT), "brand"},
 		{TokenType(COLON), ":"},
-		{TokenType(IDENT), "string"},
+		{TokenType(STRING_TYPE), "string"},
 
 		{TokenType(PRIVATE), "private"},
 		{TokenType(IDENT), "year"},
 		{TokenType(COLON), ":"},
-		{TokenType(IDENT), "number"},
+		{TokenType(NUMBER_TYPE), "number"},
 
 		{TokenType(PRIVATE), "private"},
 		{TokenType(IDENT), "running"},
 		{TokenType(COLON), ":"},
-		{TokenType(IDENT), "boolean"},
+		{TokenType(BOOLEAN), "boolean"},
 
 		{TokenType(CONSTRUCTOR), "constructor"},
 		{TokenType(LPAREN), "("},
 		{TokenType(IDENT), "brand"},
 		{TokenType(COLON), ":"},
-		{TokenType(IDENT), "string"},
+		{TokenType(STRING_TYPE), "string"},
 		{TokenType(COMMA), ","},
 		{TokenType(IDENT), "year"},
 		{TokenType(COLON), ":"},
-		{TokenType(IDENT), "number"},
+		{TokenType(NUMBER_TYPE), "number"},
 		{TokenType(RPAREN), ")"},
 
 		{TokenType(SELF), "self"},
@@ -453,6 +453,79 @@ func TestClassDeclaration(t *testing.T) {
 
 		{TokenType(END), "end"},
 		{TokenType(EOF), ""},
+	}
+
+	l := New(input)
+	for i, tt := range tests {
+		tok := l.NextToken()
+		if tok.Type != tt.expectedType {
+			t.Fatalf("tests[%d] - tokentype wrong. expected=%q, got=%q",
+				i, tt.expectedType, tok.Type)
+		}
+	}
+}
+
+func TestTypeAnnotations(t *testing.T) {
+	input := `local users: User[]
+    local cache: table<string, any>
+    local callback: (user: User) => void
+    local coords: (number, number)
+    local data: string?
+    local status: "loading" | "done"`
+
+	tests := []struct {
+		expectedType    TokenType
+		expectedLiteral string
+	}{
+		{TokenType(LOCAL), "local"},
+		{TokenType(IDENT), "users"},
+		{TokenType(COLON), ":"},
+		{TokenType(IDENT), "User"},
+		{TokenType(LBRACKET), "["},
+		{TokenType(RBRACKET), "]"},
+
+		{TokenType(LOCAL), "local"},
+		{TokenType(IDENT), "cache"},
+		{TokenType(COLON), ":"},
+		{TokenType(TABLE), "table"},
+		{TokenType(LT), "<"},
+		{TokenType(STRING_TYPE), "string"},
+		{TokenType(COMMA), ","},
+		{TokenType(ANY), "any"},
+		{TokenType(GT), "<"},
+
+		{TokenType(LOCAL), "local"},
+		{TokenType(IDENT), "callback"},
+		{TokenType(COLON), ":"},
+		{TokenType(LPAREN), "("},
+		{TokenType(IDENT), "user"},
+		{TokenType(COLON), ":"},
+		{TokenType(IDENT), "User"},
+		{TokenType(RPAREN), ")"},
+		{TokenType(ARROW), "=>"},
+		{TokenType(VOID), "void"},
+
+		{TokenType(LOCAL), "local"},
+		{TokenType(IDENT), "coords"},
+		{TokenType(COLON), ":"},
+		{TokenType(LPAREN), "("},
+		{TokenType(NUMBER_TYPE), "number"},
+		{TokenType(COMMA), ","},
+		{TokenType(NUMBER_TYPE), "number"},
+		{TokenType(RPAREN), ")"},
+
+		{TokenType(LOCAL), "local"},
+		{TokenType(IDENT), "data"},
+		{TokenType(COLON), ":"},
+		{TokenType(STRING_TYPE), "string"},
+		{TokenType(QUESTION), "?"},
+
+		{TokenType(LOCAL), "local"},
+		{TokenType(IDENT), "status"},
+		{TokenType(COLON), ":"},
+		{TokenType(STRING), "loading"},
+		{TokenType(PIPE), "|"},
+		{TokenType(STRING), "done"},
 	}
 
 	l := New(input)

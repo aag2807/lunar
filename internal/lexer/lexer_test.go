@@ -96,3 +96,47 @@ func TestNumberTokens(t *testing.T) {
 		}
 	}
 }
+
+func TestStringTokens(t *testing.T) {
+	input := `"simple string"
+    "string with \"quotes\""
+    "string with \n newline"
+    "string with \t tab"
+    "multiple
+    lines"
+    "escaped \\backslash"`
+
+	tests := []struct {
+		expectedType    TokenType
+		expectedLiteral string
+		expectedLine    int
+	}{
+		{TokenType(STRING), "simple string", 1},
+		{TokenType(STRING), "string with \"quotes\"", 2},
+		{TokenType(STRING), "string with \n newline", 3},
+		{TokenType(STRING), "string with \t tab", 4},
+		{TokenType(STRING), "multiple\n    lines", 5},
+		{TokenType(STRING), "escaped \\backslash", 7},
+		{TokenType(EOF), "", 7},
+	}
+
+	l := New(input)
+	for i, tt := range tests {
+		tok := l.NextToken()
+
+		if tok.Type != tt.expectedType {
+			t.Fatalf("tests[%d] - tokentype wrong. expected=%q, got=%q",
+				i, tt.expectedType, tok.Type)
+		}
+
+		if tok.Literal != tt.expectedLiteral {
+			t.Fatalf("tests[%d] - literal wrong. expected=%q, got=%q",
+				i, tt.expectedLiteral, tok.Literal)
+		}
+
+		if tok.Line != tt.expectedLine {
+			t.Errorf("tests[%d] - line number wrong. expected=%d, got=%d",
+				i, tt.expectedLine, tok.Line)
+		}
+	}
+}

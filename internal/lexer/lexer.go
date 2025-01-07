@@ -46,6 +46,11 @@ func (l *Lexer) NextToken() Token {
 	tok.Column = l.column
 
 	switch l.ch {
+	case '"':
+		tok.Type = TokenType(STRING)
+		tok.Literal = l.readString()
+		l.readChar() //closing quote
+		return tok
 	case '=':
 		tok = newToken(TokenType(ASSIGN), l.ch, l.line, l.column)
 		break
@@ -112,6 +117,57 @@ func (l *Lexer) readNumber() string {
 	}
 
 	return l.input[position:l.position]
+}
+
+func (l *Lexer) readString() string {
+	position := l.position + 1 // skips the opening quote
+	escapeNext := false
+	var result []byte
+
+	for {
+		l.readChar()
+		if l.ch == 0 {
+			return string(result)
+		}
+
+		if escapeNext {
+			switch l.ch {
+			case 'n':
+				result = append(result, '\n')
+			case 't':
+				result = append(result, '\t')
+			case 'r':
+				result = append(result, '\r')
+			case '"':
+				result = append(result, '"')
+			case '\\':
+				result = append(result, '\\')
+			default:
+				// Invalid escape sequence, just add the character
+				result = append(result, l.ch)
+			}
+			escapeNext = false
+			continue
+		}
+
+		if l.ch == '\\' {
+			escapeNext = true
+			continue
+		}
+
+		if l.ch == '"' {
+			break
+		}
+
+		result = append(result, l.ch)
+	}
+
+	if l.ch == 0 {
+		//unterminated string
+		return l.input[position:l.position]
+	}
+
+	return string(result)
 }
 
 func (l *Lexer) peekChar() byte {

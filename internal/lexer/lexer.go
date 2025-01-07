@@ -18,22 +18,19 @@ func New(input string) *Lexer {
 
 func (l *Lexer) readChar() {
 	if l.readPosition >= len(l.input) {
-		l.ch = 0 // ASCII code for "NUL" to indicate EOF
+		l.ch = 0 // ASCII code for "NUL"
 	} else {
 		l.ch = l.input[l.readPosition]
 	}
 
-	// Update column number
-	l.column++
-
-	// If we find a newline, increment line counter and reset column
-	if l.ch == '\n' {
-		l.line++
-		l.column = 0
-	}
-
 	l.position = l.readPosition
 	l.readPosition++
+
+	if l.ch == '\n' {
+		l.column = 0
+	} else {
+		l.column++
+	}
 }
 
 func (l *Lexer) NextToken() Token {
@@ -89,9 +86,71 @@ func (l *Lexer) NextToken() Token {
 }
 
 func (l *Lexer) skipWhitespace() {
-	for l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
+	for {
+		switch l.ch {
+		case ' ', '\t', '\r':
+			l.readChar()
+		case '\n':
+			l.line++
+			l.readChar()
+		case '-':
+			if l.peekChar() == '-' {
+				l.skipComment()
+				if l.ch == '\n' {
+					l.line++
+					l.readChar()
+				}
+			} else {
+				return
+			}
+		default:
+			return
+		}
+	}
+}
+
+func (l *Lexer) skipComment() {
+	if l.ch == '-' && l.peekChar() == '-' {
+		l.readChar() // move past first '-'
+		l.readChar() // move past '--'
+
+		if l.ch == '[' && l.peekChar() == '[' {
+			l.readChar() // consume second '['
+			l.skipMultiLineComment()
+		} else {
+			l.skipSingleLineComment()
+		}
+	}
+}
+
+func (l *Lexer) skipMultiLineComment() {
+	l.readChar() // consume first '['
+	for {
+		if l.ch == 0 {
+			return
+		}
+
+		if l.ch == ']' && l.peekChar() == ']' {
+			l.readChar() // consume first ']'
+			l.readChar() // consume second ']'
+			return
+		}
+
+		if l.ch == '\n' {
+			l.line++
+			l.column = 0
+		}
 		l.readChar()
 	}
+}
+
+func (l *Lexer) skipSingleLineComment() {
+	// Read until end of line or EOF
+	for l.ch != '\n' && l.ch != 0 {
+		l.readChar()
+	}
+	// Now we're at the newline or EOF
+	// Don't consume the newline - let skipWhitespace handle it
 }
 
 func (l *Lexer) readIdentifier() string {

@@ -138,8 +138,6 @@ func TestPrefixExpressions(t *testing.T) {
 		l := lexer.New(tt.input)
 		p := New(l)
 		exp := p.parseExpression(LOWEST)
-		fmt.Printf("Testing input: %q\n", tt.input)
-		fmt.Printf("Current token: %+v\n", p.curToken)
 
 		if exp == nil {
 			t.Errorf("Parser errors: %v", p.Errors())
@@ -204,7 +202,7 @@ func TestCallExpressions(t *testing.T) {
 		},
 		{
 			"print(\"hello\")",
-			"print(hello)",
+			"print(\"hello\")",
 		},
 		{
 			"math.max(1, 2, 3)",
@@ -289,7 +287,7 @@ func TestVariableDeclaration(t *testing.T) {
 		},
 		{
 			"local name: string = \"luna\"",
-			"local name: string = luna",
+			"local name: string = \"luna\"",
 		},
 		{
 			"local data: string?",
@@ -304,6 +302,45 @@ func TestVariableDeclaration(t *testing.T) {
 
 		if stmt == nil {
 			t.Errorf("parseVariableDeclaration() returned nil. Parser errors: %v", p.Errors())
+			continue
+		}
+
+		if stmt.String() != tt.expected {
+			t.Errorf("expected=%q, got=%q", tt.expected, stmt.String())
+		}
+	}
+}
+
+func TestFunctionDeclaration(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			`function add(x: number, y: number): number
+    return x + y
+end`,
+			`function add(x: number, y: number): number
+    return (x + y)
+end`,
+		},
+		{
+			`function greet(name: string)
+    return "Hello, " .. name
+end`,
+			`function greet(name: string)
+    return ("Hello, " .. name)
+end`,
+		},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		stmt := p.parseFunctionDeclaration()
+
+		if stmt == nil {
+			t.Errorf("parseFunctionDeclaration() returned nil. Parser errors: %v", p.Errors())
 			continue
 		}
 

@@ -30,6 +30,7 @@ var precedences = map[lexer.TokenType]int{
 	lexer.ASTERISK:   PRODUCT,
 	lexer.DOT:        DOT,
 	lexer.LPAREN:     CALL,
+	lexer.CONCAT:     SUM,
 }
 
 type prefixParseFn func() ast.Expression
@@ -75,6 +76,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.GT, p.parseInfixExpression)
 	p.registerInfix(lexer.LPAREN, p.parseCallExpression)
 	p.registerInfix(lexer.DOT, p.parseDotExpression)
+	p.registerInfix(lexer.CONCAT, p.parseInfixExpression)
 
 	// read to tokens to initialize curtoken
 	p.nextToken()
@@ -318,4 +320,125 @@ func (p *Parser) curTokenIs(t lexer.TokenType) bool {
 
 func (p *Parser) peekTokenIs(t lexer.TokenType) bool {
 	return p.peekToken.Type == t
+}
+
+func (p *Parser) parseParameter() *ast.Parameter {
+	param := &ast.Parameter{
+		Token: p.curToken,
+		Name:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+	}
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // consumes :
+		p.nextToken() // moves onto type
+		param.Type = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	}
+
+	return param
+}
+
+func (p *Parser) parseFunctionParameters() []*ast.Parameter {
+	params := []*ast.Parameter{}
+
+	if p.peekTokenIs(lexer.RPAREN) {
+		p.nextToken()
+		return params
+	}
+
+	p.nextToken()
+
+	//first param
+	param := p.parseParameter()
+	params = append(params, param)
+
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken()
+		p.nextToken()
+		param = p.parseParameter()
+		params = append(params, param)
+	}
+
+	if !p.expectPeek(lexer.RPAREN) {
+		return nil
+	}
+
+	return params
+}
+
+func (p *Parser) parseFunctionDeclaration() *ast.FunctionDeclaration {
+	fd := &ast.FunctionDeclaration{
+		Token: p.curToken,
+	}
+
+	//parse function name
+	if !p.expectPeek(lexer.IDENT) {
+		return nil
+	}
+	fd.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	//parse the parameters
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+	fd.Parameters = p.parseFunctionParameters()
+
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() //consume :
+		p.nextToken() // move onto return type
+		fd.ReturnType = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	}
+
+	fd.Body = p.parseBlockStatement()
+
+	return fd
+}
+
+func (p *Parser) parseBlockStatement() *ast.BlockStatement {
+	block := &ast.BlockStatement{
+		Token:      p.curToken,
+		Statements: []ast.Statement{},
+	}
+
+	p.nextToken()
+
+	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+		stmt := p.parseStatement()
+		if stmt != nil {
+			block.Statements = append(block.Statements, stmt)
+		}
+		p.nextToken()
+	}
+
+	return block
+}
+
+func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
+	stmt := &ast.ReturnStatement{Token: p.curToken}
+
+	p.nextToken() // move past 'return'
+
+	stmt.ReturnValue = p.parseExpression(LOWEST)
+
+	return stmt
+}
+
+func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
+	stmt := &ast.ExpressionStatement{
+		Token:      p.curToken,
+		Expression: p.parseExpression(LOWEST),
+	}
+
+	return stmt
+}
+
+func (p *Parser) parseStatement() ast.Statement {
+	switch p.curToken.Type {
+	case lexer.FUNCTION:
+		return p.parseFunctionDeclaration()
+	case lexer.RETURN:
+		return p.parseReturnStatement()
+	case lexer.LOCAL, lexer.CONST:
+		return p.parseVariableDeclaration()
+	default:
+		return p.parseExpressionStatement()
+	}
 }

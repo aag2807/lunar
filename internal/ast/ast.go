@@ -42,7 +42,9 @@ type StringLiteral struct {
 
 func (i *StringLiteral) expressionNode()      {}
 func (i *StringLiteral) TokenLiteral() string { return i.Token.Literal }
-func (i *StringLiteral) String() string       { return i.Token.Literal }
+func (i *StringLiteral) String() string {
+	return fmt.Sprintf("\"%s\"", i.Value)
+}
 
 type BooleanLiteral struct {
 	Token lexer.Token
@@ -167,3 +169,106 @@ type OptionalType struct {
 func (ot *OptionalType) expressionNode()      {}
 func (ot *OptionalType) TokenLiteral() string { return ot.Token.Literal }
 func (ot *OptionalType) String() string       { return ot.Type.String() + "?" }
+
+type Parameter struct {
+	Token lexer.Token
+	Name  *Identifier
+	Type  Expression
+}
+
+func (p *Parameter) expressionNode()      {}
+func (p *Parameter) TokenLiteral() string { return p.Token.Literal }
+func (p *Parameter) String() string {
+	var out strings.Builder
+	out.WriteString(p.Name.String())
+	if p.Type != nil {
+		out.WriteString(": ")
+		out.WriteString(p.Type.String())
+	}
+	return out.String()
+}
+
+type BlockStatement struct {
+	Token      lexer.Token
+	Statements []Statement
+}
+
+func (bs *BlockStatement) statementNode()       {}
+func (bs *BlockStatement) TokenLiteral() string { return bs.Token.Literal }
+func (bs *BlockStatement) String() string {
+	var out strings.Builder
+	for _, s := range bs.Statements {
+		out.WriteString("    ") // Add indentation
+		out.WriteString(s.String())
+		if s != bs.Statements[len(bs.Statements)-1] {
+			out.WriteString("\n")
+		}
+	}
+	return out.String()
+}
+
+type FunctionDeclaration struct {
+	Token      lexer.Token
+	Name       *Identifier
+	Parameters []*Parameter
+	ReturnType Expression
+	Body       *BlockStatement
+}
+
+func (fd *FunctionDeclaration) statementNode()       {}
+func (fd *FunctionDeclaration) TokenLiteral() string { return fd.Token.Literal }
+func (fd *FunctionDeclaration) String() string {
+	var out strings.Builder
+
+	params := []string{}
+	for _, p := range fd.Parameters {
+		params = append(params, p.String())
+	}
+
+	out.WriteString("function ")
+	out.WriteString(fd.Name.String())
+	out.WriteString("(")
+	out.WriteString(strings.Join(params, ", "))
+	out.WriteString(")")
+
+	if fd.ReturnType != nil {
+		out.WriteString(": ")
+		out.WriteString(fd.ReturnType.String())
+	}
+
+	out.WriteString("\n")
+	out.WriteString(fd.Body.String())
+	out.WriteString("\nend")
+
+	return out.String()
+}
+
+type ReturnStatement struct {
+	Token       lexer.Token
+	ReturnValue Expression
+}
+
+func (rs *ReturnStatement) statementNode()       {}
+func (rs *ReturnStatement) TokenLiteral() string { return rs.Token.Literal }
+func (rs *ReturnStatement) String() string {
+	var out strings.Builder
+	out.WriteString("return ")
+	if rs.ReturnValue != nil {
+		out.WriteString(rs.ReturnValue.String())
+	}
+	return out.String()
+}
+
+type ExpressionStatement struct {
+	Token      lexer.Token
+	Expression Expression
+}
+
+func (es *ExpressionStatement) statementNode()       {}
+func (es *ExpressionStatement) TokenLiteral() string { return es.Token.Literal }
+func (es *ExpressionStatement) String() string {
+	if es.Expression != nil {
+		return es.Expression.String()
+	}
+	return ""
+}

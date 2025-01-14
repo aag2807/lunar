@@ -61,7 +61,7 @@ func (l *Lexer) NextToken() Token {
 			l.readChar()
 			tok = Token{Type: NOT_EQ, Literal: "!=", Line: l.line, Column: l.column}
 		} else {
-			tok = newToken(ILLEGAL, l.ch, l.line, l.column)
+			tok = newToken(BANG, l.ch, l.line, l.column)
 		}
 	case '=':
 		if l.peekChar() == '=' {

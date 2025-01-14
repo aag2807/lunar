@@ -117,3 +117,53 @@ func (de *DotExpression) TokenLiteral() string { return de.Token.Literal }
 func (de *DotExpression) String() string {
 	return fmt.Sprintf("%s.%s", de.Left.String(), de.Right.String())
 }
+
+type Statement interface {
+	Node
+	statementNode()
+}
+
+type VariableDeclaration struct {
+	Token      lexer.Token
+	Name       *Identifier
+	Type       Expression
+	Value      Expression
+	IsConstant bool
+}
+
+func (vd *VariableDeclaration) statementNode()       {}
+func (vd *VariableDeclaration) TokenLiteral() string { return vd.Token.Literal }
+func (vd *VariableDeclaration) String() string {
+	var out strings.Builder
+
+	if vd.IsConstant {
+		out.WriteString("const ")
+	} else {
+		out.WriteString("local ")
+	}
+
+	out.WriteString(vd.Name.String())
+
+	// Type annotation
+	if vd.Type != nil {
+		out.WriteString(": ")
+		out.WriteString(vd.Type.String())
+	}
+
+	// Value assignment
+	if vd.Value != nil {
+		out.WriteString(" = ")
+		out.WriteString(vd.Value.String())
+	}
+
+	return out.String()
+}
+
+type OptionalType struct {
+	Token lexer.Token
+	Type  Expression
+}
+
+func (ot *OptionalType) expressionNode()      {}
+func (ot *OptionalType) TokenLiteral() string { return ot.Token.Literal }
+func (ot *OptionalType) String() string       { return ot.Type.String() + "?" }

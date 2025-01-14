@@ -273,3 +273,42 @@ func TestDotExpressionCalls(t *testing.T) {
 		}
 	}
 }
+
+func TestVariableDeclaration(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			"local x: number = 5",
+			"local x: number = 5",
+		},
+		{
+			"const MAX_SIZE: number = 100",
+			"const MAX_SIZE: number = 100",
+		},
+		{
+			"local name: string = \"luna\"",
+			"local name: string = luna",
+		},
+		{
+			"local data: string?",
+			"local data: string?",
+		},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		stmt := p.parseVariableDeclaration()
+
+		if stmt == nil {
+			t.Errorf("parseVariableDeclaration() returned nil. Parser errors: %v", p.Errors())
+			continue
+		}
+
+		if stmt.String() != tt.expected {
+			t.Errorf("expected=%q, got=%q", tt.expected, stmt.String())
+		}
+	}
+}

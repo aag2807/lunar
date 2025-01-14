@@ -152,7 +152,7 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 }
 
 func (p *Parser) expectPeek(t lexer.TokenType) bool {
-	if p.peekToken.Type == t {
+	if p.peekTokenIs(t) {
 		p.nextToken()
 		return true
 	}
@@ -262,4 +262,60 @@ func (p *Parser) parsePrefixExpression() ast.Expression {
 	expression.Right = p.parseExpression(PREFIX)
 
 	return expression
+}
+
+func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
+	decl := &ast.VariableDeclaration{
+		Token:      p.curToken,
+		IsConstant: p.curToken.Type == lexer.CONST,
+	}
+
+	// Parse identifier (name)
+	if !p.expectPeek(lexer.IDENT) {
+		return nil
+	}
+	decl.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Parse type annotation if present
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // consume :
+		p.nextToken() // move to type
+
+		typeExp := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+		// Check for optional type (?)
+		if p.peekTokenIs(lexer.QUESTION) {
+			p.nextToken()
+			decl.Type = &ast.OptionalType{
+				Token: p.curToken,
+				Type:  typeExp,
+			}
+		} else {
+			decl.Type = typeExp
+		}
+	}
+
+	// Parse initializer if present
+	if p.peekTokenIs(lexer.ASSIGN) {
+		p.nextToken() // consume =
+		p.nextToken() // move to expression
+		decl.Value = p.parseExpression(LOWEST)
+	}
+
+	return decl
+}
+
+func (p *Parser) parseType() ast.Expression {
+	if p.curTokenIs(lexer.IDENT) {
+		return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	}
+	return nil
+}
+
+func (p *Parser) curTokenIs(t lexer.TokenType) bool {
+	return p.curToken.Type == t
+}
+
+func (p *Parser) peekTokenIs(t lexer.TokenType) bool {
+	return p.peekToken.Type == t
 }

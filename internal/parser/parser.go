@@ -10,25 +10,34 @@ import (
 const (
 	_ int = iota
 	LOWEST
+	OR_PREC     // or
+	AND_PREC    // and
 	EQUALS      // ==
 	LESSGREATER // > OR <
 	SUM         // +
-	PRODUCT     // *
-	PREFIX      // -X OR !X
+	PRODUCT     // * / %
+	PREFIX      // -X OR !X OR not
 	DOT         // foo.bar
 	CALL        // function(x)
 )
 
 var precedences = map[lexer.TokenType]int{
+	lexer.OR:         OR_PREC,
+	lexer.AND:        AND_PREC,
 	lexer.EQ:         EQUALS,
 	lexer.NOT_EQ:     EQUALS,
 	lexer.NOT_EQ_LUA: EQUALS,
 	lexer.LT:         LESSGREATER,
 	lexer.GT:         LESSGREATER,
+	lexer.LT_EQ:      LESSGREATER,
+	lexer.GT_EQ:      LESSGREATER,
 	lexer.PLUS:       SUM,
 	lexer.MINUS:      SUM,
 	lexer.ASTERISK:   PRODUCT,
+	lexer.SLASH:      PRODUCT,
+	lexer.MODULO:     PRODUCT,
 	lexer.DOT:        DOT,
+	lexer.LBRACKET:   CALL, // index has same precedence as function call
 	lexer.LPAREN:     CALL,
 	lexer.CONCAT:     SUM,
 }
@@ -59,10 +68,14 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.IDENT, p.parseIdentifier)
 	p.registerPrefix(lexer.NUMBER, p.parseNumberLiteral)
 	p.registerPrefix(lexer.STRING, p.parseStringLiteral)
+	p.registerPrefix(lexer.TRUE, p.parseBooleanLiteral)
+	p.registerPrefix(lexer.FALSE, p.parseBooleanLiteral)
+	p.registerPrefix(lexer.NIL, p.parseNilLiteral)
 	p.registerPrefix(lexer.BANG, p.parsePrefixExpression)
 	p.registerPrefix(lexer.MINUS, p.parsePrefixExpression)
 	p.registerPrefix(lexer.NOT, p.parsePrefixExpression)
 	p.registerPrefix(lexer.LPAREN, p.parseGroupedExpression)
+	p.registerPrefix(lexer.LBRACE, p.parseTableLiteral)
 
 	//register infix operators
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
@@ -70,10 +83,17 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.MINUS, p.parseInfixExpression)
 	p.registerInfix(lexer.ASTERISK, p.parseInfixExpression)
 	p.registerInfix(lexer.SLASH, p.parseInfixExpression)
+	p.registerInfix(lexer.MODULO, p.parseInfixExpression)
 	p.registerInfix(lexer.EQ, p.parseInfixExpression)
 	p.registerInfix(lexer.NOT_EQ, p.parseInfixExpression)
+	p.registerInfix(lexer.NOT_EQ_LUA, p.parseInfixExpression)
 	p.registerInfix(lexer.LT, p.parseInfixExpression)
 	p.registerInfix(lexer.GT, p.parseInfixExpression)
+	p.registerInfix(lexer.LT_EQ, p.parseInfixExpression)
+	p.registerInfix(lexer.GT_EQ, p.parseInfixExpression)
+	p.registerInfix(lexer.AND, p.parseInfixExpression)
+	p.registerInfix(lexer.OR, p.parseInfixExpression)
+	p.registerInfix(lexer.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(lexer.LPAREN, p.parseCallExpression)
 	p.registerInfix(lexer.DOT, p.parseDotExpression)
 	p.registerInfix(lexer.CONCAT, p.parseInfixExpression)
@@ -110,6 +130,17 @@ func (p *Parser) parseNumberLiteral() ast.Expression {
 
 func (p *Parser) parseStringLiteral() ast.Expression {
 	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
+}
+
+func (p *Parser) parseBooleanLiteral() ast.Expression {
+	return &ast.BooleanLiteral{
+		Token: p.curToken,
+		Value: p.curToken.Type == lexer.TRUE,
+	}
+}
+
+func (p *Parser) parseNilLiteral() ast.Expression {
+	return &ast.NilLiteral{Token: p.curToken}
 }
 
 func (p *Parser) registerPrefix(tokenType lexer.TokenType, fn prefixParseFn) {
@@ -596,4 +627,66 @@ func (p *Parser) parseDoStatement() *ast.DoStatement {
 
 func (p *Parser) parseBreakStatement() *ast.BreakStatement {
 	return &ast.BreakStatement{Token: p.curToken}
+}
+
+func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
+	exp := &ast.IndexExpression{
+		Token: p.curToken,
+		Left:  left,
+	}
+
+	p.nextToken() // move past '['
+	exp.Index = p.parseExpression(LOWEST)
+
+	if !p.expectPeek(lexer.RBRACKET) {
+		return nil
+	}
+
+	return exp
+}
+
+func (p *Parser) parseTableLiteral() ast.Expression {
+	table := &ast.TableLiteral{
+		Token:  p.curToken,
+		Pairs:  make(map[ast.Expression]ast.Expression),
+		Values: []ast.Expression{},
+	}
+
+	// Empty table
+	if p.peekTokenIs(lexer.RBRACE) {
+		p.nextToken()
+		return table
+	}
+
+	p.nextToken() // move past '{'
+
+	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
+		// Try to parse as key-value pair first
+		// Look ahead to see if this is a key = value pattern
+		if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.ASSIGN) {
+			// Key-value pair
+			key := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+			p.nextToken() // consume identifier
+			p.nextToken() // consume '='
+
+			value := p.parseExpression(LOWEST)
+			table.Pairs[key] = value
+		} else {
+			// Array-style value
+			value := p.parseExpression(LOWEST)
+			table.Values = append(table.Values, value)
+		}
+
+		// Check for comma or end
+		if !p.peekTokenIs(lexer.RBRACE) {
+			if !p.expectPeek(lexer.COMMA) {
+				return nil
+			}
+			p.nextToken() // move past comma
+		} else {
+			p.nextToken() // move to '}'
+		}
+	}
+
+	return table
 }

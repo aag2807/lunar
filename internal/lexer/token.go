@@ -80,6 +80,8 @@ const (
 	NUMBER_TYPE = "number"
 	BOOLEAN     = "boolean"
 	NIL         = "nil"
+	TRUE        = "true"
+	FALSE       = "false"
 
 	ARROW    = "=>"
 	QUESTION = "?"
@@ -122,6 +124,8 @@ var keywords = map[string]TokenType{
 	"number":      NUMBER_TYPE,
 	"boolean":     BOOLEAN,
 	"nil":         NIL,
+	"true":        TRUE,
+	"false":       FALSE,
 }
 
 type Token struct {

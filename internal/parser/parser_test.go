@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"lunar/internal/ast"
 	"lunar/internal/lexer"
+	"strings"
 	"testing"
 )
 
@@ -515,5 +516,151 @@ func TestBreakStatement(t *testing.T) {
 
 	if stmt.String() != "break" {
 		t.Errorf("expected=%q, got=%q", "break", stmt.String())
+	}
+}
+
+func TestBooleanLiteral(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"true", "true"},
+		{"false", "false"},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		exp := p.parseBooleanLiteral()
+
+		if exp == nil {
+			t.Errorf("parseBooleanLiteral() returned nil for input %q", tt.input)
+			continue
+		}
+
+		if exp.String() != tt.expected {
+			t.Errorf("expected=%q, got=%q", tt.expected, exp.String())
+		}
+	}
+}
+
+func TestNilLiteral(t *testing.T) {
+	input := "nil"
+
+	l := lexer.New(input)
+	p := New(l)
+	exp := p.parseNilLiteral()
+
+	if exp == nil {
+		t.Fatal("parseNilLiteral() returned nil")
+	}
+
+	if exp.String() != "nil" {
+		t.Errorf("expected=%q, got=%q", "nil", exp.String())
+	}
+}
+
+func TestTableLiteral(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"{}", "{}"},
+		{"{1, 2, 3}", "{1, 2, 3}"},
+		{"{x = 10, y = 20}", "{x = 10, y = 20}"},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		exp := p.parseTableLiteral()
+
+		if exp == nil {
+			t.Errorf("parseTableLiteral() returned nil for input %q. Errors: %v", tt.input, p.Errors())
+			continue
+		}
+
+		result := exp.String()
+		// For key-value pairs, the order might vary due to map iteration
+		// So we'll just check it's not empty and contains the right structure
+		if tt.input == "{x = 10, y = 20}" {
+			if !strings.Contains(result, "x = 10") || !strings.Contains(result, "y = 20") {
+				t.Errorf("expected result to contain key-value pairs, got=%q", result)
+			}
+		} else {
+			if result != tt.expected {
+				t.Errorf("expected=%q, got=%q", tt.expected, result)
+			}
+		}
+	}
+}
+
+func TestIndexExpression(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"array[1]", "array[1]"},
+		{"data[\"key\"]", "data[\"key\"]"},
+		{"matrix[i][j]", "matrix[i][j]"},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		exp := p.parseExpression(LOWEST)
+
+		if exp == nil {
+			t.Errorf("parseExpression() returned nil for input %q. Errors: %v", tt.input, p.Errors())
+			continue
+		}
+
+		if exp.String() != tt.expected {
+			t.Errorf("input=%q: expected=%q, got=%q", tt.input, tt.expected, exp.String())
+		}
+	}
+}
+
+func TestLogicalOperators(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"true and false", "(true and false)"},
+		{"true or false", "(true or false)"},
+		{"x > 0 and x < 10", "((x > 0) and (x < 10))"},
+		{"a or b and c", "(a or (b and c))"}, // and has higher precedence
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		exp := p.parseExpression(LOWEST)
+
+		if exp == nil {
+			t.Errorf("parseExpression() returned nil for input %q. Errors: %v", tt.input, p.Errors())
+			continue
+		}
+
+		if exp.String() != tt.expected {
+			t.Errorf("input=%q: expected=%q, got=%q", tt.input, tt.expected, exp.String())
+		}
+	}
+}
+
+func TestModuloOperator(t *testing.T) {
+	input := "10 % 3"
+
+	l := lexer.New(input)
+	p := New(l)
+	exp := p.parseExpression(LOWEST)
+
+	if exp == nil {
+		t.Fatalf("parseExpression() returned nil. Errors: %v", p.Errors())
+	}
+
+	expected := "(10 % 3)"
+	if exp.String() != expected {
+		t.Errorf("expected=%q, got=%q", expected, exp.String())
 	}
 }

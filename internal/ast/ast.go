@@ -55,6 +55,14 @@ func (i *BooleanLiteral) expressionNode()      {}
 func (i *BooleanLiteral) TokenLiteral() string { return i.Token.Literal }
 func (i *BooleanLiteral) String() string       { return i.Token.Literal }
 
+type NilLiteral struct {
+	Token lexer.Token
+}
+
+func (nl *NilLiteral) expressionNode()      {}
+func (nl *NilLiteral) TokenLiteral() string { return nl.Token.Literal }
+func (nl *NilLiteral) String() string       { return "nil" }
+
 type InfixExpression struct {
 	Token    lexer.Token
 	Left     Expression
@@ -118,6 +126,53 @@ func (de *DotExpression) expressionNode()      {}
 func (de *DotExpression) TokenLiteral() string { return de.Token.Literal }
 func (de *DotExpression) String() string {
 	return fmt.Sprintf("%s.%s", de.Left.String(), de.Right.String())
+}
+
+type IndexExpression struct {
+	Token lexer.Token // '[' token
+	Left  Expression  // the object being indexed
+	Index Expression  // the index expression
+}
+
+func (ie *IndexExpression) expressionNode()      {}
+func (ie *IndexExpression) TokenLiteral() string { return ie.Token.Literal }
+func (ie *IndexExpression) String() string {
+	return fmt.Sprintf("%s[%s]", ie.Left.String(), ie.Index.String())
+}
+
+type TableLiteral struct {
+	Token  lexer.Token // '{' token
+	Pairs  map[Expression]Expression // for key-value pairs
+	Values []Expression // for array-style values
+}
+
+func (tl *TableLiteral) expressionNode()      {}
+func (tl *TableLiteral) TokenLiteral() string { return tl.Token.Literal }
+func (tl *TableLiteral) String() string {
+	var out strings.Builder
+	out.WriteString("{")
+
+	// Print array-style values first
+	for i, val := range tl.Values {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(val.String())
+	}
+
+	// Print key-value pairs
+	if len(tl.Pairs) > 0 && len(tl.Values) > 0 {
+		out.WriteString(", ")
+	}
+
+	pairStrs := []string{}
+	for key, val := range tl.Pairs {
+		pairStrs = append(pairStrs, fmt.Sprintf("%s = %s", key.String(), val.String()))
+	}
+	out.WriteString(strings.Join(pairStrs, ", "))
+
+	out.WriteString("}")
+	return out.String()
 }
 
 type Statement interface {

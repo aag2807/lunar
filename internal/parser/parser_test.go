@@ -664,3 +664,122 @@ func TestModuloOperator(t *testing.T) {
 		t.Errorf("expected=%q, got=%q", expected, exp.String())
 	}
 }
+
+func TestComplexTypes(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		// Array types
+		{"local numbers: number[]", "local numbers: number[]"},
+		{"local users: User[]", "local users: User[]"},
+
+		// Table types
+		{"local cache: table<string, any>", "local cache: table<string, any>"},
+		{"local map: table<number, User>", "local map: table<number, User>"},
+
+		// Union types
+		{"local status: string | number", "local status: string | number"},
+		{"local data: User | nil", "local data: User | nil"},
+
+		// Tuple types
+		{"local coords: (number, number)", "local coords: (number, number)"},
+		{"local point: (number, number, number)", "local point: (number, number, number)"},
+
+		// Generic types
+		{"local stack: Stack<number>", "local stack: Stack<number>"},
+		{"local map: Map<string, User>", "local map: Map<string, User>"},
+
+		// Optional types (existing feature, but testing with complex types)
+		{"local users: User[]?", "local users: User[]?"},
+		{"local cache: table<string, number>?", "local cache: table<string, number>?"},
+
+		// Nested complex types
+		{"local matrix: number[][]", "local matrix: number[][]"},
+		{"local users: Array<User[]>", "local users: Array<User[]>"},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		stmt := p.parseVariableDeclaration()
+
+		if stmt == nil {
+			t.Errorf("parseVariableDeclaration() returned nil for input %q. Errors: %v", tt.input, p.Errors())
+			continue
+		}
+
+		if stmt.String() != tt.expected {
+			t.Errorf("input=%q: expected=%q, got=%q", tt.input, tt.expected, stmt.String())
+		}
+	}
+}
+
+func TestFunctionTypes(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		// Simple function types
+		{"local callback: (x: number) => void", "local callback: (x: number) => void"},
+		{"local mapper: (item: User) => string", "local mapper: (item: User) => string"},
+
+		// Multiple parameters
+		{"local add: (a: number, b: number) => number", "local add: (a: number, b: number) => number"},
+
+		// Complex parameter/return types
+		{"local transform: (users: User[]) => string[]", "local transform: (users: User[]) => string[]"},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		stmt := p.parseVariableDeclaration()
+
+		if stmt == nil {
+			t.Errorf("parseVariableDeclaration() returned nil for input %q. Errors: %v", tt.input, p.Errors())
+			continue
+		}
+
+		if stmt.String() != tt.expected {
+			t.Errorf("input=%q: expected=%q, got=%q", tt.input, tt.expected, stmt.String())
+		}
+	}
+}
+
+func TestFunctionWithComplexTypes(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			`function map(array: number[], fn: (x: number) => string): string[]
+end`,
+			`function map(array: number[], fn: (x: number) => string): string[]
+
+end`,
+		},
+		{
+			`function getUser(id: number): User?
+end`,
+			`function getUser(id: number): User?
+
+end`,
+		},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		stmt := p.parseFunctionDeclaration()
+
+		if stmt == nil {
+			t.Errorf("parseFunctionDeclaration() returned nil for input %q. Errors: %v", tt.input, p.Errors())
+			continue
+		}
+
+		if stmt.String() != tt.expected {
+			t.Errorf("input=%q: expected=%q, got=%q", tt.input, tt.expected, stmt.String())
+		}
+	}
+}

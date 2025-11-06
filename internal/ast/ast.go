@@ -225,6 +225,93 @@ func (ot *OptionalType) expressionNode()      {}
 func (ot *OptionalType) TokenLiteral() string { return ot.Token.Literal }
 func (ot *OptionalType) String() string       { return ot.Type.String() + "?" }
 
+type ArrayType struct {
+	Token       lexer.Token // the element type token
+	ElementType Expression
+}
+
+func (at *ArrayType) expressionNode()      {}
+func (at *ArrayType) TokenLiteral() string { return at.Token.Literal }
+func (at *ArrayType) String() string       { return at.ElementType.String() + "[]" }
+
+type TableType struct {
+	Token     lexer.Token // 'table' token
+	KeyType   Expression
+	ValueType Expression
+}
+
+func (tt *TableType) expressionNode()      {}
+func (tt *TableType) TokenLiteral() string { return tt.Token.Literal }
+func (tt *TableType) String() string {
+	return fmt.Sprintf("table<%s, %s>", tt.KeyType.String(), tt.ValueType.String())
+}
+
+type UnionType struct {
+	Token lexer.Token // '|' token
+	Types []Expression
+}
+
+func (ut *UnionType) expressionNode()      {}
+func (ut *UnionType) TokenLiteral() string { return ut.Token.Literal }
+func (ut *UnionType) String() string {
+	typeStrs := []string{}
+	for _, t := range ut.Types {
+		if t != nil {
+			typeStrs = append(typeStrs, t.String())
+		}
+	}
+	return strings.Join(typeStrs, " | ")
+}
+
+type TupleType struct {
+	Token lexer.Token // '(' token
+	Types []Expression
+}
+
+func (tt *TupleType) expressionNode()      {}
+func (tt *TupleType) TokenLiteral() string { return tt.Token.Literal }
+func (tt *TupleType) String() string {
+	typeStrs := []string{}
+	for _, t := range tt.Types {
+		if t != nil {
+			typeStrs = append(typeStrs, t.String())
+		}
+	}
+	return fmt.Sprintf("(%s)", strings.Join(typeStrs, ", "))
+}
+
+type FunctionType struct {
+	Token      lexer.Token // '(' or first param token
+	Parameters []*Parameter
+	ReturnType Expression
+}
+
+func (ft *FunctionType) expressionNode()      {}
+func (ft *FunctionType) TokenLiteral() string { return ft.Token.Literal }
+func (ft *FunctionType) String() string {
+	paramStrs := []string{}
+	for _, p := range ft.Parameters {
+		paramStrs = append(paramStrs, p.String())
+	}
+	return fmt.Sprintf("(%s) => %s", strings.Join(paramStrs, ", "), ft.ReturnType.String())
+}
+
+type GenericType struct {
+	Token         lexer.Token // the base type token
+	BaseType      Expression
+	TypeArguments []Expression
+}
+
+func (gt *GenericType) expressionNode()      {}
+func (gt *GenericType) TokenLiteral() string { return gt.Token.Literal }
+func (gt *GenericType) String() string {
+	argStrs := []string{}
+	for _, arg := range gt.TypeArguments {
+		argStrs = append(argStrs, arg.String())
+	}
+	return fmt.Sprintf("%s<%s>", gt.BaseType.String(), strings.Join(argStrs, ", "))
+}
+
 type Parameter struct {
 	Token lexer.Token
 	Name  *Identifier

@@ -313,19 +313,7 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 	if p.peekTokenIs(lexer.COLON) {
 		p.nextToken() // consume :
 		p.nextToken() // move to type
-
-		typeExp := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-
-		// Check for optional type (?)
-		if p.peekTokenIs(lexer.QUESTION) {
-			p.nextToken()
-			decl.Type = &ast.OptionalType{
-				Token: p.curToken,
-				Type:  typeExp,
-			}
-		} else {
-			decl.Type = typeExp
-		}
+		decl.Type = p.parseType()
 	}
 
 	// Parse initializer if present
@@ -339,9 +327,233 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 }
 
 func (p *Parser) parseType() ast.Expression {
-	if p.curTokenIs(lexer.IDENT) {
-		return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	var typeExpr ast.Expression
+
+	switch p.curToken.Type {
+	case lexer.LPAREN:
+		// Could be tuple type or function type
+		return p.parseTupleOrFunctionType()
+	case lexer.TABLE:
+		// table<K, V>
+		typeExpr = p.parseTableType()
+	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL:
+		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	default:
+		return nil
 	}
+
+	// Check for suffixes and modifiers
+	return p.parseTypeSuffix(typeExpr)
+}
+
+func (p *Parser) parseSimpleType() ast.Expression {
+	switch p.curToken.Type {
+	case lexer.LPAREN:
+		return p.parseTupleOrFunctionType()
+	case lexer.TABLE:
+		return p.parseTableType()
+	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL:
+		return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	default:
+		return nil
+	}
+}
+
+func (p *Parser) parseTypeSuffix(baseType ast.Expression) ast.Expression {
+	currentType := baseType
+
+	// First pass: handle high-precedence suffixes (arrays, generics, optional)
+	// These bind tighter than union types
+	for {
+		switch {
+		case p.peekTokenIs(lexer.LBRACKET):
+			// Array type: T[]
+			p.nextToken() // consume '['
+			if !p.expectPeek(lexer.RBRACKET) {
+				return nil
+			}
+			currentType = &ast.ArrayType{
+				Token:       baseType.(*ast.Identifier).Token,
+				ElementType: currentType,
+			}
+
+		case p.peekTokenIs(lexer.LT):
+			// Generic type: T<U>
+			p.nextToken() // consume '<'
+			p.nextToken() // move to first type argument
+
+			typeArgs := []ast.Expression{}
+			typeArgs = append(typeArgs, p.parseType())
+
+			for p.peekTokenIs(lexer.COMMA) {
+				p.nextToken() // consume comma
+				p.nextToken() // move to next type
+				typeArgs = append(typeArgs, p.parseType())
+			}
+
+			if !p.expectPeek(lexer.GT) {
+				return nil
+			}
+
+			currentType = &ast.GenericType{
+				Token:         baseType.(*ast.Identifier).Token,
+				BaseType:      baseType,
+				TypeArguments: typeArgs,
+			}
+
+		case p.peekTokenIs(lexer.QUESTION):
+			// Optional type: T?
+			p.nextToken()
+			currentType = &ast.OptionalType{
+				Token: p.curToken,
+				Type:  currentType,
+			}
+
+		default:
+			// No more high-precedence suffixes
+			goto checkUnion
+		}
+	}
+
+checkUnion:
+	// Second pass: handle union types (lowest precedence)
+	if p.peekTokenIs(lexer.PIPE) {
+		types := []ast.Expression{currentType}
+		unionToken := p.peekToken
+		for p.peekTokenIs(lexer.PIPE) {
+			p.nextToken() // consume '|'
+			p.nextToken() // move to next type
+			nextType := p.parseType()
+			if nextType != nil {
+				types = append(types, nextType)
+			}
+		}
+		currentType = &ast.UnionType{
+			Token: unionToken,
+			Types: types,
+		}
+	}
+
+	return currentType
+}
+
+func (p *Parser) parseTableType() ast.Expression {
+	tableToken := p.curToken
+
+	// Expect '<'
+	if !p.expectPeek(lexer.LT) {
+		return nil
+	}
+
+	p.nextToken() // move to key type
+	keyType := p.parseType()
+
+	// Expect ','
+	if !p.expectPeek(lexer.COMMA) {
+		return nil
+	}
+
+	p.nextToken() // move to value type
+	valueType := p.parseType()
+
+	// Expect '>'
+	if !p.expectPeek(lexer.GT) {
+		return nil
+	}
+
+	return &ast.TableType{
+		Token:     tableToken,
+		KeyType:   keyType,
+		ValueType: valueType,
+	}
+}
+
+func (p *Parser) parseTupleOrFunctionType() ast.Expression {
+	parenToken := p.curToken
+
+	// Parse parameter-like list
+	params := []*ast.Parameter{}
+
+	if p.peekTokenIs(lexer.RPAREN) {
+		// Empty parameter list
+		p.nextToken()
+	} else {
+		p.nextToken() // move past '('
+
+		// Check if this is a named parameter (function type) or just types (tuple)
+		isNamedParam := p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.COLON)
+
+		if isNamedParam {
+			// Function type
+			param := p.parseParameter()
+			params = append(params, param)
+
+			for p.peekTokenIs(lexer.COMMA) {
+				p.nextToken() // consume comma
+				p.nextToken() // move to next param
+				params = append(params, p.parseParameter())
+			}
+
+			if !p.expectPeek(lexer.RPAREN) {
+				return nil
+			}
+		} else {
+			// Tuple type - just types, no names
+			types := []ast.Expression{}
+			types = append(types, p.parseType())
+
+			for p.peekTokenIs(lexer.COMMA) {
+				p.nextToken() // consume comma
+				p.nextToken() // move to next type
+				types = append(types, p.parseType())
+			}
+
+			if !p.expectPeek(lexer.RPAREN) {
+				return nil
+			}
+
+			// Check if this is followed by => (making it a function type)
+			if p.peekTokenIs(lexer.ARROW) {
+				// Convert types to anonymous parameters
+				for _, t := range types {
+					params = append(params, &ast.Parameter{
+						Token: parenToken,
+						Type:  t,
+					})
+				}
+			} else {
+				// It's a tuple type
+				return &ast.TupleType{
+					Token: parenToken,
+					Types: types,
+				}
+			}
+		}
+	}
+
+	// Check for arrow (function type)
+	if p.peekTokenIs(lexer.ARROW) {
+		p.nextToken() // consume '=>'
+		p.nextToken() // move to return type
+
+		returnType := p.parseType()
+
+		return &ast.FunctionType{
+			Token:      parenToken,
+			Parameters: params,
+			ReturnType: returnType,
+		}
+	}
+
+	// Just parenthesized type or empty tuple
+	if len(params) == 0 {
+		return &ast.TupleType{
+			Token: parenToken,
+			Types: []ast.Expression{},
+		}
+	}
+
+	// Single parameter without arrow - error?
 	return nil
 }
 
@@ -361,7 +573,7 @@ func (p *Parser) parseParameter() *ast.Parameter {
 	if p.peekTokenIs(lexer.COLON) {
 		p.nextToken() // consumes :
 		p.nextToken() // moves onto type
-		param.Type = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		param.Type = p.parseType()
 	}
 
 	return param
@@ -415,7 +627,7 @@ func (p *Parser) parseFunctionDeclaration() *ast.FunctionDeclaration {
 	if p.peekTokenIs(lexer.COLON) {
 		p.nextToken() //consume :
 		p.nextToken() // move onto return type
-		fd.ReturnType = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		fd.ReturnType = p.parseType()
 	}
 
 	fd.Body = p.parseBlockStatement()

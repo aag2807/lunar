@@ -349,3 +349,171 @@ end`,
 		}
 	}
 }
+
+func TestIfStatement(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			`if x > 0 then
+    return x
+end`,
+			`if (x > 0) then
+    return x
+end`,
+		},
+		{
+			`if x > 0 then
+    return x
+else
+    return 0
+end`,
+			`if (x > 0) then
+    return x
+else
+    return 0
+end`,
+		},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		stmt := p.parseIfStatement()
+
+		if stmt == nil {
+			t.Errorf("parseIfStatement() returned nil. Parser errors: %v", p.Errors())
+			continue
+		}
+
+		if stmt.String() != tt.expected {
+			t.Errorf("expected=%q, got=%q", tt.expected, stmt.String())
+		}
+	}
+}
+
+func TestWhileStatement(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			`while x > 0 do
+    x = x - 1
+end`,
+			`while (x > 0) do
+    x = (x - 1)
+end`,
+		},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		stmt := p.parseWhileStatement()
+
+		if stmt == nil {
+			t.Errorf("parseWhileStatement() returned nil. Parser errors: %v", p.Errors())
+			continue
+		}
+
+		if stmt.String() != tt.expected {
+			t.Errorf("expected=%q, got=%q", tt.expected, stmt.String())
+		}
+	}
+}
+
+func TestForStatement(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			`for i = 1, 10 do
+    print(i)
+end`,
+			`for i = 1, 10 do
+    print(i)
+end`,
+		},
+		{
+			`for i = 1, 10, 2 do
+    print(i)
+end`,
+			`for i = 1, 10, 2 do
+    print(i)
+end`,
+		},
+		{
+			`for item in items do
+    print(item)
+end`,
+			`for item in items do
+    print(item)
+end`,
+		},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		stmt := p.parseForStatement()
+
+		if stmt == nil {
+			t.Errorf("parseForStatement() returned nil. Parser errors: %v", p.Errors())
+			continue
+		}
+
+		if stmt.String() != tt.expected {
+			t.Errorf("expected=%q, got=%q", tt.expected, stmt.String())
+		}
+	}
+}
+
+func TestDoStatement(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			`do
+    local x = 5
+end`,
+			`do
+    local x = 5
+end`,
+		},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		stmt := p.parseDoStatement()
+
+		if stmt == nil {
+			t.Errorf("parseDoStatement() returned nil. Parser errors: %v", p.Errors())
+			continue
+		}
+
+		if stmt.String() != tt.expected {
+			t.Errorf("expected=%q, got=%q", tt.expected, stmt.String())
+		}
+	}
+}
+
+func TestBreakStatement(t *testing.T) {
+	input := "break"
+
+	l := lexer.New(input)
+	p := New(l)
+	stmt := p.parseBreakStatement()
+
+	if stmt == nil {
+		t.Fatal("parseBreakStatement() returned nil")
+	}
+
+	if stmt.String() != "break" {
+		t.Errorf("expected=%q, got=%q", "break", stmt.String())
+	}
+}

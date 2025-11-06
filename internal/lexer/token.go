@@ -64,6 +64,9 @@ const (
 	ELSE        = "else"
 	THEN        = "then"
 	FOR         = "for"
+	WHILE       = "while"
+	DO          = "do"
+	BREAK       = "break"
 	IN          = "in"
 	EXTENDS     = "extends"
 	IMPLEMENTS  = "implements"
@@ -101,6 +104,9 @@ var keywords = map[string]TokenType{
 	"else":        ELSE,
 	"then":        THEN,
 	"for":         FOR,
+	"while":       WHILE,
+	"do":          DO,
+	"break":       BREAK,
 	"in":          IN,
 	"extends":     EXTENDS,
 	"implements":  IMPLEMENTS,

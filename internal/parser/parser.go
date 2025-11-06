@@ -421,13 +421,28 @@ func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 	return stmt
 }
 
-func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
-	stmt := &ast.ExpressionStatement{
-		Token:      p.curToken,
-		Expression: p.parseExpression(LOWEST),
+func (p *Parser) parseExpressionStatement() ast.Statement {
+	// Try to parse as expression first
+	expr := p.parseExpression(LOWEST)
+
+	// Check if this is an assignment
+	if p.peekTokenIs(lexer.ASSIGN) {
+		assignToken := p.peekToken
+		p.nextToken() // consume '='
+		p.nextToken() // move to value expression
+
+		return &ast.AssignmentStatement{
+			Token: assignToken,
+			Name:  expr,
+			Value: p.parseExpression(LOWEST),
+		}
 	}
 
-	return stmt
+	// Otherwise, it's just an expression statement
+	return &ast.ExpressionStatement{
+		Token:      p.curToken,
+		Expression: expr,
+	}
 }
 
 func (p *Parser) parseStatement() ast.Statement {
@@ -438,7 +453,147 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseReturnStatement()
 	case lexer.LOCAL, lexer.CONST:
 		return p.parseVariableDeclaration()
+	case lexer.IF:
+		return p.parseIfStatement()
+	case lexer.WHILE:
+		return p.parseWhileStatement()
+	case lexer.FOR:
+		return p.parseForStatement()
+	case lexer.DO:
+		return p.parseDoStatement()
+	case lexer.BREAK:
+		return p.parseBreakStatement()
 	default:
 		return p.parseExpressionStatement()
 	}
+}
+
+func (p *Parser) parseIfStatement() *ast.IfStatement {
+	stmt := &ast.IfStatement{Token: p.curToken}
+
+	p.nextToken() // move to condition
+
+	// Parse condition
+	stmt.Condition = p.parseExpression(LOWEST)
+
+	// Expect 'then'
+	if !p.expectPeek(lexer.THEN) {
+		return nil
+	}
+
+	// Parse consequence block (stops at 'else' or 'end')
+	stmt.Consequence = p.parseIfBlockStatement()
+
+	// Check for else
+	if p.curTokenIs(lexer.ELSE) {
+		stmt.Alternative = p.parseBlockStatement()
+	}
+
+	return stmt
+}
+
+func (p *Parser) parseIfBlockStatement() *ast.BlockStatement {
+	block := &ast.BlockStatement{
+		Token:      p.curToken,
+		Statements: []ast.Statement{},
+	}
+
+	p.nextToken()
+
+	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.ELSE) && !p.curTokenIs(lexer.EOF) {
+		stmt := p.parseStatement()
+		if stmt != nil {
+			block.Statements = append(block.Statements, stmt)
+		}
+		p.nextToken()
+	}
+
+	return block
+}
+
+func (p *Parser) parseWhileStatement() *ast.WhileStatement {
+	stmt := &ast.WhileStatement{Token: p.curToken}
+
+	p.nextToken() // move to condition
+
+	// Parse condition
+	stmt.Condition = p.parseExpression(LOWEST)
+
+	// Expect 'do'
+	if !p.expectPeek(lexer.DO) {
+		return nil
+	}
+
+	// Parse body
+	stmt.Body = p.parseBlockStatement()
+
+	return stmt
+}
+
+func (p *Parser) parseForStatement() *ast.ForStatement {
+	stmt := &ast.ForStatement{Token: p.curToken}
+
+	// Expect variable name
+	if !p.expectPeek(lexer.IDENT) {
+		return nil
+	}
+	stmt.Variable = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Check if it's a generic for (for...in) or numeric for (for...=)
+	if p.peekTokenIs(lexer.IN) {
+		stmt.IsGeneric = true
+		p.nextToken() // consume 'in'
+		p.nextToken() // move to iterator expression
+
+		stmt.Iterator = p.parseExpression(LOWEST)
+	} else if p.peekTokenIs(lexer.ASSIGN) {
+		stmt.IsGeneric = false
+		p.nextToken() // consume '='
+		p.nextToken() // move to start expression
+
+		// Parse start value
+		stmt.Start = p.parseExpression(LOWEST)
+
+		// Expect comma
+		if !p.expectPeek(lexer.COMMA) {
+			return nil
+		}
+
+		p.nextToken() // move to end expression
+		stmt.End = p.parseExpression(LOWEST)
+
+		// Optional step value
+		if p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // consume comma
+			p.nextToken() // move to step expression
+			stmt.Step = p.parseExpression(LOWEST)
+		}
+	} else {
+		msg := fmt.Sprintf("expected 'in' or '=' after for variable, got %s", p.peekToken.Type)
+		p.errors = append(p.errors, msg)
+		return nil
+	}
+
+	// Expect 'do'
+	if !p.expectPeek(lexer.DO) {
+		return nil
+	}
+
+	// Parse body
+	stmt.Body = p.parseBlockStatement()
+
+	return stmt
+}
+
+func (p *Parser) parseDoStatement() *ast.DoStatement {
+	stmt := &ast.DoStatement{Token: p.curToken}
+
+	// Parse body
+	stmt.Body = p.parseBlockStatement()
+
+	return stmt
+}
+
+func (p *Parser) parseBreakStatement() *ast.BreakStatement {
+	return &ast.BreakStatement{Token: p.curToken}
 }

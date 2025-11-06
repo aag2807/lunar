@@ -272,3 +272,130 @@ func (es *ExpressionStatement) String() string {
 	}
 	return ""
 }
+
+type IfStatement struct {
+	Token       lexer.Token // 'if' token
+	Condition   Expression
+	Consequence *BlockStatement
+	Alternative *BlockStatement // can be nil
+}
+
+func (is *IfStatement) statementNode()       {}
+func (is *IfStatement) TokenLiteral() string { return is.Token.Literal }
+func (is *IfStatement) String() string {
+	var out strings.Builder
+
+	out.WriteString("if ")
+	out.WriteString(is.Condition.String())
+	out.WriteString(" then\n")
+	out.WriteString(is.Consequence.String())
+
+	if is.Alternative != nil {
+		out.WriteString("\nelse\n")
+		out.WriteString(is.Alternative.String())
+	}
+
+	out.WriteString("\nend")
+	return out.String()
+}
+
+type WhileStatement struct {
+	Token     lexer.Token // 'while' token
+	Condition Expression
+	Body      *BlockStatement
+}
+
+func (ws *WhileStatement) statementNode()       {}
+func (ws *WhileStatement) TokenLiteral() string { return ws.Token.Literal }
+func (ws *WhileStatement) String() string {
+	var out strings.Builder
+
+	out.WriteString("while ")
+	out.WriteString(ws.Condition.String())
+	out.WriteString(" do\n")
+	out.WriteString(ws.Body.String())
+	out.WriteString("\nend")
+
+	return out.String()
+}
+
+type ForStatement struct {
+	Token    lexer.Token // 'for' token
+	Variable *Identifier
+	Start    Expression // for numeric: start value
+	End      Expression // for numeric: end value
+	Step     Expression // for numeric: step value (optional)
+	Iterator Expression // for generic: iterator expression
+	Body     *BlockStatement
+	IsGeneric bool // true if generic for, false if numeric for
+}
+
+func (fs *ForStatement) statementNode()       {}
+func (fs *ForStatement) TokenLiteral() string { return fs.Token.Literal }
+func (fs *ForStatement) String() string {
+	var out strings.Builder
+
+	out.WriteString("for ")
+	out.WriteString(fs.Variable.String())
+
+	if fs.IsGeneric {
+		out.WriteString(" in ")
+		out.WriteString(fs.Iterator.String())
+	} else {
+		out.WriteString(" = ")
+		out.WriteString(fs.Start.String())
+		out.WriteString(", ")
+		out.WriteString(fs.End.String())
+		if fs.Step != nil {
+			out.WriteString(", ")
+			out.WriteString(fs.Step.String())
+		}
+	}
+
+	out.WriteString(" do\n")
+	out.WriteString(fs.Body.String())
+	out.WriteString("\nend")
+
+	return out.String()
+}
+
+type DoStatement struct {
+	Token lexer.Token // 'do' token
+	Body  *BlockStatement
+}
+
+func (ds *DoStatement) statementNode()       {}
+func (ds *DoStatement) TokenLiteral() string { return ds.Token.Literal }
+func (ds *DoStatement) String() string {
+	var out strings.Builder
+
+	out.WriteString("do\n")
+	out.WriteString(ds.Body.String())
+	out.WriteString("\nend")
+
+	return out.String()
+}
+
+type BreakStatement struct {
+	Token lexer.Token // 'break' token
+}
+
+func (bs *BreakStatement) statementNode()       {}
+func (bs *BreakStatement) TokenLiteral() string { return bs.Token.Literal }
+func (bs *BreakStatement) String() string       { return "break" }
+
+type AssignmentStatement struct {
+	Token lexer.Token // '=' token
+	Name  Expression  // left side (can be identifier, dot expression, index expression)
+	Value Expression  // right side
+}
+
+func (as *AssignmentStatement) statementNode()       {}
+func (as *AssignmentStatement) TokenLiteral() string { return as.Token.Literal }
+func (as *AssignmentStatement) String() string {
+	var out strings.Builder
+	out.WriteString(as.Name.String())
+	out.WriteString(" = ")
+	out.WriteString(as.Value.String())
+	return out.String()
+}

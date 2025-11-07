@@ -1,1 +1,519 @@
 package codegen
+
+import (
+	"fmt"
+	"lunar/internal/ast"
+	"strings"
+)
+
+// Generator generates Lua code from an AST
+type Generator struct {
+	indent int
+}
+
+// New creates a new code generator
+func New() *Generator {
+	return &Generator{
+		indent: 0,
+	}
+}
+
+// Generate generates Lua code from a list of statements
+func (g *Generator) Generate(statements []ast.Statement) string {
+	var output strings.Builder
+
+	for i, stmt := range statements {
+		code := g.generateStatement(stmt)
+		if code != "" {
+			output.WriteString(code)
+			// Add blank line between top-level declarations
+			if i < len(statements)-1 {
+				output.WriteString("\n")
+			}
+		}
+	}
+
+	return output.String()
+}
+
+// generateStatement generates Lua code for a statement
+func (g *Generator) generateStatement(stmt ast.Statement) string {
+	if stmt == nil {
+		return ""
+	}
+
+	switch node := stmt.(type) {
+	case *ast.VariableDeclaration:
+		return g.generateVariableDeclaration(node)
+	case *ast.FunctionDeclaration:
+		return g.generateFunctionDeclaration(node)
+	case *ast.ExpressionStatement:
+		return g.generateIndent() + g.generateExpression(node.Expression) + "\n"
+	case *ast.ReturnStatement:
+		return g.generateReturnStatement(node)
+	case *ast.IfStatement:
+		return g.generateIfStatement(node)
+	case *ast.WhileStatement:
+		return g.generateWhileStatement(node)
+	case *ast.ForStatement:
+		return g.generateForStatement(node)
+	case *ast.DoStatement:
+		return g.generateDoStatement(node)
+	case *ast.BreakStatement:
+		return g.generateIndent() + "break\n"
+	case *ast.BlockStatement:
+		return g.generateBlockStatement(node)
+	case *ast.AssignmentStatement:
+		return g.generateAssignmentStatement(node)
+	case *ast.ClassDeclaration:
+		return g.generateClassDeclaration(node)
+	case *ast.InterfaceDeclaration:
+		// Interfaces are type-only, don't generate code
+		return ""
+	case *ast.EnumDeclaration:
+		return g.generateEnumDeclaration(node)
+	case *ast.TypeDeclaration:
+		// Type aliases are type-only, don't generate code
+		return ""
+	default:
+		return ""
+	}
+}
+
+// generateVariableDeclaration generates code for a variable declaration
+func (g *Generator) generateVariableDeclaration(node *ast.VariableDeclaration) string {
+	var output strings.Builder
+	output.WriteString(g.generateIndent())
+	output.WriteString("local ")
+	output.WriteString(node.Name.Value)
+
+	if node.Value != nil {
+		output.WriteString(" = ")
+		output.WriteString(g.generateExpression(node.Value))
+	}
+
+	output.WriteString("\n")
+	return output.String()
+}
+
+// generateFunctionDeclaration generates code for a function declaration
+func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) string {
+	var output strings.Builder
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("function ")
+	output.WriteString(node.Name.Value)
+	output.WriteString("(")
+
+	// Parameters (without type annotations)
+	params := make([]string, len(node.Parameters))
+	for i, param := range node.Parameters {
+		params[i] = param.Name.Value
+	}
+	output.WriteString(strings.Join(params, ", "))
+	output.WriteString(")\n")
+
+	// Body
+	g.indent++
+	for _, stmt := range node.Body.Statements {
+		output.WriteString(g.generateStatement(stmt))
+	}
+	g.indent--
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("end\n")
+
+	return output.String()
+}
+
+// generateReturnStatement generates code for a return statement
+func (g *Generator) generateReturnStatement(node *ast.ReturnStatement) string {
+	var output strings.Builder
+	output.WriteString(g.generateIndent())
+	output.WriteString("return")
+
+	if node.ReturnValue != nil {
+		output.WriteString(" ")
+		output.WriteString(g.generateExpression(node.ReturnValue))
+	}
+
+	output.WriteString("\n")
+	return output.String()
+}
+
+// generateIfStatement generates code for an if statement
+func (g *Generator) generateIfStatement(node *ast.IfStatement) string {
+	var output strings.Builder
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("if ")
+	output.WriteString(g.generateExpression(node.Condition))
+	output.WriteString(" then\n")
+
+	// Consequence
+	g.indent++
+	for _, stmt := range node.Consequence.Statements {
+		output.WriteString(g.generateStatement(stmt))
+	}
+	g.indent--
+
+	// Alternative (else)
+	if node.Alternative != nil {
+		output.WriteString(g.generateIndent())
+		output.WriteString("else\n")
+
+		g.indent++
+		for _, stmt := range node.Alternative.Statements {
+			output.WriteString(g.generateStatement(stmt))
+		}
+		g.indent--
+	}
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("end\n")
+
+	return output.String()
+}
+
+// generateWhileStatement generates code for a while statement
+func (g *Generator) generateWhileStatement(node *ast.WhileStatement) string {
+	var output strings.Builder
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("while ")
+	output.WriteString(g.generateExpression(node.Condition))
+	output.WriteString(" do\n")
+
+	g.indent++
+	for _, stmt := range node.Body.Statements {
+		output.WriteString(g.generateStatement(stmt))
+	}
+	g.indent--
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("end\n")
+
+	return output.String()
+}
+
+// generateForStatement generates code for a for statement
+func (g *Generator) generateForStatement(node *ast.ForStatement) string {
+	var output strings.Builder
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("for ")
+	output.WriteString(node.Variable.Value)
+
+	if node.IsGeneric {
+		// Generic for loop: for k, v in pairs(table) do
+		output.WriteString(" in ")
+		output.WriteString(g.generateExpression(node.Iterator))
+	} else {
+		// Numeric for loop: for i = start, end, step do
+		output.WriteString(" = ")
+		output.WriteString(g.generateExpression(node.Start))
+		output.WriteString(", ")
+		output.WriteString(g.generateExpression(node.End))
+
+		if node.Step != nil {
+			output.WriteString(", ")
+			output.WriteString(g.generateExpression(node.Step))
+		}
+	}
+
+	output.WriteString(" do\n")
+
+	g.indent++
+	for _, stmt := range node.Body.Statements {
+		output.WriteString(g.generateStatement(stmt))
+	}
+	g.indent--
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("end\n")
+
+	return output.String()
+}
+
+// generateDoStatement generates code for a do statement
+func (g *Generator) generateDoStatement(node *ast.DoStatement) string {
+	var output strings.Builder
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("do\n")
+
+	g.indent++
+	for _, stmt := range node.Body.Statements {
+		output.WriteString(g.generateStatement(stmt))
+	}
+	g.indent--
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("end\n")
+
+	return output.String()
+}
+
+// generateBlockStatement generates code for a block statement
+func (g *Generator) generateBlockStatement(node *ast.BlockStatement) string {
+	var output strings.Builder
+
+	for _, stmt := range node.Statements {
+		output.WriteString(g.generateStatement(stmt))
+	}
+
+	return output.String()
+}
+
+// generateAssignmentStatement generates code for an assignment
+func (g *Generator) generateAssignmentStatement(node *ast.AssignmentStatement) string {
+	var output strings.Builder
+
+	output.WriteString(g.generateIndent())
+	output.WriteString(g.generateExpression(node.Name))
+	output.WriteString(" = ")
+	output.WriteString(g.generateExpression(node.Value))
+	output.WriteString("\n")
+
+	return output.String()
+}
+
+// generateClassDeclaration generates code for a class (transpiled to Lua table with metatable)
+func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string {
+	var output strings.Builder
+	className := node.Name.Value
+
+	// Create class table
+	output.WriteString(g.generateIndent())
+	output.WriteString(fmt.Sprintf("local %s = {}\n", className))
+	output.WriteString(g.generateIndent())
+	output.WriteString(fmt.Sprintf("%s.__index = %s\n", className, className))
+	output.WriteString("\n")
+
+	// Generate constructor as new() function
+	if node.Constructor != nil {
+		output.WriteString(g.generateIndent())
+		output.WriteString(fmt.Sprintf("function %s.new(", className))
+
+		params := make([]string, len(node.Constructor.Parameters))
+		for i, param := range node.Constructor.Parameters {
+			params[i] = param.Name.Value
+		}
+		output.WriteString(strings.Join(params, ", "))
+		output.WriteString(")\n")
+
+		g.indent++
+		output.WriteString(g.generateIndent())
+		output.WriteString("local self = setmetatable({}, " + className + ")\n")
+
+		// Initialize properties from constructor body
+		for _, stmt := range node.Constructor.Body.Statements {
+			output.WriteString(g.generateStatement(stmt))
+		}
+
+		output.WriteString(g.generateIndent())
+		output.WriteString("return self\n")
+		g.indent--
+
+		output.WriteString(g.generateIndent())
+		output.WriteString("end\n")
+		output.WriteString("\n")
+	}
+
+	// Generate methods
+	for _, method := range node.Methods {
+		output.WriteString(g.generateIndent())
+		output.WriteString(fmt.Sprintf("function %s:%s(", className, method.Name.Value))
+
+		params := make([]string, len(method.Parameters))
+		for i, param := range method.Parameters {
+			params[i] = param.Name.Value
+		}
+		output.WriteString(strings.Join(params, ", "))
+		output.WriteString(")\n")
+
+		g.indent++
+		for _, stmt := range method.Body.Statements {
+			output.WriteString(g.generateStatement(stmt))
+		}
+		g.indent--
+
+		output.WriteString(g.generateIndent())
+		output.WriteString("end\n")
+		output.WriteString("\n")
+	}
+
+	return output.String()
+}
+
+// generateEnumDeclaration generates code for an enum (transpiled to Lua table)
+func (g *Generator) generateEnumDeclaration(node *ast.EnumDeclaration) string {
+	var output strings.Builder
+	enumName := node.Name.Value
+
+	output.WriteString(g.generateIndent())
+	output.WriteString(fmt.Sprintf("local %s = {\n", enumName))
+
+	g.indent++
+	for i, member := range node.Members {
+		output.WriteString(g.generateIndent())
+		output.WriteString(member.Name.Value)
+		output.WriteString(" = ")
+
+		if member.Value != nil {
+			output.WriteString(g.generateExpression(member.Value))
+		} else {
+			// Auto-increment starting from 0
+			output.WriteString(fmt.Sprintf("%d", i))
+		}
+
+		output.WriteString(",\n")
+	}
+	g.indent--
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("}\n")
+
+	return output.String()
+}
+
+// generateExpression generates code for an expression
+func (g *Generator) generateExpression(expr ast.Expression) string {
+	if expr == nil {
+		return ""
+	}
+
+	switch node := expr.(type) {
+	case *ast.Identifier:
+		return node.Value
+	case *ast.NumberLiteral:
+		return node.Token.Literal
+	case *ast.StringLiteral:
+		return fmt.Sprintf("\"%s\"", node.Value)
+	case *ast.BooleanLiteral:
+		if node.Value {
+			return "true"
+		}
+		return "false"
+	case *ast.NilLiteral:
+		return "nil"
+	case *ast.TableLiteral:
+		return g.generateTableLiteral(node)
+	case *ast.PrefixExpression:
+		return g.generatePrefixExpression(node)
+	case *ast.InfixExpression:
+		return g.generateInfixExpression(node)
+	case *ast.CallExpression:
+		return g.generateCallExpression(node)
+	case *ast.DotExpression:
+		return g.generateDotExpression(node)
+	case *ast.IndexExpression:
+		return g.generateIndexExpression(node)
+	default:
+		return ""
+	}
+}
+
+// generateTableLiteral generates code for a table literal
+func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
+	var output strings.Builder
+	output.WriteString("{")
+
+	// Generate array-style values
+	if len(node.Values) > 0 {
+		values := make([]string, len(node.Values))
+		for i, val := range node.Values {
+			values[i] = g.generateExpression(val)
+		}
+		output.WriteString(strings.Join(values, ", "))
+	}
+
+	// Generate key-value pairs
+	if len(node.Pairs) > 0 {
+		if len(node.Values) > 0 {
+			output.WriteString(", ")
+		}
+
+		pairs := []string{}
+		for key, val := range node.Pairs {
+			keyStr := g.generateExpression(key)
+			valStr := g.generateExpression(val)
+			pairs = append(pairs, fmt.Sprintf("[%s] = %s", keyStr, valStr))
+		}
+		output.WriteString(strings.Join(pairs, ", "))
+	}
+
+	output.WriteString("}")
+	return output.String()
+}
+
+// generatePrefixExpression generates code for a prefix expression
+func (g *Generator) generatePrefixExpression(node *ast.PrefixExpression) string {
+	operator := node.Operator
+	right := g.generateExpression(node.Right)
+
+	// Convert 'not' to Lua 'not'
+	if operator == "!" {
+		operator = "not"
+	}
+
+	return fmt.Sprintf("(%s %s)", operator, right)
+}
+
+// generateInfixExpression generates code for an infix expression
+func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
+	left := g.generateExpression(node.Left)
+	operator := node.Operator
+	right := g.generateExpression(node.Right)
+
+	// Convert operators to Lua equivalents
+	switch operator {
+	case "!=":
+		operator = "~="
+	case "&&":
+		operator = "and"
+	case "||":
+		operator = "or"
+	}
+
+	return fmt.Sprintf("(%s %s %s)", left, operator, right)
+}
+
+// generateCallExpression generates code for a function call
+func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
+	function := g.generateExpression(node.Function)
+
+	args := make([]string, len(node.Arguments))
+	for i, arg := range node.Arguments {
+		args[i] = g.generateExpression(arg)
+	}
+
+	return fmt.Sprintf("%s(%s)", function, strings.Join(args, ", "))
+}
+
+// generateDotExpression generates code for a dot expression
+func (g *Generator) generateDotExpression(node *ast.DotExpression) string {
+	left := g.generateExpression(node.Left)
+	right := g.generateExpression(node.Right)
+
+	return fmt.Sprintf("%s.%s", left, right)
+}
+
+// generateIndexExpression generates code for an index expression
+func (g *Generator) generateIndexExpression(node *ast.IndexExpression) string {
+	left := g.generateExpression(node.Left)
+	index := g.generateExpression(node.Index)
+
+	return fmt.Sprintf("%s[%s]", left, index)
+}
+
+// generateIndent generates the current indentation
+func (g *Generator) generateIndent() string {
+	return strings.Repeat("    ", g.indent)
+}
+
+// Generate is the main entry point for code generation
+func Generate(statements []ast.Statement) string {
+	generator := New()
+	return generator.Generate(statements)
+}

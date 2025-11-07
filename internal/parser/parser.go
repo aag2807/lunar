@@ -706,6 +706,14 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseDoStatement()
 	case lexer.BREAK:
 		return p.parseBreakStatement()
+	case lexer.CLASS:
+		return p.parseClassDeclaration()
+	case lexer.INTERFACE:
+		return p.parseInterfaceDeclaration()
+	case lexer.ENUM:
+		return p.parseEnumDeclaration()
+	case lexer.TYPE:
+		return p.parseTypeDeclaration()
 	default:
 		return p.parseExpressionStatement()
 	}
@@ -901,4 +909,283 @@ func (p *Parser) parseTableLiteral() ast.Expression {
 	}
 
 	return table
+}
+
+func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
+	class := &ast.ClassDeclaration{
+		Token:      p.curToken,
+		Properties: []*ast.PropertyDeclaration{},
+		Methods:    []*ast.FunctionDeclaration{},
+	}
+
+	// Parse class name
+	if !p.expectPeek(lexer.IDENT) {
+		return nil
+	}
+	class.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Parse implements clause
+	if p.peekTokenIs(lexer.IMPLEMENTS) {
+		p.nextToken() // consume 'implements'
+		p.nextToken() // move to first interface
+
+		class.Implements = append(class.Implements, &ast.Identifier{
+			Token: p.curToken,
+			Value: p.curToken.Literal,
+		})
+
+		// Multiple interfaces
+		for p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // consume comma
+			p.nextToken() // move to next interface
+			class.Implements = append(class.Implements, &ast.Identifier{
+				Token: p.curToken,
+				Value: p.curToken.Literal,
+			})
+		}
+	}
+
+	p.nextToken() // move past class header
+
+	// Parse class body
+	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+		switch p.curToken.Type {
+		case lexer.PUBLIC, lexer.PRIVATE:
+			// Property or method with visibility
+			visibility := p.curToken.Literal
+			p.nextToken()
+
+			if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.COLON) {
+				// It's a property
+				prop := p.parsePropertyDeclaration()
+				prop.Visibility = visibility
+				class.Properties = append(class.Properties, prop)
+			} else if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.LPAREN) {
+				// It's a method
+				method := p.parseMethodDeclaration()
+				class.Methods = append(class.Methods, method)
+			} else {
+				p.nextToken()
+			}
+
+		case lexer.CONSTRUCTOR:
+			class.Constructor = p.parseConstructorDeclaration()
+			p.nextToken()
+
+		case lexer.IDENT:
+			// Property without visibility modifier
+			if p.peekTokenIs(lexer.COLON) {
+				prop := p.parsePropertyDeclaration()
+				class.Properties = append(class.Properties, prop)
+			} else {
+				p.nextToken()
+			}
+
+		default:
+			p.nextToken()
+		}
+	}
+
+	return class
+}
+
+func (p *Parser) parsePropertyDeclaration() *ast.PropertyDeclaration {
+	prop := &ast.PropertyDeclaration{
+		Token: p.curToken,
+		Name:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+	}
+
+	// Expect colon
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	p.nextToken() // move to type
+	prop.Type = p.parseType()
+
+	p.nextToken() // move past type
+	return prop
+}
+
+func (p *Parser) parseMethodDeclaration() *ast.FunctionDeclaration {
+	method := &ast.FunctionDeclaration{
+		Token: p.curToken,
+		Name:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+	}
+
+	// Parse parameters
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+	method.Parameters = p.parseFunctionParameters()
+
+	// Parse return type
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // consume ':'
+		p.nextToken() // move to return type
+		method.ReturnType = p.parseType()
+	}
+
+	// Parse body
+	method.Body = p.parseBlockStatement()
+
+	return method
+}
+
+func (p *Parser) parseConstructorDeclaration() *ast.ConstructorDeclaration {
+	constructor := &ast.ConstructorDeclaration{
+		Token: p.curToken,
+	}
+
+	// Parse parameters
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+	constructor.Parameters = p.parseFunctionParameters()
+
+	// Parse body
+	constructor.Body = p.parseBlockStatement()
+
+	return constructor
+}
+
+func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
+	iface := &ast.InterfaceDeclaration{
+		Token:      p.curToken,
+		Methods:    []*ast.InterfaceMethod{},
+		Properties: []*ast.PropertyDeclaration{},
+	}
+
+	// Parse interface name
+	if !p.expectPeek(lexer.IDENT) {
+		return nil
+	}
+	iface.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Parse extends clause
+	if p.peekTokenIs(lexer.EXTENDS) {
+		p.nextToken() // consume 'extends'
+		p.nextToken() // move to first parent
+
+		iface.Extends = append(iface.Extends, &ast.Identifier{
+			Token: p.curToken,
+			Value: p.curToken.Literal,
+		})
+
+		// Multiple parents
+		for p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // consume comma
+			p.nextToken() // move to next parent
+			iface.Extends = append(iface.Extends, &ast.Identifier{
+				Token: p.curToken,
+				Value: p.curToken.Literal,
+			})
+		}
+	}
+
+	p.nextToken() // move past interface header
+
+	// Parse interface body
+	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+		if p.curTokenIs(lexer.IDENT) {
+			if p.peekTokenIs(lexer.COLON) {
+				// Property
+				prop := p.parsePropertyDeclaration()
+				iface.Properties = append(iface.Properties, prop)
+			} else if p.peekTokenIs(lexer.LPAREN) {
+				// Method signature
+				method := p.parseInterfaceMethod()
+				iface.Methods = append(iface.Methods, method)
+			} else {
+				p.nextToken()
+			}
+		} else {
+			p.nextToken()
+		}
+	}
+
+	return iface
+}
+
+func (p *Parser) parseInterfaceMethod() *ast.InterfaceMethod {
+	method := &ast.InterfaceMethod{
+		Token: p.curToken,
+		Name:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+	}
+
+	// Parse parameters
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+	method.Parameters = p.parseFunctionParameters()
+
+	// Parse return type
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // consume ':'
+		p.nextToken() // move to return type
+		method.ReturnType = p.parseType()
+	}
+
+	p.nextToken() // move past method signature
+	return method
+}
+
+func (p *Parser) parseEnumDeclaration() *ast.EnumDeclaration {
+	enum := &ast.EnumDeclaration{
+		Token:   p.curToken,
+		Members: []*ast.EnumMember{},
+	}
+
+	// Parse enum name
+	if !p.expectPeek(lexer.IDENT) {
+		return nil
+	}
+	enum.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	p.nextToken() // move past enum name
+
+	// Parse enum members
+	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+		if p.curTokenIs(lexer.IDENT) {
+			member := &ast.EnumMember{
+				Token: p.curToken,
+				Name:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+			}
+
+			// Check for value assignment
+			if p.peekTokenIs(lexer.ASSIGN) {
+				p.nextToken() // consume '='
+				p.nextToken() // move to value
+				member.Value = p.parseExpression(LOWEST)
+			}
+
+			enum.Members = append(enum.Members, member)
+		}
+
+		p.nextToken()
+	}
+
+	return enum
+}
+
+func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
+	typeDecl := &ast.TypeDeclaration{
+		Token: p.curToken,
+	}
+
+	// Parse type name
+	if !p.expectPeek(lexer.IDENT) {
+		return nil
+	}
+	typeDecl.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Expect '='
+	if !p.expectPeek(lexer.ASSIGN) {
+		return nil
+	}
+
+	p.nextToken() // move to type definition
+	typeDecl.Type = p.parseType()
+
+	return typeDecl
 }

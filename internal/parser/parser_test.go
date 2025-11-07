@@ -783,3 +783,172 @@ end`,
 		}
 	}
 }
+
+func TestClassDeclaration(t *testing.T) {
+	input := `class Car implements Vehicle
+    private brand: string
+    private year: number
+
+    constructor(brand: string, year: number)
+        self.brand = brand
+    end
+
+    public start(): void
+        self.running = true
+    end
+end`
+
+	l := lexer.New(input)
+	p := New(l)
+	stmt := p.parseClassDeclaration()
+
+	if stmt == nil {
+		t.Fatalf("parseClassDeclaration() returned nil. Errors: %v", p.Errors())
+	}
+
+	if stmt.Name.Value != "Car" {
+		t.Errorf("class name wrong. expected=Car, got=%s", stmt.Name.Value)
+	}
+
+	if len(stmt.Properties) != 2 {
+		t.Errorf("expected 2 properties, got=%d", len(stmt.Properties))
+	}
+
+	if len(stmt.Implements) != 1 {
+		t.Errorf("expected 1 implement, got=%d", len(stmt.Implements))
+	}
+
+	if stmt.Constructor == nil {
+		t.Error("constructor is nil")
+	}
+
+	if len(stmt.Methods) != 1 {
+		t.Errorf("expected 1 method, got=%d", len(stmt.Methods))
+	}
+}
+
+func TestInterfaceDeclaration(t *testing.T) {
+	input := `interface Vehicle
+    brand: string
+    year: number
+    start(): void
+    stop(): void
+end`
+
+	l := lexer.New(input)
+	p := New(l)
+	stmt := p.parseInterfaceDeclaration()
+
+	if stmt == nil {
+		t.Fatalf("parseInterfaceDeclaration() returned nil. Errors: %v", p.Errors())
+	}
+
+	if stmt.Name.Value != "Vehicle" {
+		t.Errorf("interface name wrong. expected=Vehicle, got=%s", stmt.Name.Value)
+	}
+
+	if len(stmt.Properties) != 2 {
+		t.Errorf("expected 2 properties, got=%d", len(stmt.Properties))
+	}
+
+	if len(stmt.Methods) != 2 {
+		t.Errorf("expected 2 methods, got=%d", len(stmt.Methods))
+	}
+}
+
+func TestInterfaceWithExtends(t *testing.T) {
+	input := `interface ElectricVehicle extends Vehicle
+    batteryLevel: number
+    charge(duration: number): void
+end`
+
+	l := lexer.New(input)
+	p := New(l)
+	stmt := p.parseInterfaceDeclaration()
+
+	if stmt == nil {
+		t.Fatalf("parseInterfaceDeclaration() returned nil. Errors: %v", p.Errors())
+	}
+
+	if stmt.Name.Value != "ElectricVehicle" {
+		t.Errorf("interface name wrong. expected=ElectricVehicle, got=%s", stmt.Name.Value)
+	}
+
+	if len(stmt.Extends) != 1 {
+		t.Errorf("expected 1 parent, got=%d", len(stmt.Extends))
+	}
+}
+
+func TestEnumDeclaration(t *testing.T) {
+	tests := []struct {
+		input           string
+		expectedName    string
+		expectedMembers int
+	}{
+		{
+			`enum Direction
+    North
+    South
+    East
+    West
+end`,
+			"Direction",
+			4,
+		},
+		{
+			`enum HttpStatus
+    OK = 200
+    NotFound = 404
+    ServerError = 500
+end`,
+			"HttpStatus",
+			3,
+		},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		stmt := p.parseEnumDeclaration()
+
+		if stmt == nil {
+			t.Errorf("parseEnumDeclaration() returned nil for input %q. Errors: %v", tt.input, p.Errors())
+			continue
+		}
+
+		if stmt.Name.Value != tt.expectedName {
+			t.Errorf("enum name wrong. expected=%s, got=%s", tt.expectedName, stmt.Name.Value)
+		}
+
+		if len(stmt.Members) != tt.expectedMembers {
+			t.Errorf("expected %d members, got=%d", tt.expectedMembers, len(stmt.Members))
+		}
+	}
+}
+
+func TestTypeDeclaration(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"type UserId = number", "type UserId = number"},
+		{"type Email = string", "type Email = string"},
+		{"type Status = string | number", "type Status = string | number"},
+		{"type UserCallback = (user: User) => void", "type UserCallback = (user: User) => void"},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		stmt := p.parseTypeDeclaration()
+
+		if stmt == nil {
+			t.Errorf("parseTypeDeclaration() returned nil for input %q. Errors: %v", tt.input, p.Errors())
+			continue
+		}
+
+		if stmt.String() != tt.expected {
+			t.Errorf("input=%q: expected=%q, got=%q", tt.input, tt.expected, stmt.String())
+		}
+	}
+}

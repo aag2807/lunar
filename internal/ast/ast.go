@@ -541,3 +541,235 @@ func (as *AssignmentStatement) String() string {
 	out.WriteString(as.Value.String())
 	return out.String()
 }
+
+type ClassDeclaration struct {
+	Token      lexer.Token // 'class' token
+	Name       *Identifier
+	Properties []*PropertyDeclaration
+	Methods    []*FunctionDeclaration
+	Constructor *ConstructorDeclaration
+	Implements []Expression // interface names
+}
+
+func (cd *ClassDeclaration) statementNode()       {}
+func (cd *ClassDeclaration) TokenLiteral() string { return cd.Token.Literal }
+func (cd *ClassDeclaration) String() string {
+	var out strings.Builder
+
+	out.WriteString("class ")
+	out.WriteString(cd.Name.String())
+
+	if len(cd.Implements) > 0 {
+		out.WriteString(" implements ")
+		impls := []string{}
+		for _, impl := range cd.Implements {
+			impls = append(impls, impl.String())
+		}
+		out.WriteString(strings.Join(impls, ", "))
+	}
+
+	out.WriteString("\n")
+
+	// Properties
+	for _, prop := range cd.Properties {
+		out.WriteString("    ")
+		out.WriteString(prop.String())
+		out.WriteString("\n")
+	}
+
+	// Constructor
+	if cd.Constructor != nil {
+		out.WriteString("\n")
+		out.WriteString("    ")
+		out.WriteString(cd.Constructor.String())
+		out.WriteString("\n")
+	}
+
+	// Methods
+	for _, method := range cd.Methods {
+		out.WriteString("\n")
+		// Indent method
+		methodStr := method.String()
+		lines := strings.Split(methodStr, "\n")
+		for _, line := range lines {
+			out.WriteString("    ")
+			out.WriteString(line)
+			out.WriteString("\n")
+		}
+	}
+
+	out.WriteString("end")
+	return out.String()
+}
+
+type PropertyDeclaration struct {
+	Token      lexer.Token // property name token
+	Visibility string      // "public", "private", "protected"
+	Name       *Identifier
+	Type       Expression
+}
+
+func (pd *PropertyDeclaration) statementNode()       {}
+func (pd *PropertyDeclaration) TokenLiteral() string { return pd.Token.Literal }
+func (pd *PropertyDeclaration) String() string {
+	var out strings.Builder
+	if pd.Visibility != "" {
+		out.WriteString(pd.Visibility)
+		out.WriteString(" ")
+	}
+	out.WriteString(pd.Name.String())
+	out.WriteString(": ")
+	out.WriteString(pd.Type.String())
+	return out.String()
+}
+
+type ConstructorDeclaration struct {
+	Token      lexer.Token // 'constructor' token
+	Parameters []*Parameter
+	Body       *BlockStatement
+}
+
+func (cd *ConstructorDeclaration) statementNode()       {}
+func (cd *ConstructorDeclaration) TokenLiteral() string { return cd.Token.Literal }
+func (cd *ConstructorDeclaration) String() string {
+	var out strings.Builder
+
+	params := []string{}
+	for _, p := range cd.Parameters {
+		params = append(params, p.String())
+	}
+
+	out.WriteString("constructor(")
+	out.WriteString(strings.Join(params, ", "))
+	out.WriteString(")\n")
+	out.WriteString(cd.Body.String())
+	out.WriteString("\nend")
+
+	return out.String()
+}
+
+type InterfaceDeclaration struct {
+	Token      lexer.Token // 'interface' token
+	Name       *Identifier
+	Methods    []*InterfaceMethod
+	Properties []*PropertyDeclaration
+	Extends    []Expression // parent interface names
+}
+
+func (id *InterfaceDeclaration) statementNode()       {}
+func (id *InterfaceDeclaration) TokenLiteral() string { return id.Token.Literal }
+func (id *InterfaceDeclaration) String() string {
+	var out strings.Builder
+
+	out.WriteString("interface ")
+	out.WriteString(id.Name.String())
+
+	if len(id.Extends) > 0 {
+		out.WriteString(" extends ")
+		exts := []string{}
+		for _, ext := range id.Extends {
+			exts = append(exts, ext.String())
+		}
+		out.WriteString(strings.Join(exts, ", "))
+	}
+
+	out.WriteString("\n")
+
+	// Properties
+	for _, prop := range id.Properties {
+		out.WriteString("    ")
+		out.WriteString(prop.String())
+		out.WriteString("\n")
+	}
+
+	// Methods
+	for _, method := range id.Methods {
+		out.WriteString("    ")
+		out.WriteString(method.String())
+		out.WriteString("\n")
+	}
+
+	out.WriteString("end")
+	return out.String()
+}
+
+type InterfaceMethod struct {
+	Token      lexer.Token
+	Name       *Identifier
+	Parameters []*Parameter
+	ReturnType Expression
+}
+
+func (im *InterfaceMethod) statementNode()       {}
+func (im *InterfaceMethod) TokenLiteral() string { return im.Token.Literal }
+func (im *InterfaceMethod) String() string {
+	params := []string{}
+	for _, p := range im.Parameters {
+		params = append(params, p.String())
+	}
+
+	var out strings.Builder
+	out.WriteString(im.Name.String())
+	out.WriteString("(")
+	out.WriteString(strings.Join(params, ", "))
+	out.WriteString(")")
+
+	if im.ReturnType != nil {
+		out.WriteString(": ")
+		out.WriteString(im.ReturnType.String())
+	}
+
+	return out.String()
+}
+
+type EnumDeclaration struct {
+	Token   lexer.Token // 'enum' token
+	Name    *Identifier
+	Members []*EnumMember
+}
+
+func (ed *EnumDeclaration) statementNode()       {}
+func (ed *EnumDeclaration) TokenLiteral() string { return ed.Token.Literal }
+func (ed *EnumDeclaration) String() string {
+	var out strings.Builder
+
+	out.WriteString("enum ")
+	out.WriteString(ed.Name.String())
+	out.WriteString("\n")
+
+	for _, member := range ed.Members {
+		out.WriteString("    ")
+		out.WriteString(member.String())
+		out.WriteString("\n")
+	}
+
+	out.WriteString("end")
+	return out.String()
+}
+
+type EnumMember struct {
+	Token lexer.Token
+	Name  *Identifier
+	Value Expression // optional - can be nil
+}
+
+func (em *EnumMember) statementNode()       {}
+func (em *EnumMember) TokenLiteral() string { return em.Token.Literal }
+func (em *EnumMember) String() string {
+	if em.Value != nil {
+		return fmt.Sprintf("%s = %s", em.Name.String(), em.Value.String())
+	}
+	return em.Name.String()
+}
+
+type TypeDeclaration struct {
+	Token lexer.Token // 'type' token
+	Name  *Identifier
+	Type  Expression // the type being aliased
+}
+
+func (td *TypeDeclaration) statementNode()       {}
+func (td *TypeDeclaration) TokenLiteral() string { return td.Token.Literal }
+func (td *TypeDeclaration) String() string {
+	return fmt.Sprintf("type %s = %s", td.Name.String(), td.Type.String())
+}

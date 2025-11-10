@@ -1,0 +1,50 @@
+-- Example LÖVE 2D game using type declarations
+-- This file demonstrates how declaration files enable typed external APIs
+
+-- Game state
+local playerX: number = 400
+local playerY: number = 300
+local playerSpeed: number = 200
+
+function load(): void
+	love.window.setTitle("Lunar + LÖVE Example")
+	love.window.setMode(800, 600)
+end
+
+function update(dt: number): void
+	-- Move player with arrow keys
+	if love.keyboard.isDown("left") then
+		playerX = playerX - playerSpeed * dt
+	end
+
+	if love.keyboard.isDown("right") then
+		playerX = playerX + playerSpeed * dt
+	end
+
+	if love.keyboard.isDown("up") then
+		playerY = playerY - playerSpeed * dt
+	end
+
+	if love.keyboard.isDown("down") then
+		playerY = playerY + playerSpeed * dt
+	end
+end
+
+function draw(): void
+	-- Clear screen to dark blue
+	love.graphics.clear(0.1, 0.1, 0.2, 1.0)
+
+	-- Draw player as white circle
+	love.graphics.setColor(1.0, 1.0, 1.0, 1.0)
+	love.graphics.circle("fill", playerX, playerY, 20)
+
+	-- Draw instructions
+	love.graphics.print("Use arrow keys to move", 10, 10)
+end
+
+function keypressed(key: string): void
+	if key == "escape" then
+		-- Exit game (in real LÖVE, this would be love.event.quit())
+		print("Escape pressed - would quit game")
+	end
+end

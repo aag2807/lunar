@@ -831,6 +831,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseExportStatement()
 	case lexer.IMPORT:
 		return p.parseImportStatement()
+	case lexer.DECLARE:
+		return p.parseDeclareStatement()
 	default:
 		return p.parseExpressionStatement()
 	}
@@ -1411,6 +1413,36 @@ func (p *Parser) parseImportStatement() *ast.ImportStatement {
 	importStmt.Module = p.curToken.Literal
 
 	return importStmt
+}
+
+// parseDeclareStatement parses ambient declarations like: declare const name: Type
+func (p *Parser) parseDeclareStatement() *ast.DeclareStatement {
+	declareStmt := &ast.DeclareStatement{
+		Token: p.curToken,
+	}
+
+	p.nextToken() // move past 'declare'
+
+	// Parse the underlying declaration (const, function, class, interface, etc.)
+	switch p.curToken.Type {
+	case lexer.CONST, lexer.LOCAL:
+		declareStmt.Declaration = p.parseVariableDeclaration()
+	case lexer.FUNCTION:
+		declareStmt.Declaration = p.parseFunctionDeclaration()
+	case lexer.CLASS:
+		declareStmt.Declaration = p.parseClassDeclaration()
+	case lexer.INTERFACE:
+		declareStmt.Declaration = p.parseInterfaceDeclaration()
+	case lexer.ENUM:
+		declareStmt.Declaration = p.parseEnumDeclaration()
+	case lexer.TYPE:
+		declareStmt.Declaration = p.parseTypeDeclaration()
+	default:
+		p.errors = append(p.errors, fmt.Sprintf("expected declaration after 'declare', got %s", p.curToken.Type))
+		return nil
+	}
+
+	return declareStmt
 }
 
 // parseGenericParameters parses generic type parameters: <T, U, V>

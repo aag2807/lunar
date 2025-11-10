@@ -137,6 +137,11 @@ func (c *Checker) registerTypeDefinition(stmt ast.Statement) {
 		c.registerEnum(node)
 	case *ast.TypeDeclaration:
 		c.registerTypeAlias(node)
+	case *ast.DeclareStatement:
+		// Ambient declarations - register the underlying declaration
+		if node.Declaration != nil {
+			c.registerTypeDefinition(node.Declaration)
+		}
 	}
 }
 
@@ -495,6 +500,9 @@ func (c *Checker) checkStatement(stmt ast.Statement) {
 		// Enum declarations don't need runtime checking
 	case *ast.TypeDeclaration:
 		// Type declarations don't need runtime checking
+	case *ast.DeclareStatement:
+		// Ambient declarations - register without checking implementation
+		c.checkDeclareStatement(node)
 	case *ast.ExportStatement:
 		c.checkExportStatement(node)
 	case *ast.ImportStatement:
@@ -1192,6 +1200,54 @@ func (c *Checker) checkImportStatement(node *ast.ImportStatement) {
 	// For now, just add imported names as 'any' type so they don't cause undefined variable errors
 	for _, name := range node.Names {
 		c.env.Set(name.Value, Any)
+	}
+}
+
+// checkDeclareStatement handles ambient declarations
+func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
+	if node.Declaration == nil {
+		return
+	}
+
+	// For ambient declarations, we only register types, not check implementations
+	switch decl := node.Declaration.(type) {
+	case *ast.VariableDeclaration:
+		// Register the variable with its declared type
+		if decl.Type != nil {
+			declaredType := c.resolveTypeExpression(decl.Type)
+			if decl.IsConstant {
+				c.env.SetConst(decl.Name.Value, declaredType)
+			} else {
+				c.env.Set(decl.Name.Value, declaredType)
+			}
+		} else {
+			// No type annotation on ambient declaration - use any
+			c.env.Set(decl.Name.Value, Any)
+		}
+
+	case *ast.FunctionDeclaration:
+		// Register the function signature without checking the body
+		params := make([]Type, len(decl.Parameters))
+		for i, param := range decl.Parameters {
+			if param.Type != nil {
+				params[i] = c.resolveTypeExpression(param.Type)
+			} else {
+				params[i] = Any
+			}
+		}
+
+		var returnType Type = Void
+		if decl.ReturnType != nil {
+			returnType = c.resolveTypeExpression(decl.ReturnType)
+		}
+
+		funcType := &FunctionType{
+			Parameters: params,
+			ReturnType: returnType,
+		}
+		c.env.Set(decl.Name.Value, funcType)
+
+	// Class, Interface, Enum, Type declarations are already handled in registerTypeDefinition
 	}
 }
 

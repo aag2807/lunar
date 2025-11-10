@@ -75,6 +75,10 @@ func (g *Generator) generateStatement(stmt ast.Statement) string {
 	case *ast.TypeDeclaration:
 		// Type aliases are type-only, don't generate code
 		return ""
+	case *ast.ExportStatement:
+		return g.generateExportStatement(node)
+	case *ast.ImportStatement:
+		return g.generateImportStatement(node)
 	default:
 		return ""
 	}
@@ -510,6 +514,46 @@ func (g *Generator) generateIndexExpression(node *ast.IndexExpression) string {
 // generateIndent generates the current indentation
 func (g *Generator) generateIndent() string {
 	return strings.Repeat("    ", g.indent)
+}
+
+// generateExportStatement generates code for an export statement
+func (g *Generator) generateExportStatement(node *ast.ExportStatement) string {
+	// In Lua, exports are handled via return tables at the end of modules
+	// For now, just generate the underlying statement without special export handling
+	// The exported names should be collected and returned at module end
+	return g.generateStatement(node.Statement)
+}
+
+// generateImportStatement generates code for an import statement
+func (g *Generator) generateImportStatement(node *ast.ImportStatement) string {
+	var output strings.Builder
+	output.WriteString(g.generateIndent())
+
+	if node.IsWildcard {
+		// import * from "module" -> local module = require("module")
+		// Extract module name from path (last part before extension)
+		moduleName := node.Module
+		// Simple heuristic: use the last part of the path as variable name
+		parts := strings.Split(moduleName, "/")
+		varName := strings.TrimSuffix(parts[len(parts)-1], ".lunar")
+		output.WriteString(fmt.Sprintf("local %s = require(\"%s\")\n", varName, moduleName))
+	} else {
+		// import { name1, name2 } from "module"
+		// -> local _module = require("module")
+		// -> local name1 = _module.name1
+		// -> local name2 = _module.name2
+		tempVar := "_" + strings.ReplaceAll(node.Module, "/", "_")
+		tempVar = strings.ReplaceAll(tempVar, ".", "_")
+
+		output.WriteString(fmt.Sprintf("local %s = require(\"%s\")\n", tempVar, node.Module))
+
+		for _, name := range node.Names {
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("local %s = %s.%s\n", name.Value, tempVar, name.Value))
+		}
+	}
+
+	return output.String()
 }
 
 // Generate is the main entry point for code generation

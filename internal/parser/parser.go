@@ -733,6 +733,10 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseEnumDeclaration()
 	case lexer.TYPE:
 		return p.parseTypeDeclaration()
+	case lexer.EXPORT:
+		return p.parseExportStatement()
+	case lexer.IMPORT:
+		return p.parseImportStatement()
 	default:
 		return p.parseExpressionStatement()
 	}
@@ -1207,4 +1211,77 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 	typeDecl.Type = p.parseType()
 
 	return typeDecl
+}
+
+func (p *Parser) parseExportStatement() *ast.ExportStatement {
+	exportStmt := &ast.ExportStatement{
+		Token: p.curToken,
+	}
+
+	p.nextToken() // move past 'export'
+
+	// Parse the statement being exported
+	exportStmt.Statement = p.parseStatement()
+
+	return exportStmt
+}
+
+func (p *Parser) parseImportStatement() *ast.ImportStatement {
+	importStmt := &ast.ImportStatement{
+		Token: p.curToken,
+	}
+
+	p.nextToken() // move past 'import'
+
+	// Check for wildcard import (import * from "module")
+	if p.curTokenIs(lexer.ASTERISK) {
+		importStmt.IsWildcard = true
+		p.nextToken() // move past '*'
+	} else if p.curTokenIs(lexer.LBRACE) {
+		// Named imports: import { name1, name2 } from "module"
+		p.nextToken() // move past '{'
+
+		for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
+			if !p.curTokenIs(lexer.IDENT) {
+				p.peekError(lexer.IDENT)
+				return nil
+			}
+
+			importStmt.Names = append(importStmt.Names, &ast.Identifier{
+				Token: p.curToken,
+				Value: p.curToken.Literal,
+			})
+
+			p.nextToken()
+
+			if p.curTokenIs(lexer.COMMA) {
+				p.nextToken() // move past comma
+			}
+		}
+
+		if !p.curTokenIs(lexer.RBRACE) {
+			p.errors = append(p.errors, "expected '}' after import names")
+			return nil
+		}
+
+		p.nextToken() // move past '}'
+	}
+
+	// Expect 'from' keyword
+	if !p.curTokenIs(lexer.FROM) {
+		p.errors = append(p.errors, "expected 'from' after import statement")
+		return nil
+	}
+
+	p.nextToken() // move past 'from'
+
+	// Expect string literal for module path
+	if !p.curTokenIs(lexer.STRING) {
+		p.errors = append(p.errors, "expected string literal for module path")
+		return nil
+	}
+
+	importStmt.Module = p.curToken.Literal
+
+	return importStmt
 }

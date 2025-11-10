@@ -773,3 +773,36 @@ func (td *TypeDeclaration) TokenLiteral() string { return td.Token.Literal }
 func (td *TypeDeclaration) String() string {
 	return fmt.Sprintf("type %s = %s", td.Name.String(), td.Type.String())
 }
+
+// ExportStatement wraps another statement to mark it as exported
+type ExportStatement struct {
+	Token     lexer.Token // 'export' token
+	Statement Statement   // the statement being exported
+}
+
+func (es *ExportStatement) statementNode()       {}
+func (es *ExportStatement) TokenLiteral() string { return es.Token.Literal }
+func (es *ExportStatement) String() string {
+	return fmt.Sprintf("export %s", es.Statement.String())
+}
+
+// ImportStatement represents an import declaration
+type ImportStatement struct {
+	Token   lexer.Token   // 'import' token
+	Names   []*Identifier // names being imported
+	Module  string        // module path (string literal)
+	IsWildcard bool       // true if using * import
+}
+
+func (is *ImportStatement) statementNode()       {}
+func (is *ImportStatement) TokenLiteral() string { return is.Token.Literal }
+func (is *ImportStatement) String() string {
+	if is.IsWildcard {
+		return fmt.Sprintf("import * from \"%s\"", is.Module)
+	}
+	names := []string{}
+	for _, name := range is.Names {
+		names = append(names, name.String())
+	}
+	return fmt.Sprintf("import { %s } from \"%s\"", strings.Join(names, ", "), is.Module)
+}

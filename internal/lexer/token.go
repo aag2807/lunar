@@ -73,6 +73,10 @@ const (
 	CONSTRUCTOR = "constructor"
 	SELF        = "self"
 	VOID        = "void"
+	EXPORT      = "export"
+	IMPORT      = "import"
+	FROM        = "from"
+	PROTECTED   = "protected"
 
 	//types
 	ANY         = "any"
@@ -118,6 +122,10 @@ var keywords = map[string]TokenType{
 	"or":          OR,
 	"not":         NOT,
 	"void":        VOID,
+	"export":      EXPORT,
+	"import":      IMPORT,
+	"from":        FROM,
+	"protected":   PROTECTED,
 	"table":       TABLE,
 	"any":         ANY,
 	"string":      STRING_TYPE,

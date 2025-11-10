@@ -19,15 +19,17 @@ func (e *TypeError) Error() string {
 
 // Environment represents a scope with type bindings
 type Environment struct {
-	store map[string]Type
-	outer *Environment
+	store     map[string]Type
+	constVars map[string]bool // tracks which variables are const
+	outer     *Environment
 }
 
 // NewEnvironment creates a new environment
 func NewEnvironment() *Environment {
 	return &Environment{
-		store: make(map[string]Type),
-		outer: nil,
+		store:     make(map[string]Type),
+		constVars: make(map[string]bool),
+		outer:     nil,
 	}
 }
 
@@ -50,6 +52,24 @@ func (e *Environment) Get(name string) (Type, bool) {
 // Set sets a type in the environment
 func (e *Environment) Set(name string, typ Type) {
 	e.store[name] = typ
+}
+
+// SetConst sets a variable as const in the environment
+func (e *Environment) SetConst(name string, typ Type) {
+	e.store[name] = typ
+	e.constVars[name] = true
+}
+
+// IsConst checks if a variable is const
+func (e *Environment) IsConst(name string) bool {
+	isConst, ok := e.constVars[name]
+	if ok && isConst {
+		return true
+	}
+	if e.outer != nil {
+		return e.outer.IsConst(name)
+	}
+	return false
 }
 
 // Checker performs type checking on an AST
@@ -350,6 +370,10 @@ func (c *Checker) checkStatement(stmt ast.Statement) {
 		// Enum declarations don't need runtime checking
 	case *ast.TypeDeclaration:
 		// Type declarations don't need runtime checking
+	case *ast.ExportStatement:
+		c.checkExportStatement(node)
+	case *ast.ImportStatement:
+		c.checkImportStatement(node)
 	}
 }
 
@@ -376,10 +400,19 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 				node.Token,
 			)
 		}
-		c.env.Set(node.Name.Value, declaredType)
+		// Use SetConst if variable is declared as const
+		if node.IsConstant {
+			c.env.SetConst(node.Name.Value, declaredType)
+		} else {
+			c.env.Set(node.Name.Value, declaredType)
+		}
 	} else {
 		// Infer type from value
-		c.env.Set(node.Name.Value, valueType)
+		if node.IsConstant {
+			c.env.SetConst(node.Name.Value, valueType)
+		} else {
+			c.env.Set(node.Name.Value, valueType)
+		}
 	}
 }
 
@@ -562,6 +595,17 @@ func (c *Checker) checkBlockStatement(node *ast.BlockStatement) {
 
 // checkAssignmentStatement checks an assignment statement
 func (c *Checker) checkAssignmentStatement(node *ast.AssignmentStatement) {
+	// Check if trying to assign to a const variable
+	if ident, ok := node.Name.(*ast.Identifier); ok {
+		if c.env.IsConst(ident.Value) {
+			c.addError(
+				fmt.Sprintf("Cannot assign to const variable '%s'", ident.Value),
+				node.Token,
+			)
+			return
+		}
+	}
+
 	targetType := c.checkExpression(node.Name)
 	valueType := c.checkExpression(node.Value)
 
@@ -949,6 +993,26 @@ func (c *Checker) addError(message string, token lexer.Token) {
 		Line:    token.Line,
 		Column:  token.Column,
 	})
+}
+
+// checkExportStatement checks an export statement
+func (c *Checker) checkExportStatement(node *ast.ExportStatement) {
+	// Type check the underlying statement
+	c.checkStatement(node.Statement)
+}
+
+// checkImportStatement checks an import statement
+func (c *Checker) checkImportStatement(node *ast.ImportStatement) {
+	// For now, we skip type checking imports since we don't have module resolution
+	// In a full implementation, we would:
+	// 1. Resolve the module path
+	// 2. Load the module's type information
+	// 3. Add the imported names to the environment with their types
+
+	// For now, just add imported names as 'any' type so they don't cause undefined variable errors
+	for _, name := range node.Names {
+		c.env.Set(name.Value, Any)
+	}
 }
 
 // Check is the main entry point for type checking

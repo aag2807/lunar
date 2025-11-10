@@ -118,7 +118,7 @@ func compile(inputFile, outputFile string, typeCheck bool) error {
 		allStatements := append(declarationStatements, statements...)
 		typeErrors := types.Check(allStatements)
 		if len(typeErrors) > 0 {
-			return formatTypeErrors(inputFile, typeErrors)
+			return formatTypeErrors(inputFile, string(source), typeErrors)
 		}
 	}
 
@@ -175,13 +175,50 @@ func formatParserErrors(filename string, errors []string) error {
 	return fmt.Errorf("%s", sb.String())
 }
 
-// formatTypeErrors formats type errors for display
-func formatTypeErrors(filename string, errors []*types.TypeError) error {
+// formatTypeErrors formats type errors for display with source context
+func formatTypeErrors(filename string, source string, errors []*types.TypeError) error {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("\n%s: Type errors:\n", filename))
-	for _, err := range errors {
-		sb.WriteString(fmt.Sprintf("  Line %d, Column %d: %s\n", err.Line, err.Column, err.Message))
+	sb.WriteString(fmt.Sprintf("\n%s: Type errors found:\n\n", filename))
+
+	lines := strings.Split(source, "\n")
+
+	for i, err := range errors {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+
+		// Error location header
+		sb.WriteString(fmt.Sprintf("  Error %d: %s:%d:%d\n", i+1, filename, err.Line, err.Column))
+		sb.WriteString(fmt.Sprintf("  %s\n\n", err.Message))
+
+		// Show source context (line before, error line, line after)
+		startLine := err.Line - 2
+		endLine := err.Line + 1
+		if startLine < 1 {
+			startLine = 1
+		}
+		if endLine > len(lines) {
+			endLine = len(lines)
+		}
+
+		for lineNum := startLine; lineNum <= endLine; lineNum++ {
+			lineContent := lines[lineNum-1]
+
+			// Highlight the error line
+			if lineNum == err.Line {
+				sb.WriteString(fmt.Sprintf("  %4d | %s\n", lineNum, lineContent))
+
+				// Add caret pointing to error column
+				if err.Column > 0 && err.Column <= len(lineContent)+1 {
+					pointer := strings.Repeat(" ", err.Column-1) + "^"
+					sb.WriteString(fmt.Sprintf("       | %s\n", pointer))
+				}
+			} else {
+				sb.WriteString(fmt.Sprintf("  %4d | %s\n", lineNum, lineContent))
+			}
+		}
 	}
+
 	return fmt.Errorf("%s", sb.String())
 }
 

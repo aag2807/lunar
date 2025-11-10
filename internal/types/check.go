@@ -851,8 +851,35 @@ func (c *Checker) checkIdentifier(node *ast.Identifier) Type {
 
 // checkTableLiteral checks a table literal
 func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
-	// For now, return a generic table type
-	// More sophisticated analysis could infer specific key/value types
+	// Check if this is a record-like table (all keys are string identifiers)
+	if len(node.Values) == 0 && len(node.Pairs) > 0 {
+		properties := make(map[string]Type)
+		isRecord := true
+
+		for key, value := range node.Pairs {
+			// Check if key is an identifier (field name)
+			if ident, ok := key.(*ast.Identifier); ok {
+				valueType := c.checkExpression(value)
+				properties[ident.Value] = valueType
+			} else {
+				// Not a simple identifier key, treat as regular table
+				isRecord = false
+				break
+			}
+		}
+
+		// If all keys are identifiers, create a structural interface type
+		if isRecord {
+			return &InterfaceType{
+				Name:       "<table literal>",
+				Properties: properties,
+				Methods:    make(map[string]*FunctionType),
+				Extends:    []*InterfaceType{},
+			}
+		}
+	}
+
+	// For array-style or mixed tables, return a generic table type
 	return &TableType{KeyType: Any, ValueType: Any}
 }
 

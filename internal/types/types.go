@@ -471,6 +471,32 @@ func (t *InterfaceType) IsAssignableTo(other Type) bool {
 				return true
 			}
 		}
+
+		// Structural compatibility: check if this interface has all required properties
+		// This allows table literals to be assigned to interface types
+		for propName, propType := range otherInterface.Properties {
+			myPropType, hasProperty := t.Properties[propName]
+			if !hasProperty {
+				return false // Missing required property
+			}
+			if !myPropType.IsAssignableTo(propType) {
+				return false // Property type mismatch
+			}
+		}
+
+		// Check methods (if any required)
+		for methodName, methodType := range otherInterface.Methods {
+			myMethodType, hasMethod := t.Methods[methodName]
+			if !hasMethod {
+				return false // Missing required method
+			}
+			if !myMethodType.IsAssignableTo(methodType) {
+				return false // Method type mismatch
+			}
+		}
+
+		// If we have all required properties and methods, we're compatible
+		return true
 	}
 	return false
 }

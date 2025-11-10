@@ -66,6 +66,7 @@ func New(l *lexer.Lexer) *Parser {
 	//register prefix parse functions
 	p.prefixParseFns = make(map[lexer.TokenType]prefixParseFn)
 	p.registerPrefix(lexer.IDENT, p.parseIdentifier)
+	p.registerPrefix(lexer.SELF, p.parseIdentifier) // self is like an identifier
 	p.registerPrefix(lexer.NUMBER, p.parseNumberLiteral)
 	p.registerPrefix(lexer.STRING, p.parseStringLiteral)
 	p.registerPrefix(lexer.TRUE, p.parseBooleanLiteral)
@@ -269,6 +270,24 @@ func (p *Parser) noPrefixParseFnError(t lexer.TokenType) {
 
 func (p *Parser) Errors() []string {
 	return p.errors
+}
+
+// Parse parses the entire program and returns a slice of statements
+func (p *Parser) Parse() []ast.Statement {
+	statements := []ast.Statement{}
+
+	// Note: New() already initializes curToken and peekToken by calling nextToken() twice
+	// So we don't need to call nextToken() here
+
+	for !p.curTokenIs(lexer.EOF) {
+		stmt := p.parseStatement()
+		if stmt != nil {
+			statements = append(statements, stmt)
+		}
+		p.nextToken()
+	}
+
+	return statements
 }
 
 func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {

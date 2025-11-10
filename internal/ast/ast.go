@@ -826,3 +826,19 @@ func (is *ImportStatement) String() string {
 	}
 	return fmt.Sprintf("import { %s } from \"%s\"", strings.Join(names, ", "), is.Module)
 }
+
+// DeclareStatement represents an ambient declaration (no implementation)
+// Used in .d.lunar files to declare external APIs
+type DeclareStatement struct {
+	Token       lexer.Token // 'declare' token
+	Declaration Statement   // the declaration (variable, function, class, etc.)
+}
+
+func (ds *DeclareStatement) statementNode()       {}
+func (ds *DeclareStatement) TokenLiteral() string { return ds.Token.Literal }
+func (ds *DeclareStatement) String() string {
+	if ds.Declaration != nil {
+		return fmt.Sprintf("declare %s", ds.Declaration.String())
+	}
+	return "declare"
+}

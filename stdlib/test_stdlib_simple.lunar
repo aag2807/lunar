@@ -1,0 +1,26 @@
+-- Test file for non-conflicting standard library declarations
+
+function testMathLib(): void
+	local pi: number = math.pi
+	local sine: number = math.sin(pi / 2)
+	local random: number = math.random(1, 100)
+	local floor: number = math.floor(3.7)
+	local ceil: number = math.ceil(3.2)
+
+	print("Math tests passed")
+end
+
+function testCoreGlobals(): void
+	local str: string = tostring(123)
+	local num: any = tonumber("456")
+
+	print("Core global tests passed")
+end
+
+function main(): void
+	testMathLib()
+	testCoreGlobals()
+	print("All standard library tests passed!")
+end
+
+main()

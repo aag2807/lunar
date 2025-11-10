@@ -1,0 +1,103 @@
+-- LÖVE 2D Framework Type Declarations
+-- This file provides type information for the LÖVE 2D game framework
+-- Place this file in your project to get type checking for LÖVE APIs
+
+-- Color type helper
+declare type Color {
+	r: number
+	g: number
+	b: number
+	a: number
+}
+end
+
+-- Graphics module
+declare interface GraphicsModule {
+	-- Drawing functions
+	clear: function(r: number, g: number, b: number, a: number): void
+	print: function(text: string, x: number, y: number): void
+	rectangle: function(mode: string, x: number, y: number, width: number, height: number): void
+	circle: function(mode: string, x: number, y: number, radius: number): void
+	line: function(x1: number, y1: number, x2: number, y2: number): void
+
+	-- State functions
+	setColor: function(r: number, g: number, b: number, a: number): void
+	setBackgroundColor: function(r: number, g: number, b: number): void
+
+	-- Coordinate system
+	translate: function(dx: number, dy: number): void
+	rotate: function(angle: number): void
+	scale: function(sx: number, sy: number): void
+	push: function(): void
+	pop: function(): void
+}
+end
+
+-- Window module
+declare interface WindowModule {
+	setTitle: function(title: string): void
+	setMode: function(width: number, height: number): boolean
+	getWidth: function(): number
+	getHeight: function(): number
+	setFullscreen: function(fullscreen: boolean): boolean
+}
+end
+
+-- Keyboard module
+declare interface KeyboardModule {
+	isDown: function(key: string): boolean
+	setKeyRepeat: function(enable: boolean): void
+}
+end
+
+-- Mouse module
+declare interface MouseModule {
+	getX: function(): number
+	getY: function(): number
+	getPosition: function(): number
+	isDown: function(button: number): boolean
+	setVisible: function(visible: boolean): void
+}
+end
+
+-- Timer module
+declare interface TimerModule {
+	getDelta: function(): number
+	getFPS: function(): number
+	getTime: function(): number
+	sleep: function(seconds: number): void
+}
+end
+
+-- Audio module
+declare interface AudioModule {
+	newSource: function(filename: string, sourceType: string): any
+	play: function(source: any): void
+	pause: function(source: any): void
+	stop: function(source: any): void
+	setVolume: function(volume: number): void
+}
+end
+
+-- Main LÖVE table
+declare interface Love {
+	graphics: GraphicsModule
+	window: WindowModule
+	keyboard: KeyboardModule
+	mouse: MouseModule
+	timer: TimerModule
+	audio: AudioModule
+}
+end
+
+-- Global love object
+declare const love: Love
+
+-- LÖVE Callbacks (optional to implement)
+declare function load(): void end
+declare function update(dt: number): void end
+declare function draw(): void end
+declare function keypressed(key: string): void end
+declare function keyreleased(key: string): void end
+declare function mousepressed(x: number, y: number, button: number): void end
+declare function mousereleased(x: number, y: number, button: number): void end

@@ -1,0 +1,9 @@
+# Compiled binary
+lunar
+
+# Test files (root directory only)
+/*.lua
+/test.lunar
+/simple.lunar
+/debug.lunar
+/func*.lunar

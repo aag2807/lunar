@@ -154,8 +154,6 @@ local s: StringOrNumber = true
 	}
 }
 
-// TODO: Fix 3+ member unions - currently only 2-member unions work correctly
-/*
 func TestMultiUnionType(t *testing.T) {
 	input := `
 type Value = string | number | boolean
@@ -183,7 +181,6 @@ local v3: Value = true
 		}
 	}
 }
-*/
 
 func TestUnionTypeInClass(t *testing.T) {
 	input := `

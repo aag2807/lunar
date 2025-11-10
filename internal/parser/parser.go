@@ -442,7 +442,8 @@ checkUnion:
 		for p.peekTokenIs(lexer.PIPE) {
 			p.nextToken() // consume '|'
 			p.nextToken() // move to next type
-			nextType := p.parseType()
+			// Parse the next type WITHOUT processing unions (to avoid nested unions)
+			nextType := p.parseNonUnionType()
 			if nextType != nil {
 				types = append(types, nextType)
 			}
@@ -454,6 +455,79 @@ checkUnion:
 	}
 
 	return currentType
+}
+
+// parseNonUnionType parses a type with all suffixes EXCEPT union types
+// This is used when parsing union members to avoid nested union structures
+func (p *Parser) parseNonUnionType() ast.Expression {
+	var typeExpr ast.Expression
+
+	switch p.curToken.Type {
+	case lexer.LPAREN:
+		// Could be tuple type or function type
+		return p.parseTupleOrFunctionType()
+	case lexer.TABLE:
+		// table<K, V>
+		typeExpr = p.parseTableType()
+	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL:
+		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	default:
+		return nil
+	}
+
+	currentType := typeExpr
+
+	// Handle high-precedence suffixes (arrays, generics, optional) but NOT unions
+	for {
+		switch {
+		case p.peekTokenIs(lexer.LBRACKET):
+			// Array type: T[]
+			p.nextToken() // consume '['
+			if !p.expectPeek(lexer.RBRACKET) {
+				return nil
+			}
+			currentType = &ast.ArrayType{
+				Token:       p.curToken,
+				ElementType: currentType,
+			}
+
+		case p.peekTokenIs(lexer.LT):
+			// Generic type: T<U>
+			p.nextToken() // consume '<'
+			p.nextToken() // move to first type argument
+
+			typeArgs := []ast.Expression{}
+			typeArgs = append(typeArgs, p.parseType())
+
+			for p.peekTokenIs(lexer.COMMA) {
+				p.nextToken() // consume comma
+				p.nextToken() // move to next type
+				typeArgs = append(typeArgs, p.parseType())
+			}
+
+			if !p.expectPeek(lexer.GT) {
+				return nil
+			}
+
+			currentType = &ast.GenericType{
+				Token:         typeExpr.(*ast.Identifier).Token,
+				BaseType:      typeExpr,
+				TypeArguments: typeArgs,
+			}
+
+		case p.peekTokenIs(lexer.QUESTION):
+			// Optional type: T?
+			p.nextToken() // consume '?'
+			currentType = &ast.OptionalType{
+				Token: p.curToken,
+				Type:  currentType,
+			}
+
+		default:
+			// No more high-precedence suffixes, return without processing unions
+			return currentType
+		}
+	}
 }
 
 func (p *Parser) parseTableType() ast.Expression {

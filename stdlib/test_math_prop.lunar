@@ -1,0 +1,8 @@
+-- Test math property access
+
+function test(): void
+	local pi: any = math.pi
+	print("Pi accessed")
+end
+
+test()

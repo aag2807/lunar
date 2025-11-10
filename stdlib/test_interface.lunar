@@ -1,0 +1,20 @@
+-- Test if interface property access works
+
+interface TestLib {
+	getValue: function(): number
+}
+end
+
+class MyMath implements TestLib {
+	getValue(): number {
+		return 42
+	}
+}
+
+function main(): void {
+	local m: TestLib = MyMath()
+	local v: number = m.getValue()
+	print("Value is")
+end
+
+main()

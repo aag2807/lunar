@@ -1,0 +1,49 @@
+-- Lua 5.1 Math Library
+-- Type declarations for mathematical functions
+
+declare interface MathLib {
+	-- Trigonometric Functions
+	sin: function(x: number): number
+	cos: function(x: number): number
+	tan: function(x: number): number
+	asin: function(x: number): number
+	acos: function(x: number): number
+	atan: function(x: number): number
+	atan2: function(y: number, x: number): number
+	sinh: function(x: number): number
+	cosh: function(x: number): number
+	tanh: function(x: number): number
+
+	-- Exponential and Logarithmic
+	exp: function(x: number): number
+	log: function(x: number, base: number): number
+	log10: function(x: number): number
+	sqrt: function(x: number): number
+	pow: function(x: number, y: number): number
+
+	-- Rounding and Absolute Value
+	abs: function(x: number): number
+	floor: function(x: number): number
+	ceil: function(x: number): number
+	modf: function(x: number): number
+
+	-- Random Numbers
+	random: function(m: number, n: number): number
+	randomseed: function(x: number): void
+
+	-- Limits and Constants
+	min: function(...: number): number
+	max: function(...: number): number
+	deg: function(x: number): number
+	rad: function(x: number): number
+	fmod: function(x: number, y: number): number
+	frexp: function(x: number): number
+	ldexp: function(m: number, e: number): number
+
+	-- Constants
+	pi: number
+	huge: number
+}
+end
+
+declare const math: MathLib

@@ -235,9 +235,15 @@ func (p *Parser) parseDotExpression(left ast.Expression) ast.Expression {
 		Left:  left,
 	}
 
-	precedence := p.curPrecedence()
-	p.nextToken()
-	exp.Right = p.parseExpression(precedence)
+	// Right side of dot expression must be an identifier
+	if !p.expectPeek(lexer.IDENT) {
+		return nil
+	}
+
+	exp.Right = &ast.Identifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
 
 	return exp
 }

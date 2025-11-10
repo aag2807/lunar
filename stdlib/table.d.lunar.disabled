@@ -1,0 +1,18 @@
+-- Lua 5.1 Table Library
+-- Type declarations for table manipulation functions
+
+declare interface TableLib {
+	-- Table Modification
+	insert: function(t: any, pos: number, value: any): void
+	remove: function(t: any, pos: number): any
+	concat: function(t: any, sep: string, i: number, j: number): string
+
+	-- Table Sorting
+	sort: function(t: any, comp: function(a: any, b: any): boolean): void
+
+	-- Table Size (Lua 5.2+, but commonly available)
+	maxn: function(t: any): number
+}
+end
+
+declare const table: TableLib

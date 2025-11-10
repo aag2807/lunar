@@ -1,257 +1,379 @@
-# Lunar Language Specification
+# Lunar
 
-## Overview
-Lunar is a statically-typed superset of Lua 5.1 that compiles to clean, efficient Lua code. It adds type safety and modern programming features while maintaining full compatibility with existing Lua code.
+**A statically-typed superset of Lua that compiles to clean, efficient Lua code.**
 
-## Table of Contents
-1. [Basic Types](#basic-types)
-2. [Variables and Constants](#variables-and-constants)
-3. [Functions](#functions)
-4. [Interfaces](#interfaces)
-5. [Classes](#classes)
-6. [Generics](#generics)
-7. [Enums](#enums)
-8. [Type System](#type-system)
-9. [Modules](#modules)
-10. [Type Declarations](#type-declarations)
+Lunar adds modern type safety and programming features to Lua while maintaining 100% compatibility with existing Lua code and libraries.
 
-## Basic Types
-
-### Primitive Types
-- `string`: Text values
-- `number`: Both integer and floating-point numbers
-- `boolean`: `true` or `false`
-- `nil`: Represents absence of a value
-- `any`: Any type (escape hatch from type checking)
-- `void`: Represents no return value in functions
-
-### Complex Types
-- Arrays: `T[]` where T is any valid type
-- Tables: `table<K, V>` where K and V are valid types
-- Tuples: `(T1, T2, ...)` for multiple return values
-- Union Types: `T1 | T2`
-- Optional Types: `T?` (shorthand for `T | nil`)
-
-## Variables and Constants
-
-### Variable Declaration
-```lua
--- Type inference
-local name = "lunar"  -- inferred as string
-
--- Explicit type annotation
-local age: number = 25
-local isValid: boolean = true
-
--- Optional types
-local data: string? = nil
-
--- Constants (immutable variables)
-const MAX_SIZE: number = 100
-const DEBUG: boolean = false
-```
-
-## Functions
-
-### Function Declaration
-```lua
--- Basic function with type annotations
-function greet(name: string): string
-    return "Hello, " .. name
+```lunar
+-- Type-safe Lunar code
+function calculateTotal(price: number, quantity: number): number
+    return price * quantity
 end
 
--- Optional parameters
-function createUser(name: string, age: number?): User
-    -- Implementation
-end
-
--- Multiple return values using tuple type
-function getCoordinates(): (number, number)
-    return 10, 20
-end
-
--- Generic function
-function map<T, U>(array: T[], fn: (item: T) => U): U[]
-    local result: U[] = {}
-    for _, item in ipairs(array) do
-        table.insert(result, fn(item))
-    end
-    return result
-end
-```
-
-## Interfaces
-
-### Interface Declaration
-```lua
-interface Vehicle
-    brand: string
-    year: number
-    start(): void
-    stop(): void
-end
-
-interface ElectricVehicle extends Vehicle
-    batteryLevel: number
-    charge(duration: number): void
-end
-```
-
-## Classes
-
-### Class Declaration
-```lua
-class Car implements Vehicle
-    private brand: string
-    private year: number
-    private running: boolean
-
-    constructor(brand: string, year: number)
-        self.brand = brand
-        self.year = year
-        self.running = false
-    end
-
-    public start(): void
-        self.running = true
-    end
-
-    public stop(): void
-        self.running = false
-    end
-end
-```
-
-### Access Modifiers
-- `public`: Accessible from anywhere (default)
-- `private`: Accessible only within the class
-- `protected`: Accessible within the class and its descendants
-
-## Generics
-
-### Generic Types
-```lua
-class Stack<T>
-    private items: T[]
+class ShoppingCart
+    private items: number[]
 
     constructor()
         self.items = {}
     end
 
-    public push(item: T): void
-        table.insert(self.items, item)
+    addItem(price: number): void
+        table.insert(self.items, price)
     end
 
-    public pop(): T?
-        return table.remove(self.items)
+    getTotal(): number
+        local total: number = 0
+        for _, price in ipairs(self.items) do
+            total = total + price
+        end
+        return total
+    end
+end
+```
+
+## Features
+
+✅ **Type Safety** - Catch errors at compile time, not runtime
+✅ **Classes & OOP** - Modern object-oriented programming with inheritance
+✅ **Interfaces** - Define contracts and ensure implementation
+✅ **Enums** - Type-safe enumeration values
+✅ **Generics** - Write reusable, type-safe code
+✅ **Union Types** - Flexible type combinations (`string | number`)
+✅ **Declaration Files** - Type definitions for existing Lua libraries (`.d.lunar`)
+✅ **Standard Library Types** - Built-in declarations for Lua 5.1 stdlib
+✅ **Excellent Error Messages** - Clear, helpful errors with source context
+✅ **Clean Lua Output** - Generates readable, efficient Lua code
+✅ **100% Lua Compatible** - Use any Lua library seamlessly
+
+## Installation
+
+### Prerequisites
+- Go 1.16 or higher
+
+### Build from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/lunar.git
+cd lunar
+
+# Build the compiler
+go build -o lunar ./cmd/lunar
+
+# Build the declaration generator (optional)
+go build -o lunar2decl ./cmd/lunar2decl
+
+# Add to your PATH (optional)
+sudo cp lunar /usr/local/bin/
+sudo cp lunar2decl /usr/local/bin/
+```
+
+### Using Make (recommended)
+
+```bash
+# Build both tools
+make build
+
+# Install to /usr/local/bin
+make install
+
+# Run tests
+make test
+
+# Clean build artifacts
+make clean
+```
+
+## Quick Start
+
+### 1. Create a Lunar file
+
+```lunar
+-- hello.lunar
+function greet(name: string): string
+    return "Hello, " .. name .. "!"
+end
+
+local message: string = greet("World")
+print(message)
+```
+
+### 2. Compile to Lua
+
+```bash
+lunar hello.lunar
+```
+
+This generates `hello.lua`:
+
+```lua
+function greet(name)
+    return "Hello, " .. name .. "!"
+end
+
+local message = greet("World")
+print(message)
+```
+
+### 3. Run the Lua code
+
+```bash
+lua hello.lua
+```
+
+## Usage
+
+```bash
+# Compile with type checking (default)
+lunar input.lunar
+
+# Compile without type checking
+lunar input.lunar --no-type-check
+
+# Specify output file
+lunar input.lunar -o output.lua
+
+# Show version
+lunar --version
+
+# Show help
+lunar --help
+```
+
+## Documentation
+
+- **[Language Specification](LANGUAGE_SPEC.md)** - Complete language reference
+- **[Standard Library](stdlib/README.md)** - Type declarations for Lua stdlib
+- **[Declaration Generator](cmd/lunar2decl/README.md)** - Generate `.d.lunar` files
+- **[Examples](examples/)** - Sample code and use cases
+
+## Examples
+
+### Type Safety
+
+```lunar
+function divide(a: number, b: number): number
+    if b == 0 then
+        error("Division by zero")
+    end
+    return a / b
+end
+
+-- Type error caught at compile time!
+-- divide("10", 5)  -- Error: cannot pass string to number parameter
+```
+
+### Classes and Inheritance
+
+```lunar
+class Animal
+    protected name: string
+
+    constructor(name: string)
+        self.name = name
+    end
+
+    speak(): void
+        print("Some sound")
     end
 end
 
--- Usage
-local numberStack: Stack<number> = Stack<number>.new()
-```
+class Dog extends Animal
+    constructor(name: string)
+        super(name)
+    end
 
-## Enums
-
-### Enum Declaration
-```lua
-enum Direction
-    North
-    South
-    East
-    West
+    speak(): void
+        print(self.name .. " says: Woof!")
+    end
 end
 
-enum HttpStatus
-    OK = 200
-    NotFound = 404
-    ServerError = 500
-end
+local dog: Dog = Dog("Buddy")
+dog.speak()  -- Outputs: Buddy says: Woof!
 ```
 
-## Type System
+### Generics
 
-### Type Aliases
-```lua
-type UserId = number
-type Email = string
-type UserCallback = (user: User) => void
+```lunar
+class Box<T>
+    private value: T
 
-type Point
-    x: number
-    y: number
-end
-```
+    constructor(value: T)
+        self.value = value
+    end
 
-### Union Types
-```lua
-type Status = "loading" | "success" | "error"
-type NumberOrString = number | string
-```
+    getValue(): T
+        return self.value
+    end
 
-### Type Guards
-```lua
-function isString(value: any): value is string
-    return type(value) == "string"
-end
-```
-
-## Modules
-
-### Module System
-```lua
--- Exporting (in user.lunar)
-export interface User
-    id: number
-    name: string
+    setValue(value: T): void
+        self.value = value
+    end
 end
 
-export class UserService
-    -- Implementation
+local numberBox: Box<number> = Box<number>(42)
+local stringBox: Box<string> = Box<string>("hello")
+```
+
+### Using Lua Libraries with Type Safety
+
+```lunar
+-- Copy stdlib declarations to your project
+-- cp stdlib/*.d.lunar .
+
+-- Now use Lua stdlib with full type safety!
+function calculateCircleArea(radius: number): number
+    local area: number = math.pi * math.pow(radius, 2)
+    return math.floor(area * 100) / 100
 end
 
--- Importing (in main.lunar)
-import { User, UserService } from "./user"
+local result: number = calculateCircleArea(5.0)
+print(result)
 ```
 
-## Type Declarations
+## Declaration Files
 
-### Declaration Files
-```lua
--- types.lunar
-declare interface Window
-    width: number
-    height: number
+Create type definitions for existing Lua libraries:
+
+### Manual Creation
+```lunar
+-- socket.d.lunar
+declare interface Socket {
+    connect: function(host: string, port: number): boolean
+    send: function(data: string): boolean
+    receive: function(): string | nil
+    close: function(): void
+}
 end
 
-declare function setTimeout(callback: () => void, ms: number): number
+declare function socket_connect(host: string, port: number): Socket end
 ```
 
-## Conventions
+### Auto-Generate from Lua Code
+```bash
+# Generate declarations from existing Lua files
+lunar2decl mylib.lua
 
-### Naming Conventions
-- Interface names: PascalCase
-- Class names: PascalCase
-- Function names: camelCase
-- Variable names: camelCase
-- Constants: UPPER_SNAKE_CASE
-- File names: lowercase with hyphens (e.g., user-service.lunar)
-
-### File Extension
-- `.lunar` for Lunar source files
-- `.d.lunar` for Lunar type declaration files
-
-### Comments
-```lua
--- Single line comment
-
---[[
-    Multi-line
-    comment
-]]
+# This creates mylib.d.lunar with function signatures
+# Manually refine the types for better type safety
 ```
 
-### Type Annotations Style
-- Space after colon in type annotations: `name: string`
-- No space before colon: `name: string` (not `name : string`)
-- Space after comma in generic types: `Map<string, number>`
+## Error Messages
+
+Lunar provides clear, helpful error messages with source context:
+
+```
+test.lunar: Type errors found:
+
+  Error 1: test.lunar:4:2
+  Cannot assign type 'number' to variable of type 'string'
+
+     2 |
+     3 | function calculateArea(width: number, height: number): number
+     4 | 	local area: string = width * height
+       |  ^
+     5 | 	return area
+```
+
+## Standard Library Support
+
+Lunar includes type declarations for Lua 5.1 standard library:
+
+- ✅ **lua.d.lunar** - Core globals (print, tostring, tonumber, etc.)
+- ✅ **math.d.lunar** - Math functions (sin, cos, random, floor, etc.)
+- ✅ **io.d.lunar** - File I/O (open, read, write, etc.)
+- ✅ **os.d.lunar** - OS facilities (time, execute, date, etc.)
+- ⚠️ **string/table** - Currently limited due to keyword conflicts (v1.1)
+
+Simply copy the declarations to your project directory for automatic type checking!
+
+## Project Structure
+
+```
+lunar/
+├── cmd/
+│   ├── lunar/          # Main compiler
+│   └── lunar2decl/     # Declaration generator tool
+├── internal/
+│   ├── lexer/          # Tokenization
+│   ├── parser/         # AST construction
+│   ├── types/          # Type checking
+│   ├── codegen/        # Lua code generation
+│   └── ast/            # AST definitions
+├── stdlib/             # Standard library declarations
+├── examples/           # Example code
+└── README.md           # This file
+```
+
+## Roadmap
+
+### v1.0 (Current) ✅
+- [x] Complete type system
+- [x] Classes, interfaces, enums
+- [x] Generics
+- [x] Union and literal types
+- [x] Declaration files
+- [x] Standard library declarations
+- [x] Improved error messages
+- [x] Declaration generator tool
+
+### v1.1 (Planned)
+- [ ] Context-aware keywords (full string/table stdlib support)
+- [ ] Enhanced error suggestions ("Did you mean...?")
+- [ ] More comprehensive stdlib coverage
+- [ ] Performance optimizations
+
+### v2.0 (Future)
+- [ ] Language Server Protocol (LSP) for IDE integration
+- [ ] Source maps for debugging
+- [ ] Package manager integration
+- [ ] Code formatter
+
+## Contributing
+
+Contributions are welcome! Areas where help is especially appreciated:
+
+- Additional standard library declarations
+- Bug fixes and error reporting
+- Documentation improvements
+- Example code and tutorials
+- Testing on different platforms
+
+## License
+
+[MIT License](LICENSE)
+
+## Why Lunar?
+
+**For Lua Developers:**
+- Add type safety to catch bugs early
+- Better IDE support and autocompletion
+- Modern OOP features while keeping Lua's simplicity
+- No runtime overhead - compiles to clean Lua
+
+**For TypeScript/Typed Language Developers:**
+- Familiar syntax and type system
+- Target embedded systems and game engines that use Lua
+- Lightweight and fast compilation
+- Full interop with existing Lua ecosystem
+
+## Comparison with Lua
+
+| Feature | Lua | Lunar |
+|---------|-----|-------|
+| Static typing | ❌ | ✅ |
+| Classes/OOP | Manual (metatables) | ✅ Built-in |
+| Interfaces | ❌ | ✅ |
+| Generics | ❌ | ✅ |
+| Compile-time errors | ❌ | ✅ |
+| Runtime performance | ⚡ Fast | ⚡ Fast (same) |
+| Lua compatibility | ✅ | ✅ |
+| Learning curve | Easy | Easy-Medium |
+
+## Acknowledgments
+
+Inspired by TypeScript, with design principles adapted for the Lua ecosystem.
+
+---
+
+**[Get Started Now](#quick-start)** | **[View Examples](examples/)** | **[Read the Spec](LANGUAGE_SPEC.md)**

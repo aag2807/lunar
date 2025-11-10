@@ -2,8 +2,11 @@
 lunar
 lunar2decl
 
+# Generated Lua files (keep source .lunar files only)
+*.lua
+!examples/*.lua.example
+
 # Test files (root directory only)
-/*.lua
 /*test*.lunar
 /simple.lunar
 /debug.lunar

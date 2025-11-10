@@ -251,19 +251,19 @@ func (c *Checker) registerEnum(node *ast.EnumDeclaration) {
 		Members: make(map[string]Type),
 	}
 
-	for _, member := range node.Members {
-		if member.Value != nil {
-			// Infer type from the value expression
-			memberType := c.checkExpression(member.Value)
-			enumType.Members[member.Name.Value] = memberType
-		} else {
-			// Default to number if no value specified
-			enumType.Members[member.Name.Value] = Number
-		}
-	}
-
+	// First, register the enum type itself so members can reference it
 	c.enums[enumType.Name] = enumType
 	c.env.Set(enumType.Name, enumType)
+
+	for _, member := range node.Members {
+		if member.Value != nil {
+			// Validate the value expression (should be number or string)
+			_ = c.checkExpression(member.Value)
+		}
+		// All enum members have the enum type itself, not the value type
+		// This ensures type safety: Color.Red has type Color, not number
+		enumType.Members[member.Name.Value] = enumType
+	}
 }
 
 // registerTypeAlias registers a type alias

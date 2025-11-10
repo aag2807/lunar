@@ -355,6 +355,13 @@ func (p *Parser) parseType() ast.Expression {
 	case lexer.TABLE:
 		// table<K, V>
 		typeExpr = p.parseTableType()
+	case lexer.STRING:
+		// String literal in type position (for literal types)
+		typeExpr = &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
+	case lexer.NUMBER:
+		// Number literal in type position (for literal types)
+		value, _ := strconv.ParseFloat(p.curToken.Literal, 64)
+		typeExpr = &ast.NumberLiteral{Token: p.curToken, Value: value}
 	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL:
 		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	default:
@@ -469,6 +476,13 @@ func (p *Parser) parseNonUnionType() ast.Expression {
 	case lexer.TABLE:
 		// table<K, V>
 		typeExpr = p.parseTableType()
+	case lexer.STRING:
+		// String literal in type position (for literal types)
+		typeExpr = &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
+	case lexer.NUMBER:
+		// Number literal in type position (for literal types)
+		value, _ := strconv.ParseFloat(p.curToken.Literal, 64)
+		typeExpr = &ast.NumberLiteral{Token: p.curToken, Value: value}
 	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL:
 		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	default:

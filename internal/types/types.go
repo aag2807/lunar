@@ -122,6 +122,86 @@ func (t *VoidType) IsAssignableTo(other Type) bool {
 	return isAny
 }
 
+// StringLiteralType represents a specific string value as a type
+type StringLiteralType struct {
+	Value string
+}
+
+func (t *StringLiteralType) String() string { return fmt.Sprintf("\"%s\"", t.Value) }
+func (t *StringLiteralType) Equals(other Type) bool {
+	otherLiteral, ok := other.(*StringLiteralType)
+	if !ok {
+		return false
+	}
+	return t.Value == otherLiteral.Value
+}
+func (t *StringLiteralType) IsAssignableTo(other Type) bool {
+	if t.Equals(other) {
+		return true
+	}
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	// String literal is assignable to string type
+	if _, isString := other.(*StringType); isString {
+		return true
+	}
+	// Check if other is a union type that contains this literal OR the base string type
+	if unionType, isUnion := other.(*UnionType); isUnion {
+		// First check if the literal itself is in the union
+		if unionType.Contains(t) {
+			return true
+		}
+		// Then check if the base string type is in the union
+		for _, ut := range unionType.Types {
+			if _, isString := ut.(*StringType); isString {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// NumberLiteralType represents a specific number value as a type
+type NumberLiteralType struct {
+	Value float64
+}
+
+func (t *NumberLiteralType) String() string { return fmt.Sprintf("%g", t.Value) }
+func (t *NumberLiteralType) Equals(other Type) bool {
+	otherLiteral, ok := other.(*NumberLiteralType)
+	if !ok {
+		return false
+	}
+	return t.Value == otherLiteral.Value
+}
+func (t *NumberLiteralType) IsAssignableTo(other Type) bool {
+	if t.Equals(other) {
+		return true
+	}
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	// Number literal is assignable to number type
+	if _, isNumber := other.(*NumberType); isNumber {
+		return true
+	}
+	// Check if other is a union type that contains this literal OR the base number type
+	if unionType, isUnion := other.(*UnionType); isUnion {
+		// First check if the literal itself is in the union
+		if unionType.Contains(t) {
+			return true
+		}
+		// Then check if the base number type is in the union
+		for _, ut := range unionType.Types {
+			if _, isNumber := ut.(*NumberType); isNumber {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // AnyType represents the any type (accepts all types)
 type AnyType struct{}
 

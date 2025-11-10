@@ -365,6 +365,14 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		// Full generic support would require more complex handling
 		return baseType
 
+	case *ast.StringLiteral:
+		// String literal in type position becomes a literal type
+		return &StringLiteralType{Value: node.Value}
+
+	case *ast.NumberLiteral:
+		// Number literal in type position becomes a literal type
+		return &NumberLiteralType{Value: node.Value}
+
 	default:
 		c.addError(fmt.Sprintf("Cannot resolve type expression: %T", expr), lexer.Token{})
 		return Any
@@ -815,9 +823,11 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 	case *ast.Identifier:
 		return c.checkIdentifier(node)
 	case *ast.NumberLiteral:
-		return Number
+		// Number literals infer as literal types for precision
+		return &NumberLiteralType{Value: node.Value}
 	case *ast.StringLiteral:
-		return String
+		// String literals infer as literal types for precision
+		return &StringLiteralType{Value: node.Value}
 	case *ast.BooleanLiteral:
 		return Boolean
 	case *ast.NilLiteral:

@@ -1,0 +1,22 @@
+-- Full generic Stack implementation from spec
+
+class Stack<T>
+    private items: number
+
+    constructor()
+        self.items = 0
+    end
+
+    public push(item: T): void
+        self.items = self.items + 1
+    end
+
+    public size(): number
+        return self.items
+    end
+end
+
+-- Generic function
+function map<T, U>(item: T): U
+    return item
+end

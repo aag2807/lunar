@@ -637,6 +637,12 @@ func (p *Parser) parseFunctionDeclaration() *ast.FunctionDeclaration {
 	}
 	fd.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
+	// Parse generic parameters if present: <T, U>
+	if p.peekTokenIs(lexer.LT) {
+		p.nextToken() // consume <
+		fd.GenericParams = p.parseGenericParameters()
+	}
+
 	//parse the parameters
 	if !p.expectPeek(lexer.LPAREN) {
 		return nil
@@ -946,6 +952,12 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 		return nil
 	}
 	class.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Parse generic parameters if present: <T, U>
+	if p.peekTokenIs(lexer.LT) {
+		p.nextToken() // consume <
+		class.GenericParams = p.parseGenericParameters()
+	}
 
 	// Parse implements clause
 	if p.peekTokenIs(lexer.IMPLEMENTS) {
@@ -1284,4 +1296,36 @@ func (p *Parser) parseImportStatement() *ast.ImportStatement {
 	importStmt.Module = p.curToken.Literal
 
 	return importStmt
+}
+
+// parseGenericParameters parses generic type parameters: <T, U, V>
+func (p *Parser) parseGenericParameters() []*ast.Identifier {
+	params := []*ast.Identifier{}
+
+	p.nextToken() // move past '<' to first parameter
+
+	for !p.curTokenIs(lexer.GT) && !p.curTokenIs(lexer.EOF) {
+		if !p.curTokenIs(lexer.IDENT) {
+			p.peekError(lexer.IDENT)
+			return nil
+		}
+
+		params = append(params, &ast.Identifier{
+			Token: p.curToken,
+			Value: p.curToken.Literal,
+		})
+
+		p.nextToken()
+
+		if p.curTokenIs(lexer.COMMA) {
+			p.nextToken() // move past comma to next parameter
+		}
+	}
+
+	if !p.curTokenIs(lexer.GT) {
+		p.errors = append(p.errors, "expected '>' after generic parameters")
+		return nil
+	}
+
+	return params
 }

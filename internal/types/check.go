@@ -147,6 +147,15 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		Implements: []*InterfaceType{},
 	}
 
+	// Add generic type parameters to scope temporarily
+	prevEnv := c.env
+	if len(node.GenericParams) > 0 {
+		c.env = NewEnclosedEnvironment(prevEnv)
+		for _, genericParam := range node.GenericParams {
+			c.env.Set(genericParam.Value, Any)
+		}
+	}
+
 	// Register properties
 	for _, prop := range node.Properties {
 		propType := c.resolveTypeExpression(prop.Type)
@@ -178,6 +187,11 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 				c.addError(fmt.Sprintf("Interface '%s' not found", ident.Value), ident.Token)
 			}
 		}
+	}
+
+	// Restore environment
+	if len(node.GenericParams) > 0 {
+		c.env = prevEnv
 	}
 
 	c.classes[classType.Name] = classType
@@ -418,6 +432,15 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 
 // checkFunctionDeclaration checks a function declaration
 func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
+	// Add generic type parameters to current scope first (for type resolution)
+	prevEnv := c.env
+	if len(node.GenericParams) > 0 {
+		c.env = NewEnclosedEnvironment(prevEnv)
+		for _, genericParam := range node.GenericParams {
+			c.env.Set(genericParam.Value, Any)
+		}
+	}
+
 	// Create function type
 	params := make([]Type, len(node.Parameters))
 	for i, param := range node.Parameters {
@@ -438,14 +461,21 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		ReturnType: returnType,
 	}
 
-	// Register function in environment
+	// Restore environment and register function
+	if len(node.GenericParams) > 0 {
+		c.env = prevEnv
+	}
 	c.env.Set(node.Name.Value, funcType)
 
 	// Check function body in new scope
-	prevEnv := c.env
 	prevReturnType := c.currentFunctionReturnType
-	c.env = NewEnclosedEnvironment(prevEnv)
+	c.env = NewEnclosedEnvironment(c.env)
 	c.currentFunctionReturnType = returnType
+
+	// Add generic type parameters to scope
+	for _, genericParam := range node.GenericParams {
+		c.env.Set(genericParam.Value, Any)
+	}
 
 	// Add parameters to scope
 	for i, param := range node.Parameters {
@@ -632,6 +662,11 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		c.env = NewEnclosedEnvironment(prevEnv)
 		c.currentFunctionReturnType = Void
 
+		// Add generic type parameters to scope
+		for _, genericParam := range node.GenericParams {
+			c.env.Set(genericParam.Value, Any)
+		}
+
 		// Add self to scope
 		c.env.Set("self", classType)
 
@@ -656,6 +691,11 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		prevEnv := c.env
 		prevReturnType := c.currentFunctionReturnType
 		c.env = NewEnclosedEnvironment(prevEnv)
+
+		// Add generic type parameters to scope
+		for _, genericParam := range node.GenericParams {
+			c.env.Set(genericParam.Value, Any)
+		}
 
 		// Get method's return type
 		var returnType Type = Void

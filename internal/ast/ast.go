@@ -350,11 +350,12 @@ func (bs *BlockStatement) String() string {
 }
 
 type FunctionDeclaration struct {
-	Token      lexer.Token
-	Name       *Identifier
-	Parameters []*Parameter
-	ReturnType Expression
-	Body       *BlockStatement
+	Token         lexer.Token
+	Name          *Identifier
+	GenericParams []*Identifier // generic type parameters like <T, U>
+	Parameters    []*Parameter
+	ReturnType    Expression
+	Body          *BlockStatement
 }
 
 func (fd *FunctionDeclaration) statementNode()       {}
@@ -543,12 +544,13 @@ func (as *AssignmentStatement) String() string {
 }
 
 type ClassDeclaration struct {
-	Token      lexer.Token // 'class' token
-	Name       *Identifier
-	Properties []*PropertyDeclaration
-	Methods    []*FunctionDeclaration
-	Constructor *ConstructorDeclaration
-	Implements []Expression // interface names
+	Token         lexer.Token // 'class' token
+	Name          *Identifier
+	GenericParams []*Identifier           // generic type parameters like <T, U>
+	Properties    []*PropertyDeclaration
+	Methods       []*FunctionDeclaration
+	Constructor   *ConstructorDeclaration
+	Implements    []Expression // interface names
 }
 
 func (cd *ClassDeclaration) statementNode()       {}

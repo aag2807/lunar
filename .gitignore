@@ -3,7 +3,7 @@ lunar
 
 # Test files (root directory only)
 /*.lua
-/test.lunar
+/*test*.lunar
 /simple.lunar
 /debug.lunar
 /func*.lunar

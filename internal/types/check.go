@@ -268,7 +268,31 @@ func (c *Checker) registerEnum(node *ast.EnumDeclaration) {
 
 // registerTypeAlias registers a type alias
 func (c *Checker) registerTypeAlias(node *ast.TypeDeclaration) {
-	aliasType := c.resolveTypeExpression(node.Type)
+	var aliasType Type
+
+	if node.Type != nil {
+		// Regular type alias: type Name = Type
+		aliasType = c.resolveTypeExpression(node.Type)
+	} else if len(node.Properties) > 0 {
+		// Object shape: type Name ... end
+		interfaceType := &InterfaceType{
+			Name:       node.Name.Value,
+			Properties: make(map[string]Type),
+			Methods:    make(map[string]*FunctionType),
+			Extends:    []*InterfaceType{},
+		}
+
+		// Register properties
+		for _, prop := range node.Properties {
+			propType := c.resolveTypeExpression(prop.Type)
+			interfaceType.Properties[prop.Name.Value] = propType
+		}
+
+		aliasType = interfaceType
+	} else {
+		aliasType = Any
+	}
+
 	c.typeAliases[node.Name.Value] = aliasType
 	c.env.Set(node.Name.Value, aliasType)
 }

@@ -1214,13 +1214,34 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 	}
 	typeDecl.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
-	// Expect '='
-	if !p.expectPeek(lexer.ASSIGN) {
-		return nil
-	}
+	p.nextToken() // move past name
 
-	p.nextToken() // move to type definition
-	typeDecl.Type = p.parseType()
+	// Check if it's an object shape declaration (type Name ... end) or alias (type Name = Type)
+	if p.curTokenIs(lexer.ASSIGN) {
+		// Type alias: type Name = Type
+		p.nextToken() // move to type definition
+		typeDecl.Type = p.parseType()
+	} else {
+		// Object shape: type Name { properties } end
+		// Parse properties similar to interface
+		for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+			if p.curTokenIs(lexer.IDENT) {
+				prop := &ast.PropertyDeclaration{
+					Token: p.curToken,
+					Name:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+				}
+
+				if !p.expectPeek(lexer.COLON) {
+					return nil
+				}
+
+				p.nextToken() // move to type
+				prop.Type = p.parseType()
+				typeDecl.Properties = append(typeDecl.Properties, prop)
+			}
+			p.nextToken()
+		}
+	}
 
 	return typeDecl
 }

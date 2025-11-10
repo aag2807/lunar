@@ -26,8 +26,14 @@ func (t *NumberType) IsAssignableTo(other Type) bool {
 	if t.Equals(other) {
 		return true
 	}
-	_, isAny := other.(*AnyType)
-	return isAny
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	// Check if other is a union type that contains number
+	if unionType, isUnion := other.(*UnionType); isUnion {
+		return unionType.Contains(t)
+	}
+	return false
 }
 
 // StringType represents the string type
@@ -42,8 +48,14 @@ func (t *StringType) IsAssignableTo(other Type) bool {
 	if t.Equals(other) {
 		return true
 	}
-	_, isAny := other.(*AnyType)
-	return isAny
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	// Check if other is a union type that contains string
+	if unionType, isUnion := other.(*UnionType); isUnion {
+		return unionType.Contains(t)
+	}
+	return false
 }
 
 // BooleanType represents the boolean type
@@ -58,8 +70,14 @@ func (t *BooleanType) IsAssignableTo(other Type) bool {
 	if t.Equals(other) {
 		return true
 	}
-	_, isAny := other.(*AnyType)
-	return isAny
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	// Check if other is a union type that contains boolean
+	if unionType, isUnion := other.(*UnionType); isUnion {
+		return unionType.Contains(t)
+	}
+	return false
 }
 
 // NilType represents the nil type
@@ -78,8 +96,14 @@ func (t *NilType) IsAssignableTo(other Type) bool {
 	if opt, ok := other.(*OptionalType); ok {
 		return opt != nil
 	}
-	_, isAny := other.(*AnyType)
-	return isAny
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	// Check if other is a union type that contains nil
+	if unionType, isUnion := other.(*UnionType); isUnion {
+		return unionType.Contains(t)
+	}
+	return false
 }
 
 // VoidType represents the void type (for functions with no return)

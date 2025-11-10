@@ -767,13 +767,30 @@ func (em *EnumMember) String() string {
 type TypeDeclaration struct {
 	Token lexer.Token // 'type' token
 	Name  *Identifier
-	Type  Expression // the type being aliased
+	Type  Expression               // the type being aliased (for type Name = Type)
+	Properties []*PropertyDeclaration // for object shape (type Name ... end)
 }
 
 func (td *TypeDeclaration) statementNode()       {}
 func (td *TypeDeclaration) TokenLiteral() string { return td.Token.Literal }
 func (td *TypeDeclaration) String() string {
-	return fmt.Sprintf("type %s = %s", td.Name.String(), td.Type.String())
+	if td.Type != nil {
+		return fmt.Sprintf("type %s = %s", td.Name.String(), td.Type.String())
+	}
+	// Object shape type
+	return fmt.Sprintf("type %s { ... }", td.Name.String())
+}
+
+// ObjectShapeType represents an inline object shape for type declarations
+type ObjectShapeType struct {
+	Token      lexer.Token
+	Properties []*PropertyDeclaration
+}
+
+func (ost *ObjectShapeType) expressionNode()      {}
+func (ost *ObjectShapeType) TokenLiteral() string { return ost.Token.Literal }
+func (ost *ObjectShapeType) String() string {
+	return "{ object shape }"
 }
 
 // ExportStatement wraps another statement to mark it as exported

@@ -78,10 +78,11 @@ type Checker struct {
 	errors []*TypeError
 
 	// Type definitions (classes, interfaces, enums, type aliases)
-	classes    map[string]*ClassType
-	interfaces map[string]*InterfaceType
-	enums      map[string]*EnumType
-	typeAliases map[string]Type
+	classes            map[string]*ClassType
+	interfaces         map[string]*InterfaceType
+	enums              map[string]*EnumType
+	typeAliases        map[string]Type
+	genericTypeAliases map[string]*GenericTypeAlias
 
 	// Current function return type (for checking return statements)
 	currentFunctionReturnType Type
@@ -100,12 +101,13 @@ func NewChecker() *Checker {
 	env.Set("any", Any)
 
 	return &Checker{
-		env:         env,
-		errors:      []*TypeError{},
-		classes:     make(map[string]*ClassType),
-		interfaces:  make(map[string]*InterfaceType),
-		enums:       make(map[string]*EnumType),
-		typeAliases: make(map[string]Type),
+		env:                env,
+		errors:             []*TypeError{},
+		classes:            make(map[string]*ClassType),
+		interfaces:         make(map[string]*InterfaceType),
+		enums:              make(map[string]*EnumType),
+		typeAliases:        make(map[string]Type),
+		genericTypeAliases: make(map[string]*GenericTypeAlias),
 	}
 }
 
@@ -268,6 +270,25 @@ func (c *Checker) registerEnum(node *ast.EnumDeclaration) {
 
 // registerTypeAlias registers a type alias
 func (c *Checker) registerTypeAlias(node *ast.TypeDeclaration) {
+	// Check if this is a generic type alias
+	if len(node.GenericParams) > 0 {
+		// Generic type alias: type Name<T, U> = Type
+		typeParams := make([]string, len(node.GenericParams))
+		for i, param := range node.GenericParams {
+			typeParams[i] = param.Value
+		}
+
+		genericAlias := &GenericTypeAlias{
+			Name:       node.Name.Value,
+			TypeParams: typeParams,
+			Body:       node.Type,
+		}
+
+		c.genericTypeAliases[node.Name.Value] = genericAlias
+		c.env.Set(node.Name.Value, genericAlias)
+		return
+	}
+
 	var aliasType Type
 
 	if node.Type != nil {
@@ -335,9 +356,15 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		return &TableType{KeyType: keyType, ValueType: valueType}
 
 	case *ast.UnionType:
-		types := make([]Type, len(node.Types))
-		for i, t := range node.Types {
-			types[i] = c.resolveTypeExpression(t)
+		types := make([]Type, 0, len(node.Types))
+		for _, t := range node.Types {
+			resolvedType := c.resolveTypeExpression(t)
+			// Flatten nested unions
+			if unionType, isUnion := resolvedType.(*UnionType); isUnion {
+				types = append(types, unionType.Types...)
+			} else {
+				types = append(types, resolvedType)
+			}
 		}
 		return &UnionType{Types: types}
 
@@ -360,9 +387,32 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		return &FunctionType{Parameters: params, ReturnType: returnType}
 
 	case *ast.GenericType:
+		// Check if this is a generic type alias instantiation like Nullable<string>
+		if baseIdent, ok := node.BaseType.(*ast.Identifier); ok {
+			if genericAlias, exists := c.genericTypeAliases[baseIdent.Value]; exists {
+				// Resolve type arguments
+				typeArgs := make([]Type, len(node.TypeArguments))
+				for i, arg := range node.TypeArguments {
+					typeArgs[i] = c.resolveTypeExpression(arg)
+				}
+
+				// Check parameter count matches
+				if len(typeArgs) != len(genericAlias.TypeParams) {
+					c.addError(
+						fmt.Sprintf("Generic type '%s' expects %d type arguments, got %d",
+							genericAlias.Name, len(genericAlias.TypeParams), len(typeArgs)),
+						lexer.Token{},
+					)
+					return Any
+				}
+
+				// Create substitution map and resolve the body
+				return c.substituteTypeParams(genericAlias.Body, genericAlias.TypeParams, typeArgs)
+			}
+		}
+
+		// Not a generic type alias, try regular type resolution
 		baseType := c.resolveTypeExpression(node.BaseType)
-		// For now, we'll just return the base type
-		// Full generic support would require more complex handling
 		return baseType
 
 	case *ast.StringLiteral:
@@ -377,6 +427,35 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		c.addError(fmt.Sprintf("Cannot resolve type expression: %T", expr), lexer.Token{})
 		return Any
 	}
+}
+
+// substituteTypeParams substitutes type parameters in a type expression
+// For example: substituting T with string in (nil | T) yields (nil | string)
+func (c *Checker) substituteTypeParams(body ast.Expression, typeParams []string, typeArgs []Type) Type {
+	if body == nil {
+		return Any
+	}
+
+	// Create a substitution map
+	substitutions := make(map[string]Type)
+	for i, param := range typeParams {
+		substitutions[param] = typeArgs[i]
+	}
+
+	// Create a new environment with substitutions
+	prevEnv := c.env
+	c.env = NewEnclosedEnvironment(prevEnv)
+	for param, typ := range substitutions {
+		c.env.Set(param, typ)
+	}
+
+	// Resolve the body with the substituted environment
+	result := c.resolveTypeExpression(body)
+
+	// Restore environment
+	c.env = prevEnv
+
+	return result
 }
 
 // checkStatement checks a statement

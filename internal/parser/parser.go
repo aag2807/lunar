@@ -1302,7 +1302,13 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 	}
 	typeDecl.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
-	p.nextToken() // move past name
+	// Parse generic parameters if present: <T, U>
+	if p.peekTokenIs(lexer.LT) {
+		p.nextToken() // consume <
+		typeDecl.GenericParams = p.parseGenericParameters()
+	}
+
+	p.nextToken() // move past name (or generic params)
 
 	// Check if it's an object shape declaration (type Name ... end) or alias (type Name = Type)
 	if p.curTokenIs(lexer.ASSIGN) {

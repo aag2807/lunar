@@ -765,10 +765,11 @@ func (em *EnumMember) String() string {
 }
 
 type TypeDeclaration struct {
-	Token lexer.Token // 'type' token
-	Name  *Identifier
-	Type  Expression               // the type being aliased (for type Name = Type)
-	Properties []*PropertyDeclaration // for object shape (type Name ... end)
+	Token         lexer.Token // 'type' token
+	Name          *Identifier
+	GenericParams []*Identifier            // generic type parameters (e.g., T, U)
+	Type          Expression               // the type being aliased (for type Name = Type)
+	Properties    []*PropertyDeclaration // for object shape (type Name ... end)
 }
 
 func (td *TypeDeclaration) statementNode()       {}

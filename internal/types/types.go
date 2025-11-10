@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"lunar/internal/ast"
 	"strings"
 )
 
@@ -418,6 +419,46 @@ func (t *OptionalType) IsAssignableTo(other Type) bool {
 		return t.BaseType.IsAssignableTo(otherOpt.BaseType)
 	}
 	// Optional is NOT assignable to non-optional (must unwrap first)
+	return false
+}
+
+// GenericTypeAlias represents a generic type alias like type Nullable<T> = T | nil
+type GenericTypeAlias struct {
+	Name       string
+	TypeParams []string       // e.g., ["T", "U"]
+	Body       ast.Expression // the type expression with type parameters
+}
+
+func (t *GenericTypeAlias) String() string {
+	params := strings.Join(t.TypeParams, ", ")
+	return fmt.Sprintf("%s<%s>", t.Name, params)
+}
+func (t *GenericTypeAlias) Equals(other Type) bool {
+	otherGeneric, ok := other.(*GenericTypeAlias)
+	if !ok {
+		return false
+	}
+	if t.Name != otherGeneric.Name {
+		return false
+	}
+	if len(t.TypeParams) != len(otherGeneric.TypeParams) {
+		return false
+	}
+	for i, param := range t.TypeParams {
+		if param != otherGeneric.TypeParams[i] {
+			return false
+		}
+	}
+	return true
+}
+func (t *GenericTypeAlias) IsAssignableTo(other Type) bool {
+	// Generic type aliases cannot be assigned directly; they must be instantiated first
+	if t.Equals(other) {
+		return true
+	}
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
 	return false
 }
 

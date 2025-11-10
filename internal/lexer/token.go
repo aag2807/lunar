@@ -64,12 +64,19 @@ const (
 	ELSE        = "else"
 	THEN        = "then"
 	FOR         = "for"
+	WHILE       = "while"
+	DO          = "do"
+	BREAK       = "break"
 	IN          = "in"
 	EXTENDS     = "extends"
 	IMPLEMENTS  = "implements"
 	CONSTRUCTOR = "constructor"
 	SELF        = "self"
 	VOID        = "void"
+	EXPORT      = "export"
+	IMPORT      = "import"
+	FROM        = "from"
+	PROTECTED   = "protected"
 
 	//types
 	ANY         = "any"
@@ -77,6 +84,8 @@ const (
 	NUMBER_TYPE = "number"
 	BOOLEAN     = "boolean"
 	NIL         = "nil"
+	TRUE        = "true"
+	FALSE       = "false"
 
 	ARROW    = "=>"
 	QUESTION = "?"
@@ -101,6 +110,9 @@ var keywords = map[string]TokenType{
 	"else":        ELSE,
 	"then":        THEN,
 	"for":         FOR,
+	"while":       WHILE,
+	"do":          DO,
+	"break":       BREAK,
 	"in":          IN,
 	"extends":     EXTENDS,
 	"implements":  IMPLEMENTS,
@@ -110,12 +122,18 @@ var keywords = map[string]TokenType{
 	"or":          OR,
 	"not":         NOT,
 	"void":        VOID,
+	"export":      EXPORT,
+	"import":      IMPORT,
+	"from":        FROM,
+	"protected":   PROTECTED,
 	"table":       TABLE,
 	"any":         ANY,
 	"string":      STRING_TYPE,
 	"number":      NUMBER_TYPE,
 	"boolean":     BOOLEAN,
 	"nil":         NIL,
+	"true":        TRUE,
+	"false":       FALSE,
 }
 
 type Token struct {

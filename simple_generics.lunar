@@ -1,0 +1,13 @@
+-- Test simple generics parsing
+
+class Stack<T>
+    private x: number
+
+    constructor()
+        self.x = 0
+    end
+end
+
+function identity<T>(value: T): T
+    return value
+end

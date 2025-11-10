@@ -1,0 +1,7 @@
+-- Test simple export
+
+export function greet(name: string): string
+    return "Hello, " .. name
+end
+
+export const MAX_SIZE: number = 100

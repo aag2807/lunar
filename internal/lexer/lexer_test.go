@@ -433,7 +433,7 @@ func TestClassDeclaration(t *testing.T) {
 		{TokenType(DOT), "."},
 		{TokenType(IDENT), "running"},
 		{TokenType(ASSIGN), "="},
-		{TokenType(IDENT), "false"},
+		{TokenType(FALSE), "false"},
 
 		{TokenType(END), "end"},
 
@@ -448,7 +448,7 @@ func TestClassDeclaration(t *testing.T) {
 		{TokenType(DOT), "."},
 		{TokenType(IDENT), "running"},
 		{TokenType(ASSIGN), "="},
-		{TokenType(IDENT), "true"},
+		{TokenType(TRUE), "true"},
 		{TokenType(END), "end"},
 
 		{TokenType(END), "end"},

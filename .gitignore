@@ -7,3 +7,7 @@ lunar
 /simple.lunar
 /debug.lunar
 /func*.lunar
+
+# Analysis and temporary documentation
+/*_analysis.md
+/type_*.lunar

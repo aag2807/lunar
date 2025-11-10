@@ -16,7 +16,12 @@ Type declarations for the LÖVE 2D game framework. This file demonstrates:
 - Nested interfaces for module structure
 
 **Usage:**
-Place `love.d.lunar` in your project directory. The Lunar compiler will use it to provide type checking for LÖVE APIs.
+Simply place `love.d.lunar` in your project directory alongside your `.lunar` files. The Lunar compiler **automatically discovers and loads** all `.d.lunar` files in the same directory - no imports or special configuration needed!
+
+```bash
+# Just compile your game - declarations load automatically!
+lunar my_game.lunar
+```
 
 ### love_game_example.lunar
 
@@ -33,8 +38,8 @@ A simple LÖVE game that uses the type declarations from `love.d.lunar`. Shows h
 -- Declare a constant
 declare const PI: number
 
--- Declare a function
-declare function print(message: string): void
+-- Declare a function (note: needs 'end')
+declare function print(message: string): void end
 
 -- Declare an interface
 declare interface Graphics {
@@ -54,12 +59,27 @@ end
 declare type Optional<T> = T | nil
 ```
 
+## Auto-Loading Declaration Files
+
+The Lunar compiler **automatically discovers and loads** all `.d.lunar` files in the same directory as your source file. This means:
+
+- ✅ **Zero configuration** - just drop declaration files in your project
+- ✅ **No imports needed** - types are available immediately
+- ✅ **Multiple libraries** - all `.d.lunar` files are loaded
+- ✅ **Type safety** - declarations are checked before your code
+
+**How it works:**
+1. When compiling `my_game.lunar`, the compiler scans the same directory
+2. Finds all `*.d.lunar` files (e.g., `love.d.lunar`, `mylib.d.lunar`)
+3. Parses and registers all declarations
+4. Type-checks your code with those declarations available
+
 ## Creating Your Own Declaration Files
 
 1. Create a `.d.lunar` file named after your library (e.g., `mylibrary.d.lunar`)
 2. Use `declare` statements to define the library's API
 3. Place the file in your project directory
-4. The Lunar compiler will automatically recognize and use it
+4. **That's it!** The compiler will automatically find and use it
 
 Declaration files are perfect for:
 - External Lua libraries

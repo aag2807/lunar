@@ -94,10 +94,10 @@ end
 declare const love: Love
 
 -- LÖVE Callbacks (optional to implement)
-declare function load(): void
-declare function update(dt: number): void
-declare function draw(): void
-declare function keypressed(key: string): void
-declare function keyreleased(key: string): void
-declare function mousepressed(x: number, y: number, button: number): void
-declare function mousereleased(x: number, y: number, button: number): void
+declare function load(): void end
+declare function update(dt: number): void end
+declare function draw(): void end
+declare function keypressed(key: string): void end
+declare function keyreleased(key: string): void end
+declare function mousepressed(x: number, y: number, button: number): void end
+declare function mousereleased(x: number, y: number, button: number): void end

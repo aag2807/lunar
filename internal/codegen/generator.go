@@ -461,7 +461,11 @@ func (g *Generator) generatePrefixExpression(node *ast.PrefixExpression) string 
 		operator = "not"
 	}
 
-	return fmt.Sprintf("(%s %s)", operator, right)
+	// Only add parentheses if the right side is a complex expression
+	if needsParentheses(node.Right) {
+		return fmt.Sprintf("%s (%s)", operator, right)
+	}
+	return fmt.Sprintf("%s %s", operator, right)
 }
 
 // generateInfixExpression generates code for an infix expression
@@ -480,7 +484,18 @@ func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
 		operator = "or"
 	}
 
-	return fmt.Sprintf("(%s %s %s)", left, operator, right)
+	// Smart parenthesization based on operator precedence
+	leftNeedsParens := needsParensInInfix(node.Left, operator, true)
+	rightNeedsParens := needsParensInInfix(node.Right, operator, false)
+
+	if leftNeedsParens {
+		left = "(" + left + ")"
+	}
+	if rightNeedsParens {
+		right = "(" + right + ")"
+	}
+
+	return fmt.Sprintf("%s %s %s", left, operator, right)
 }
 
 // generateCallExpression generates code for a function call
@@ -557,7 +572,81 @@ func (g *Generator) generateImportStatement(node *ast.ImportStatement) string {
 }
 
 // Generate is the main entry point for code generation
+// Note: Optimizations disabled by default in v1.0 (enabled in future versions)
 func Generate(statements []ast.Statement) string {
+	return GenerateWithOptions(statements, false)
+}
+
+// GenerateWithOptions generates Lua code with configurable optimization
+func GenerateWithOptions(statements []ast.Statement, optimize bool) string {
+	// Run optimizer if enabled
+	if optimize {
+		optimizer := NewOptimizer(true)
+		statements = optimizer.OptimizeStatements(statements)
+	}
+
 	generator := New()
 	return generator.Generate(statements)
+}
+
+// needsParentheses determines if an expression needs parentheses
+func needsParentheses(expr ast.Expression) bool {
+	switch expr.(type) {
+	case *ast.InfixExpression, *ast.PrefixExpression:
+		return true
+	default:
+		return false
+	}
+}
+
+// needsParensInInfix determines if parentheses are needed for an operand in an infix expression
+func needsParensInInfix(expr ast.Expression, parentOp string, isLeft bool) bool {
+	infixExpr, ok := expr.(*ast.InfixExpression)
+	if !ok {
+		return false
+	}
+
+	childOp := infixExpr.Operator
+	parentPrec := getOperatorPrecedence(parentOp)
+	childPrec := getOperatorPrecedence(childOp)
+
+	// Need parentheses if child has lower precedence
+	if childPrec < parentPrec {
+		return true
+	}
+
+	// For same precedence, need parentheses on right for non-associative/right-associative operators
+	if childPrec == parentPrec && !isLeft {
+		// Most operators in Lua are left-associative, so right operand needs parentheses
+		// Exception: power operator ^ is right-associative
+		if parentOp != "^" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// getOperatorPrecedence returns the precedence level of an operator (higher = tighter binding)
+func getOperatorPrecedence(op string) int {
+	switch op {
+	case "or", "||":
+		return 1
+	case "and", "&&":
+		return 2
+	case "<", ">", "<=", ">=", "~=", "!=", "==":
+		return 3
+	case "..":
+		return 4
+	case "+", "-":
+		return 5
+	case "*", "/", "%":
+		return 6
+	case "not", "!", "unary-":
+		return 7
+	case "^":
+		return 8
+	default:
+		return 0
+	}
 }

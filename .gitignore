@@ -1,9 +1,12 @@
-# Compiled binaries
-lunar
-lunar2decl
+# Compiled binaries (in root only)
+/lunar
+/lunar2decl
+
+# Generated Lua files (keep source .lunar files only)
+*.lua
+!examples/*.lua.example
 
 # Test files (root directory only)
-/*.lua
 /*test*.lunar
 /simple.lunar
 /debug.lunar

@@ -1,95 +1,98 @@
 # Lunar Examples
 
-This directory contains example code demonstrating Lunar language features.
+This directory contains example code demonstrating various Lunar language features.
 
-## Declaration Files (`.d.lunar`)
+## Examples
 
-Declaration files provide type information for external libraries written in Lua. They use the `declare` keyword to define ambient declarations without implementations.
+### class.lunar
+**Basic OOP demonstration**
 
-### love.d.lunar
+Shows how to create classes with:
+- Private properties
+- Constructors
+- Public methods
 
-Type declarations for the LÖVE 2D game framework. This file demonstrates:
-
-- `declare interface` for module types
-- `declare const` for global objects
-- `declare function` for global callbacks
-- Nested interfaces for module structure
-
-**Usage:**
-Simply place `love.d.lunar` in your project directory alongside your `.lunar` files. The Lunar compiler **automatically discovers and loads** all `.d.lunar` files in the same directory - no imports or special configuration needed!
+A simple `Point` class with x/y coordinates.
 
 ```bash
-# Just compile your game - declarations load automatically!
-lunar my_game.lunar
+lunar class.lunar
+lua class.lua
 ```
 
 ### love_game_example.lunar
+**LÖVE 2D Game Framework Integration**
 
-A simple LÖVE game that uses the type declarations from `love.d.lunar`. Shows how typed external APIs enable:
+Demonstrates using Lunar with the LÖVE game framework:
+- Player movement with keyboard input
+- Game state management
+- Drawing graphics
+- Type-safe game development
 
-- IntelliSense-like completion
-- Type-safe API usage
-- Compile-time error detection
-- Better code documentation
+Requires the `love.d.lunar` declaration file for type checking.
 
-## Declaration File Syntax
-
-```lunar
--- Declare a constant
-declare const PI: number
-
--- Declare a function (note: needs 'end')
-declare function print(message: string): void end
-
--- Declare an interface
-declare interface Graphics {
-    clear: function(): void
-    setColor: function(r: number, g: number, b: number): void
-}
-end
-
--- Declare a type alias
-declare type Vector2 {
-    x: number
-    y: number
-}
-end
-
--- Declare with generics
-declare type Optional<T> = T | nil
+```bash
+lunar love_game_example.lunar
+love love_game_example.lua  # Requires LÖVE 2D installed
 ```
 
-## Auto-Loading Declaration Files
+### love.d.lunar
+**Declaration file for LÖVE 2D Framework**
 
-The Lunar compiler **automatically discovers and loads** all `.d.lunar` files in the same directory as your source file. This means:
+Type declarations for the LÖVE game framework including:
+- Graphics API (`love.graphics.*`)
+- Keyboard input (`love.keyboard.*`)
+- Game callbacks (`load`, `update`, `draw`, etc.)
 
-- ✅ **Zero configuration** - just drop declaration files in your project
-- ✅ **No imports needed** - types are available immediately
-- ✅ **Multiple libraries** - all `.d.lunar` files are loaded
-- ✅ **Type safety** - declarations are checked before your code
+This is an example of how to create declaration files for external Lua libraries.
 
-**How it works:**
-1. When compiling `my_game.lunar`, the compiler scans the same directory
-2. Finds all `*.d.lunar` files (e.g., `love.d.lunar`, `mylib.d.lunar`)
-3. Parses and registers all declarations
-4. Type-checks your code with those declarations available
+## Declaration Files
 
-## Creating Your Own Declaration Files
+Declaration files (`.d.lunar`) provide type information for existing Lua libraries:
 
-1. Create a `.d.lunar` file named after your library (e.g., `mylibrary.d.lunar`)
-2. Use `declare` statements to define the library's API
-3. Place the file in your project directory
-4. **That's it!** The compiler will automatically find and use it
+### lua.d.lunar
+Copy of the standard library core globals declarations. Provides types for:
+- `print()`, `tostring()`, `tonumber()`
+- `assert()`, `error()`
+- `pairs()`, `ipairs()`
+- And more...
 
-Declaration files are perfect for:
-- External Lua libraries
-- C libraries with Lua bindings
-- Game engine APIs (LÖVE, Corona, etc.)
-- Any runtime-provided APIs
+Place this in your project directory for automatic stdlib type checking.
 
-## Benefits
+## Running Examples
 
-- **Type Safety**: Catch errors at compile time instead of runtime
-- **Documentation**: Self-documenting API types
-- **IDE Support**: Enable better code completion and navigation
-- **Gradual Typing**: Add types to existing Lua projects incrementally
+1. **Build Lunar compiler** (if not already built):
+   ```bash
+   cd .. && make build
+   ```
+
+2. **Compile an example**:
+   ```bash
+   ../lunar class.lunar
+   ```
+
+3. **Run the generated Lua**:
+   ```bash
+   lua class.lua
+   ```
+
+## Creating Your Own Examples
+
+Use these examples as templates for your own Lunar projects. Key patterns demonstrated:
+
+- **Type Safety**: All variables and function parameters are typed
+- **OOP**: Classes with encapsulation and methods
+- **External Libraries**: Using declaration files for Lua libraries
+- **Clean Output**: Generated Lua code is readable and efficient
+
+## Tips
+
+- Start with `class.lunar` to understand basic syntax
+- Copy `lua.d.lunar` to your project for stdlib support
+- Use `love.d.lunar` as a template for creating your own declaration files
+- Run `lunar --help` to see all compiler options
+
+## Need Help?
+
+- Read the [Language Specification](../LANGUAGE_SPEC.md)
+- Check the [Main README](../README.md) for installation and usage
+- See [Standard Library Declarations](../stdlib/README.md) for stdlib types

@@ -56,6 +56,10 @@ const (
 	END         = "end"
 	PUBLIC      = "public"
 	PRIVATE     = "private"
+	PROTECTED   = "protected"
+	STATIC      = "static"
+	ABSTRACT    = "abstract"
+	READONLY    = "readonly"
 	FUNCTION    = "function"
 	LOCAL       = "local"
 	CONST       = "const"
@@ -76,7 +80,6 @@ const (
 	EXPORT      = "export"
 	IMPORT      = "import"
 	FROM        = "from"
-	PROTECTED   = "protected"
 	DECLARE     = "declare"
 
 	//types
@@ -103,6 +106,10 @@ var keywords = map[string]TokenType{
 	"end":         END,
 	"public":      PUBLIC,
 	"private":     PRIVATE,
+	"protected":   PROTECTED,
+	"static":      STATIC,
+	"abstract":    ABSTRACT,
+	"readonly":    READONLY,
 	"function":    FUNCTION,
 	"local":       LOCAL,
 	"const":       CONST,
@@ -126,7 +133,6 @@ var keywords = map[string]TokenType{
 	"export":      EXPORT,
 	"import":      IMPORT,
 	"from":        FROM,
-	"protected":   PROTECTED,
 	"declare":     DECLARE,
 	"table":       TABLE,
 	"any":         ANY,

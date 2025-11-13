@@ -860,6 +860,9 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseDoStatement()
 	case lexer.BREAK:
 		return p.parseBreakStatement()
+	case lexer.ABSTRACT:
+		// abstract class declaration
+		return p.parseAbstractClassDeclaration()
 	case lexer.CLASS:
 		return p.parseClassDeclaration()
 	case lexer.INTERFACE:
@@ -1071,6 +1074,24 @@ func (p *Parser) parseTableLiteral() ast.Expression {
 	return table
 }
 
+func (p *Parser) parseAbstractClassDeclaration() *ast.ClassDeclaration {
+	// Consume 'abstract' keyword
+	p.nextToken()
+
+	// Expect 'class' keyword
+	if !p.curTokenIs(lexer.CLASS) {
+		p.errors = append(p.errors, fmt.Sprintf("expected 'class' after 'abstract', got %s", p.curToken.Type))
+		return nil
+	}
+
+	// Parse class declaration normally
+	class := p.parseClassDeclaration()
+	if class != nil {
+		class.IsAbstract = true
+	}
+	return class
+}
+
 func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 	class := &ast.ClassDeclaration{
 		Token:      p.curToken,
@@ -1115,34 +1136,50 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 
 	// Parse class body
 	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
-		switch p.curToken.Type {
-		case lexer.PUBLIC, lexer.PRIVATE:
-			// Property or method with visibility
-			visibility := p.curToken.Literal
-			p.nextToken()
+		// Track modifiers for current member
+		isStatic := false
+		isAbstract := false
+		isReadonly := false
+		visibility := "public" // default visibility
 
-			if p.curTokenIsIdentOrContextual() && p.peekTokenIs(lexer.COLON) {
-				// It's a property - allows context-aware keywords
-				prop := p.parsePropertyDeclaration()
-				prop.Visibility = visibility
-				class.Properties = append(class.Properties, prop)
-			} else if p.curTokenIsIdentOrContextual() && p.peekTokenIs(lexer.LPAREN) {
-				// It's a method - allows context-aware keywords
-				method := p.parseMethodDeclaration()
-				class.Methods = append(class.Methods, method)
-			} else {
-				p.nextToken()
+		// Parse modifiers
+		for p.curToken.Type == lexer.PUBLIC || p.curToken.Type == lexer.PRIVATE || p.curToken.Type == lexer.PROTECTED ||
+			p.curToken.Type == lexer.STATIC || p.curToken.Type == lexer.ABSTRACT || p.curToken.Type == lexer.READONLY {
+			switch p.curToken.Type {
+			case lexer.PUBLIC, lexer.PRIVATE, lexer.PROTECTED:
+				visibility = p.curToken.Literal
+			case lexer.STATIC:
+				isStatic = true
+			case lexer.ABSTRACT:
+				isAbstract = true
+			case lexer.READONLY:
+				isReadonly = true
 			}
+			p.nextToken()
+		}
 
+		// Now parse the actual member
+		switch p.curToken.Type {
 		case lexer.CONSTRUCTOR:
 			class.Constructor = p.parseConstructorDeclaration()
 			p.nextToken()
 
-		case lexer.IDENT:
-			// Property without visibility modifier
+		case lexer.IDENT, lexer.STRING_TYPE, lexer.TABLE, lexer.TYPE:
+			// Could be property or method
 			if p.peekTokenIs(lexer.COLON) {
+				// It's a property
 				prop := p.parsePropertyDeclaration()
+				prop.Visibility = visibility
+				prop.IsStatic = isStatic
+				prop.IsReadonly = isReadonly
 				class.Properties = append(class.Properties, prop)
+			} else if p.peekTokenIs(lexer.LPAREN) {
+				// It's a method
+				method := p.parseMethodDeclaration()
+				method.IsStatic = isStatic
+				method.IsAbstract = isAbstract
+				class.Methods = append(class.Methods, method)
+				p.nextToken() // Advance past method's end
 			} else {
 				p.nextToken()
 			}

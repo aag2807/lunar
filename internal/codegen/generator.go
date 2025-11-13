@@ -468,10 +468,44 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 		output.WriteString("\n")
 	}
 
-	// Generate methods
+	// Generate static properties
+	for _, prop := range node.Properties {
+		if prop.IsStatic {
+			// Static properties go directly on the class table
+			// They would need initialization in constructor or elsewhere
+			// For now, we'll just declare them as nil (can be set later)
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("%s.%s = nil\n", className, prop.Name.Value))
+		}
+	}
+	if len(node.Properties) > 0 {
+		hasStatic := false
+		for _, prop := range node.Properties {
+			if prop.IsStatic {
+				hasStatic = true
+				break
+			}
+		}
+		if hasStatic {
+			output.WriteString("\n")
+		}
+	}
+
+	// Generate methods (both static and instance)
 	for _, method := range node.Methods {
+		// Skip abstract methods (no implementation)
+		if method.IsAbstract {
+			continue
+		}
+
 		output.WriteString(g.generateIndent())
-		output.WriteString(fmt.Sprintf("function %s:%s(", className, method.Name.Value))
+		if method.IsStatic {
+			// Static methods use dot notation (no self parameter)
+			output.WriteString(fmt.Sprintf("function %s.%s(", className, method.Name.Value))
+		} else {
+			// Instance methods use colon notation (implicit self parameter)
+			output.WriteString(fmt.Sprintf("function %s:%s(", className, method.Name.Value))
+		}
 
 		params := make([]string, len(method.Parameters))
 		for i, param := range method.Parameters {
@@ -481,8 +515,10 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 		output.WriteString(")\n")
 
 		g.indent++
-		for _, stmt := range method.Body.Statements {
-			output.WriteString(g.generateStatement(stmt))
+		if method.Body != nil {
+			for _, stmt := range method.Body.Statements {
+				output.WriteString(g.generateStatement(stmt))
+			}
 		}
 		g.indent--
 

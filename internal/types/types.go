@@ -514,11 +514,16 @@ func (t *TupleType) IsAssignableTo(other Type) bool {
 
 // ClassType represents a class type
 type ClassType struct {
-	Name        string
-	Properties  map[string]Type
-	Methods     map[string]*FunctionType
-	Constructor *FunctionType // Constructor signature
-	Implements  []*InterfaceType
+	Name             string
+	Properties       map[string]Type           // Instance properties
+	Methods          map[string]*FunctionType  // Instance methods
+	StaticProperties map[string]Type           // Static properties
+	StaticMethods    map[string]*FunctionType  // Static methods
+	ReadonlyProps    map[string]bool           // Readonly property names
+	AbstractMethods  map[string]bool           // Abstract method names
+	Constructor      *FunctionType             // Constructor signature
+	Implements       []*InterfaceType
+	IsAbstract       bool                      // Whether class is abstract
 }
 
 func (t *ClassType) String() string {
@@ -559,6 +564,28 @@ func (t *ClassType) GetProperty(name string) (Type, bool) {
 func (t *ClassType) GetMethod(name string) (*FunctionType, bool) {
 	typ, ok := t.Methods[name]
 	return typ, ok
+}
+
+// GetStaticProperty returns the type of a static property
+func (t *ClassType) GetStaticProperty(name string) (Type, bool) {
+	typ, ok := t.StaticProperties[name]
+	return typ, ok
+}
+
+// GetStaticMethod returns the type of a static method
+func (t *ClassType) GetStaticMethod(name string) (*FunctionType, bool) {
+	typ, ok := t.StaticMethods[name]
+	return typ, ok
+}
+
+// IsReadonly checks if a property is readonly
+func (t *ClassType) IsReadonly(name string) bool {
+	return t.ReadonlyProps[name]
+}
+
+// IsAbstractMethod checks if a method is abstract
+func (t *ClassType) IsAbstractMethod(name string) bool {
+	return t.AbstractMethods[name]
 }
 
 // InterfaceType represents an interface type

@@ -265,10 +265,15 @@ func (c *Checker) registerTypeDefinition(stmt ast.Statement) {
 // registerClass registers a class type
 func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 	classType := &ClassType{
-		Name:       node.Name.Value,
-		Properties: make(map[string]Type),
-		Methods:    make(map[string]*FunctionType),
-		Implements: []*InterfaceType{},
+		Name:             node.Name.Value,
+		Properties:       make(map[string]Type),
+		Methods:          make(map[string]*FunctionType),
+		StaticProperties: make(map[string]Type),
+		StaticMethods:    make(map[string]*FunctionType),
+		ReadonlyProps:    make(map[string]bool),
+		AbstractMethods:  make(map[string]bool),
+		Implements:       []*InterfaceType{},
+		IsAbstract:       node.IsAbstract,
 	}
 
 	// Add generic type parameters to scope temporarily
@@ -283,7 +288,19 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 	// Register properties
 	for _, prop := range node.Properties {
 		propType := c.resolveTypeExpression(prop.Type)
-		classType.Properties[prop.Name.Value] = propType
+		propName := prop.Name.Value
+
+		// Track static vs instance properties
+		if prop.IsStatic {
+			classType.StaticProperties[propName] = propType
+		} else {
+			classType.Properties[propName] = propType
+		}
+
+		// Track readonly properties
+		if prop.IsReadonly {
+			classType.ReadonlyProps[propName] = true
+		}
 	}
 
 	// Register constructor
@@ -312,9 +329,22 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		if method.ReturnType != nil {
 			returnType = c.resolveTypeExpression(method.ReturnType)
 		}
-		classType.Methods[method.Name.Value] = &FunctionType{
+		funcType := &FunctionType{
 			Parameters: params,
 			ReturnType: returnType,
+		}
+		methodName := method.Name.Value
+
+		// Track static vs instance methods
+		if method.IsStatic {
+			classType.StaticMethods[methodName] = funcType
+		} else {
+			classType.Methods[methodName] = funcType
+		}
+
+		// Track abstract methods
+		if method.IsAbstract {
+			classType.AbstractMethods[methodName] = true
 		}
 	}
 
@@ -907,6 +937,23 @@ func (c *Checker) checkAssignmentStatement(node *ast.AssignmentStatement) {
 		}
 	}
 
+	// Check if trying to assign to a readonly property
+	if dotExpr, ok := node.Name.(*ast.DotExpression); ok {
+		leftType := c.checkExpression(dotExpr.Left)
+		if classType, ok := leftType.(*ClassType); ok {
+			if rightIdent, ok := dotExpr.Right.(*ast.Identifier); ok {
+				propName := rightIdent.Value
+				if classType.IsReadonly(propName) {
+					c.addError(
+						fmt.Sprintf("Cannot assign to readonly property '%s'", propName),
+						node.Token,
+					)
+					return
+				}
+			}
+		}
+	}
+
 	targetType := c.checkExpression(node.Name)
 	valueType := c.checkExpression(node.Value)
 
@@ -924,6 +971,27 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 	classType, ok := c.classes[node.Name.Value]
 	if !ok {
 		return
+	}
+
+	// Check abstract methods: they should not have a body in abstract classes
+	// For now, we'll allow abstract methods to have no body
+	for _, method := range node.Methods {
+		if method.IsAbstract {
+			// Abstract methods shouldn't have implementation
+			if method.Body != nil && len(method.Body.Statements) > 0 {
+				c.addError(
+					fmt.Sprintf("Abstract method '%s' should not have an implementation", method.Name.Value),
+					method.Token,
+				)
+			}
+			// Abstract methods can only exist in abstract classes
+			if !node.IsAbstract {
+				c.addError(
+					fmt.Sprintf("Abstract method '%s' can only be declared in an abstract class", method.Name.Value),
+					method.Token,
+				)
+			}
+		}
 	}
 
 	// Check constructor if present
@@ -1243,6 +1311,15 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 
 	// Check if it's a class type (constructor call)
 	if classType, ok := funcType.(*ClassType); ok {
+		// Check if trying to instantiate an abstract class
+		if classType.IsAbstract {
+			c.addError(
+				fmt.Sprintf("Cannot instantiate abstract class '%s'", classType.Name),
+				node.Token,
+			)
+			return classType
+		}
+
 		if classType.Constructor == nil {
 			c.addError(
 				fmt.Sprintf("Class '%s' has no constructor", classType.Name),
@@ -1331,11 +1408,19 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 	// Check if left type has the property
 	switch typ := leftType.(type) {
 	case *ClassType:
-		// Check properties
+		// Check static properties first (when accessing class directly like Math.PI)
+		if propType, ok := typ.GetStaticProperty(propertyName); ok {
+			return propType
+		}
+		// Check static methods
+		if methodType, ok := typ.GetStaticMethod(propertyName); ok {
+			return methodType
+		}
+		// Check instance properties
 		if propType, ok := typ.GetProperty(propertyName); ok {
 			return propType
 		}
-		// Check methods
+		// Check instance methods
 		if methodType, ok := typ.GetMethod(propertyName); ok {
 			return methodType
 		}

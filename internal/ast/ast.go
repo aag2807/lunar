@@ -356,6 +356,8 @@ type FunctionDeclaration struct {
 	Parameters    []*Parameter
 	ReturnType    Expression
 	Body          *BlockStatement
+	IsStatic      bool // static method (when used in class)
+	IsAbstract    bool // abstract method (when used in class)
 }
 
 func (fd *FunctionDeclaration) statementNode()       {}
@@ -551,6 +553,7 @@ type ClassDeclaration struct {
 	Methods       []*FunctionDeclaration
 	Constructor   *ConstructorDeclaration
 	Implements    []Expression // interface names
+	IsAbstract    bool         // abstract class
 }
 
 func (cd *ClassDeclaration) statementNode()       {}
@@ -607,6 +610,8 @@ func (cd *ClassDeclaration) String() string {
 type PropertyDeclaration struct {
 	Token      lexer.Token // property name token
 	Visibility string      // "public", "private", "protected"
+	IsStatic   bool        // static property
+	IsReadonly bool        // readonly property
 	Name       *Identifier
 	Type       Expression
 }

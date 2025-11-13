@@ -286,6 +286,22 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		classType.Properties[prop.Name.Value] = propType
 	}
 
+	// Register constructor
+	if node.Constructor != nil {
+		params := make([]Type, len(node.Constructor.Parameters))
+		for i, param := range node.Constructor.Parameters {
+			if param.Type != nil {
+				params[i] = c.resolveTypeExpression(param.Type)
+			} else {
+				params[i] = Any
+			}
+		}
+		classType.Constructor = &FunctionType{
+			Parameters: params,
+			ReturnType: classType, // Constructor returns an instance of the class
+		}
+	}
+
 	// Register methods
 	for _, method := range node.Methods {
 		params := make([]Type, len(method.Parameters))
@@ -1224,6 +1240,43 @@ func (c *Checker) checkInfixExpression(node *ast.InfixExpression) Type {
 // checkCallExpression checks a function call
 func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 	funcType := c.checkExpression(node.Function)
+
+	// Check if it's a class type (constructor call)
+	if classType, ok := funcType.(*ClassType); ok {
+		if classType.Constructor == nil {
+			c.addError(
+				fmt.Sprintf("Class '%s' has no constructor", classType.Name),
+				node.Token,
+			)
+			return classType // Still return the class type
+		}
+
+		fnType := classType.Constructor
+
+		// Check argument count
+		if len(node.Arguments) != len(fnType.Parameters) {
+			c.addError(
+				fmt.Sprintf("Constructor expects %d arguments, got %d",
+					len(fnType.Parameters), len(node.Arguments)),
+				node.Token,
+			)
+			return fnType.ReturnType
+		}
+
+		// Check argument types
+		for i, arg := range node.Arguments {
+			argType := c.checkExpression(arg)
+			if !argType.IsAssignableTo(fnType.Parameters[i]) {
+				c.addError(
+					fmt.Sprintf("Argument %d: cannot pass type '%s' to parameter of type '%s'",
+						i+1, argType.String(), fnType.Parameters[i].String()),
+					node.Token,
+				)
+			}
+		}
+
+		return fnType.ReturnType
+	}
 
 	// Check if it's a function type
 	fnType, ok := funcType.(*FunctionType)

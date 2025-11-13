@@ -10,17 +10,19 @@ import (
 
 // Generator generates Lua code from an AST
 type Generator struct {
-	indent         int
+	indent           int
 	sourceMapBuilder *sourcemap.Builder
-	currentLine    int
-	currentColumn  int
-	sourceFile     string
+	currentLine      int
+	currentColumn    int
+	sourceFile       string
+	classes          map[string]bool // Track defined classes for constructor calls
 }
 
 // New creates a new code generator
 func New() *Generator {
 	return &Generator{
-		indent: 0,
+		indent:  0,
+		classes: make(map[string]bool),
 	}
 }
 
@@ -32,6 +34,7 @@ func NewWithSourceMap(sourceFile, generatedFile string) *Generator {
 		currentLine:      1,
 		currentColumn:    0,
 		sourceFile:       sourceFile,
+		classes:          make(map[string]bool),
 	}
 }
 
@@ -425,6 +428,9 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 	var output strings.Builder
 	className := node.Name.Value
 
+	// Track this class for constructor calls
+	g.classes[className] = true
+
 	// Create class table
 	output.WriteString(g.generateIndent())
 	output.WriteString(fmt.Sprintf("local %s = {}\n", className))
@@ -639,6 +645,13 @@ func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
 // generateCallExpression generates code for a function call
 func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 	function := g.generateExpression(node.Function)
+
+	// Check if calling a class constructor (simple identifier that's a known class)
+	if ident, ok := node.Function.(*ast.Identifier); ok {
+		if g.classes[ident.Value] {
+			function = function + ".new"
+		}
+	}
 
 	args := make([]string, len(node.Arguments))
 	for i, arg := range node.Arguments {

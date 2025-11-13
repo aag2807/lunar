@@ -514,10 +514,11 @@ func (t *TupleType) IsAssignableTo(other Type) bool {
 
 // ClassType represents a class type
 type ClassType struct {
-	Name       string
-	Properties map[string]Type
-	Methods    map[string]*FunctionType
-	Implements []*InterfaceType
+	Name        string
+	Properties  map[string]Type
+	Methods     map[string]*FunctionType
+	Constructor *FunctionType // Constructor signature
+	Implements  []*InterfaceType
 }
 
 func (t *ClassType) String() string {

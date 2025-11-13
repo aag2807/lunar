@@ -120,9 +120,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Type resolver prioritizes primitive types over environment variables
 - Updated all declaration parsing to support contextual keywords
 
+### Added - Source Maps
+
+- **Source map generation** with `--source-map` flag
+  - Generates `.lua.map` files following Source Map v3 specification
+  - Proper VLQ (Variable Length Quantity) base64 encoding
+  - Maps generated Lua code back to original Lunar source
+  - Automatic source map comment insertion in generated Lua files
+  - Enables debugging with original source line numbers
+
+- **Source Map Infrastructure**
+  - `internal/sourcemap` package with full source map support
+  - Statement-level position tracking during code generation
+  - JSON and base64 encoding support for source maps
+  - Comprehensive test suite for VLQ encoding and source map generation
+
 ### Fixed
 - Resolved conflict between primitive type names and stdlib module names
 - `string`, `table`, and `type` can now be used as variable/function names
+- Fixed codegen test expectations to match optimizer behavior
 
 ## [Unreleased] - Planned for v1.2
 
@@ -135,7 +151,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 - Language Server Protocol (LSP) implementation for IDE support
-- Source maps for debugging compiled code
 - Package manager integration
 - Code formatter tool
 - Watch mode for continuous compilation
@@ -145,4 +160,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History
 
+- **1.1.0** (2025-11-13) - Context-aware keywords, source maps, complete stdlib support
 - **1.0.0** (2024-11-10) - Initial release with complete type system, OOP, generics, stdlib declarations, and tooling

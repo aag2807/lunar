@@ -42,6 +42,7 @@ end
 ✅ **Context-Aware Keywords** - `string`, `table`, `type` work as both types and identifiers
 ✅ **Declaration Files** - Type definitions for existing Lua libraries (`.d.lunar`)
 ✅ **Complete Standard Library Types** - Full type coverage including `string.*` and `table.*`
+✅ **Source Maps** - Debug with original Lunar source line numbers (Source Map v3)
 ✅ **Excellent Error Messages** - Clear, helpful errors with source context
 ✅ **Clean Lua Output** - Generates readable, efficient Lua code
 ✅ **100% Lua Compatible** - Use any Lua library seamlessly
@@ -129,16 +130,22 @@ lua hello.lua
 lunar input.lunar
 
 # Compile without type checking
-lunar input.lunar --no-type-check
+lunar -no-typecheck input.lunar
+
+# Generate source map for debugging
+lunar -source-map input.lunar
 
 # Specify output file
-lunar input.lunar -o output.lua
+lunar -o output.lua input.lunar
+
+# Combine options (note: flags must come before filename)
+lunar -source-map -o output.lua input.lunar
 
 # Show version
-lunar --version
+lunar -version
 
 # Show help
-lunar --help
+lunar -help
 ```
 
 ## Documentation

@@ -79,46 +79,61 @@ func (b *Builder) Build() *SourceMap {
 }
 
 // encodeMappings encodes mappings into VLQ (Variable Length Quantity) format
-// For simplicity in v1, we'll use a simplified encoding
-// Full VLQ encoding can be added later for production use
+// Following the Source Map v3 specification
 func (b *Builder) encodeMappings() string {
 	if len(b.mappings) == 0 {
 		return ""
 	}
 
-	var segments []string
-	currentLine := 0
+	var result strings.Builder
 
-	var lineSegments []string
-	for _, m := range b.mappings {
-		// Start new line if needed
-		for currentLine < m.GeneratedLine {
-			if len(lineSegments) > 0 {
-				segments = append(segments, strings.Join(lineSegments, ","))
-				lineSegments = []string{}
+	// Track previous values for delta encoding
+	prevGenLine := 0
+	prevGenCol := 0
+	prevSrcLine := 0
+	prevSrcCol := 0
+	prevNameIndex := 0
+
+	for i, m := range b.mappings {
+		// Add semicolons for each line
+		for prevGenLine < m.GeneratedLine {
+			if prevGenLine > 0 || i > 0 {
+				result.WriteString(";")
 			}
-			currentLine++
-			if currentLine < m.GeneratedLine {
-				segments = append(segments, "")
-			}
+			prevGenLine++
+			prevGenCol = 0 // Reset column for new line
 		}
 
-		// For simplicity, encode as JSON for now
-		// Production version should use VLQ base64 encoding
-		segment := fmt.Sprintf("%d:%d:%d:%d",
-			m.GeneratedColumn,
-			0, // Source file index (always 0 for single source)
-			m.SourceLine-1,
-			m.SourceColumn,
-		)
-		lineSegments = append(lineSegments, segment)
+		// Add comma between segments on the same line
+		if i > 0 && m.GeneratedLine == prevGenLine {
+			result.WriteString(",")
+		}
+
+		// Encode the segment:
+		// 1. Generated column (delta from previous)
+		result.WriteString(EncodeVLQ(m.GeneratedColumn - prevGenCol))
+		prevGenCol = m.GeneratedColumn
+
+		// 2. Source file index (always 0 for single source)
+		result.WriteString(EncodeVLQ(0))
+
+		// 3. Source line (delta from previous)
+		result.WriteString(EncodeVLQ(m.SourceLine - 1 - prevSrcLine))
+		prevSrcLine = m.SourceLine - 1
+
+		// 4. Source column (delta from previous)
+		result.WriteString(EncodeVLQ(m.SourceColumn - prevSrcCol))
+		prevSrcCol = m.SourceColumn
+
+		// 5. Name index (optional, if name is provided)
+		if m.Name != "" {
+			nameIndex := b.names[m.Name]
+			result.WriteString(EncodeVLQ(nameIndex - prevNameIndex))
+			prevNameIndex = nameIndex
+		}
 	}
 
-	if len(lineSegments) > 0 {
-		segments = append(segments, strings.Join(lineSegments, ","))
-	}
-
-	return strings.Join(segments, ";")
+	return result.String()
 }
 
 // ToJSON converts the source map to JSON string

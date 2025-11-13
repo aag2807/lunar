@@ -20,6 +20,7 @@ func main() {
 	// Define command-line flags
 	outputFile := flag.String("o", "", "Output file (default: replaces .lunar with .lua)")
 	noTypeCheck := flag.Bool("no-typecheck", false, "Skip type checking")
+	sourceMap := flag.Bool("source-map", false, "Generate source map (.lua.map file)")
 	showVersion := flag.Bool("version", false, "Show version information")
 	showHelp := flag.Bool("help", false, "Show help message")
 
@@ -66,16 +67,19 @@ func main() {
 	}
 
 	// Compile the file
-	if err := compile(inputFile, output, !*noTypeCheck); err != nil {
+	if err := compile(inputFile, output, !*noTypeCheck, *sourceMap); err != nil {
 		fmt.Fprintf(os.Stderr, "Compilation failed:\n%v\n", err)
 		os.Exit(1)
 	}
 
 	fmt.Printf("Successfully compiled %s -> %s\n", inputFile, output)
+	if *sourceMap {
+		fmt.Printf("Source map: %s.map\n", output)
+	}
 }
 
 // compile compiles a Lunar source file to Lua
-func compile(inputFile, outputFile string, typeCheck bool) error {
+func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool) error {
 	// Auto-load declaration files from the same directory
 	declarationStatements := []ast.Statement{}
 	if typeCheck {
@@ -123,7 +127,29 @@ func compile(inputFile, outputFile string, typeCheck bool) error {
 	}
 
 	// Code Generator: Transpile to Lua (only main file, not declarations)
-	luaCode := codegen.Generate(statements)
+	var luaCode string
+	if generateSourceMap {
+		// Generate with source map
+		sourceMapData, sourceMapObj := codegen.GenerateWithSourceMap(statements, inputFile, outputFile, false)
+		luaCode = sourceMapData
+
+		// Add source map comment to Lua file
+		mapFilename := outputFile + ".map"
+		sourceMapComment := sourceMapObj.GenerateComment(filepath.Base(mapFilename))
+		luaCode += "\n" + sourceMapComment + "\n"
+
+		// Write source map file
+		sourceMapJSON, err := sourceMapObj.ToJSON()
+		if err != nil {
+			return fmt.Errorf("failed to generate source map JSON: %w", err)
+		}
+		if err := ioutil.WriteFile(mapFilename, []byte(sourceMapJSON), 0644); err != nil {
+			return fmt.Errorf("failed to write source map file: %w", err)
+		}
+	} else {
+		// Generate without source map
+		luaCode = codegen.Generate(statements)
+	}
 
 	// Write output file
 	if err := ioutil.WriteFile(outputFile, []byte(luaCode), 0644); err != nil {
@@ -232,6 +258,7 @@ func printHelp() {
 	fmt.Println("Options:")
 	fmt.Println("  -o <file>        Output file (default: replaces .lunar with .lua)")
 	fmt.Println("  --no-typecheck   Skip type checking")
+	fmt.Println("  --source-map     Generate source map (.lua.map file)")
 	fmt.Println("  --version        Show version information")
 	fmt.Println("  --help           Show this help message")
 	fmt.Println()
@@ -239,6 +266,7 @@ func printHelp() {
 	fmt.Println("  lunar main.lunar")
 	fmt.Println("  lunar main.lunar -o output.lua")
 	fmt.Println("  lunar main.lunar --no-typecheck")
+	fmt.Println("  lunar main.lunar --source-map")
 	fmt.Println()
 	fmt.Println("For more information about the Lunar language:")
 	fmt.Println("  See README.md in the repository")

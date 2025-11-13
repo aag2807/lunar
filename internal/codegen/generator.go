@@ -3,12 +3,18 @@ package codegen
 import (
 	"fmt"
 	"lunar/internal/ast"
+	"lunar/internal/lexer"
+	"lunar/internal/sourcemap"
 	"strings"
 )
 
 // Generator generates Lua code from an AST
 type Generator struct {
-	indent int
+	indent         int
+	sourceMapBuilder *sourcemap.Builder
+	currentLine    int
+	currentColumn  int
+	sourceFile     string
 }
 
 // New creates a new code generator
@@ -18,22 +24,154 @@ func New() *Generator {
 	}
 }
 
+// NewWithSourceMap creates a new code generator with source map support
+func NewWithSourceMap(sourceFile, generatedFile string) *Generator {
+	return &Generator{
+		indent:           0,
+		sourceMapBuilder: sourcemap.NewBuilder(sourceFile, generatedFile),
+		currentLine:      1,
+		currentColumn:    0,
+		sourceFile:       sourceFile,
+	}
+}
+
+// GetSourceMap returns the built source map (if enabled)
+func (g *Generator) GetSourceMap() *sourcemap.SourceMap {
+	if g.sourceMapBuilder == nil {
+		return nil
+	}
+	return g.sourceMapBuilder.Build()
+}
+
+// trackMapping adds a source mapping if source maps are enabled
+func (g *Generator) trackMapping(sourceToken lexer.Token) {
+	if g.sourceMapBuilder == nil {
+		return
+	}
+
+	// Add mapping from current generated position to source position
+	g.sourceMapBuilder.AddMapping(
+		g.currentLine,
+		g.currentColumn,
+		sourceToken.Line,
+		sourceToken.Column-1, // Source maps use 0-based columns
+		"",
+	)
+}
+
+// write outputs text and updates position tracking
+func (g *Generator) write(text string) {
+	if g.sourceMapBuilder == nil {
+		return // Position tracking not needed without source maps
+	}
+
+	for _, char := range text {
+		if char == '\n' {
+			g.currentLine++
+			g.currentColumn = 0
+		} else {
+			g.currentColumn++
+		}
+	}
+}
+
 // Generate generates Lua code from a list of statements
 func (g *Generator) Generate(statements []ast.Statement) string {
 	var output strings.Builder
 
 	for i, stmt := range statements {
+		// Track mapping at the start of each statement
+		if g.sourceMapBuilder != nil {
+			g.trackStatementMapping(stmt)
+		}
+
 		code := g.generateStatement(stmt)
 		if code != "" {
+			g.write(code)
 			output.WriteString(code)
 			// Add blank line between top-level declarations
 			if i < len(statements)-1 {
+				g.write("\n")
 				output.WriteString("\n")
 			}
 		}
 	}
 
 	return output.String()
+}
+
+// trackStatementMapping tracks the source mapping for a statement
+func (g *Generator) trackStatementMapping(stmt ast.Statement) {
+	if stmt == nil {
+		return
+	}
+
+	// Get the token from the statement
+	var token lexer.Token
+	switch node := stmt.(type) {
+	case *ast.VariableDeclaration:
+		token = node.Token
+	case *ast.FunctionDeclaration:
+		token = node.Token
+	case *ast.ExpressionStatement:
+		if node.Expression != nil {
+			token = g.getExpressionToken(node.Expression)
+		}
+	case *ast.ReturnStatement:
+		token = node.Token
+	case *ast.IfStatement:
+		token = node.Token
+	case *ast.WhileStatement:
+		token = node.Token
+	case *ast.ForStatement:
+		token = node.Token
+	case *ast.DoStatement:
+		token = node.Token
+	case *ast.BreakStatement:
+		token = node.Token
+	case *ast.AssignmentStatement:
+		if node.Name != nil {
+			token = g.getExpressionToken(node.Name)
+		}
+	case *ast.ClassDeclaration:
+		token = node.Token
+	case *ast.EnumDeclaration:
+		token = node.Token
+	case *ast.ExportStatement:
+		token = node.Token
+	case *ast.ImportStatement:
+		token = node.Token
+	default:
+		return
+	}
+
+	g.trackMapping(token)
+}
+
+// getExpressionToken gets the token from an expression
+func (g *Generator) getExpressionToken(expr ast.Expression) lexer.Token {
+	switch node := expr.(type) {
+	case *ast.Identifier:
+		return node.Token
+	case *ast.NumberLiteral:
+		return node.Token
+	case *ast.StringLiteral:
+		return node.Token
+	case *ast.BooleanLiteral:
+		return node.Token
+	case *ast.CallExpression:
+		return g.getExpressionToken(node.Function)
+	case *ast.InfixExpression:
+		return g.getExpressionToken(node.Left)
+	case *ast.PrefixExpression:
+		return node.Token
+	case *ast.DotExpression:
+		return g.getExpressionToken(node.Left)
+	case *ast.IndexExpression:
+		return g.getExpressionToken(node.Left)
+	default:
+		return lexer.Token{}
+	}
 }
 
 // generateStatement generates Lua code for a statement
@@ -587,6 +725,21 @@ func GenerateWithOptions(statements []ast.Statement, optimize bool) string {
 
 	generator := New()
 	return generator.Generate(statements)
+}
+
+// GenerateWithSourceMap generates Lua code and source map
+func GenerateWithSourceMap(statements []ast.Statement, sourceFile, generatedFile string, optimize bool) (string, *sourcemap.SourceMap) {
+	// Run optimizer if enabled
+	if optimize {
+		optimizer := NewOptimizer(true)
+		statements = optimizer.OptimizeStatements(statements)
+	}
+
+	generator := NewWithSourceMap(sourceFile, generatedFile)
+	code := generator.Generate(statements)
+	sourceMap := generator.GetSourceMap()
+
+	return code, sourceMap
 }
 
 // needsParentheses determines if an expression needs parentheses

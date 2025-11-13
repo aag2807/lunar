@@ -1359,8 +1359,8 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 		p.nextToken() // move to type definition
 		typeDecl.Type = p.parseType()
 	} else {
-		// Object shape: type Name { properties } end
-		// Parse properties similar to interface
+		// Object shape: type Name ... end
+		// Parse properties similar to interface (no braces needed)
 		for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
 			if p.curTokenIsIdentOrContextual() {
 				prop := &ast.PropertyDeclaration{

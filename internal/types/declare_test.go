@@ -93,10 +93,9 @@ local g: Graphics = graphics
 
 func TestDeclareType(t *testing.T) {
 	input := `
-declare type Vector2 {
+declare type Vector2
 	x: number
 	y: number
-}
 end
 
 declare function distance(v1: Vector2, v2: Vector2): number

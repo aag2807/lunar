@@ -8,10 +8,9 @@ import (
 
 func TestObjectTypeDeclaration(t *testing.T) {
 	input := `
-type Point {
+type Point
 	x: number
 	y: number
-}
 end
 
 local p: Point = { x = 10, y = 20 }
@@ -38,10 +37,9 @@ local p: Point = { x = 10, y = 20 }
 
 func TestObjectTypeWithMissingProperty(t *testing.T) {
 	input := `
-type Point {
+type Point
 	x: number
 	y: number
-}
 end
 
 local p: Point = { x = 10 }
@@ -69,10 +67,9 @@ local p: Point = { x = 10 }
 
 func TestObjectTypeWithWrongPropertyType(t *testing.T) {
 	input := `
-type Point {
+type Point
 	x: number
 	y: number
-}
 end
 
 local p: Point = { x = "not a number", y = 20 }
@@ -100,10 +97,9 @@ local p: Point = { x = "not a number", y = 20 }
 
 func TestObjectTypeWithExtraProperties(t *testing.T) {
 	input := `
-type Point {
+type Point
 	x: number
 	y: number
-}
 end
 
 local p: Point = { x = 10, y = 20, z = 30 }
@@ -131,17 +127,15 @@ local p: Point = { x = 10, y = 20, z = 30 }
 
 func TestNestedObjectTypes(t *testing.T) {
 	input := `
-type Address {
+type Address
 	street: string
 	city: string
-}
 end
 
-type Person {
+type Person
 	name: string
 	age: number
 	address: Address
-}
 end
 
 local addr: Address = { street = "123 Main St", city = "Springfield" }
@@ -169,10 +163,9 @@ local person: Person = { name = "John", age = 30, address = addr }
 
 func TestObjectTypeInFunction(t *testing.T) {
 	input := `
-type Point {
+type Point
 	x: number
 	y: number
-}
 end
 
 function distance(p1: Point, p2: Point): number

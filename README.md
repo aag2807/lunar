@@ -337,8 +337,28 @@ lunar/
 
 ### v2.0 (Future)
 - [ ] Language Server Protocol (LSP) for IDE integration
+  - **Design complete** - See [LSP Design](docs/LSP_DESIGN.md), [Neovim Setup](docs/NEOVIM_SETUP.md), and [Quick Start](docs/LSP_QUICKSTART.md)
+  - Implementation in progress
 - [ ] Package manager integration
 - [ ] Code formatter
+
+## LSP Development
+
+Lunar will have full Language Server Protocol support for IDE features. Documentation:
+
+- **[LSP Design Document](docs/LSP_DESIGN.md)** - Complete architecture and implementation plan
+- **[Neovim Setup Guide](docs/NEOVIM_SETUP.md)** - How to configure Neovim with Lunar LSP
+- **[LSP Quick Start](docs/LSP_QUICKSTART.md)** - Quick reference for implementers and users
+
+Features planned:
+- Real-time diagnostics (errors/warnings)
+- Go to definition
+- Hover type information
+- Autocompletion
+- Find references
+- Rename symbol
+- Document symbols
+- Workspace symbols
 
 ## Contributing
 

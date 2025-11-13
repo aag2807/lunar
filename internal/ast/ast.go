@@ -356,8 +356,9 @@ type FunctionDeclaration struct {
 	Parameters    []*Parameter
 	ReturnType    Expression
 	Body          *BlockStatement
-	IsStatic      bool // static method (when used in class)
-	IsAbstract    bool // abstract method (when used in class)
+	IsStatic      bool   // static method (when used in class)
+	IsAbstract    bool   // abstract method (when used in class)
+	Visibility    string // visibility modifier: public, private, protected (when used in class)
 }
 
 func (fd *FunctionDeclaration) statementNode()       {}

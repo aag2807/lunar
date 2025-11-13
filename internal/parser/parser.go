@@ -1188,6 +1188,7 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 				method := p.parseMethodDeclaration(isAbstract)
 				method.IsStatic = isStatic
 				method.IsAbstract = isAbstract
+				method.Visibility = visibility
 				class.Methods = append(class.Methods, method)
 				// Only advance past 'end' if method has statements (i.e., has a body)
 				if method.Body != nil && len(method.Body.Statements) > 0 {

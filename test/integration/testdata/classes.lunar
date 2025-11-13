@@ -1,0 +1,13 @@
+-- Class test
+class Point
+    private x: number
+    private y: number
+
+    constructor(x: number, y: number)
+        self.x = x
+        self.y = y
+    end
+end
+
+local point: Point = Point(10, 20)
+print("Point created")

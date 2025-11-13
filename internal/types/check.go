@@ -72,6 +72,123 @@ func (e *Environment) IsConst(name string) bool {
 	return false
 }
 
+// GetAllNames returns all variable names in this environment and outer scopes
+func (e *Environment) GetAllNames() []string {
+	names := make([]string, 0, len(e.store))
+	seen := make(map[string]bool)
+
+	// Collect names from current scope
+	for name := range e.store {
+		names = append(names, name)
+		seen[name] = true
+	}
+
+	// Collect names from outer scopes (avoiding duplicates)
+	if e.outer != nil {
+		for _, name := range e.outer.GetAllNames() {
+			if !seen[name] {
+				names = append(names, name)
+				seen[name] = true
+			}
+		}
+	}
+
+	return names
+}
+
+// levenshteinDistance calculates the edit distance between two strings
+// Used for "Did you mean?" suggestions
+func levenshteinDistance(s1, s2 string) int {
+	if len(s1) == 0 {
+		return len(s2)
+	}
+	if len(s2) == 0 {
+		return len(s1)
+	}
+
+	// Create a matrix for dynamic programming
+	matrix := make([][]int, len(s1)+1)
+	for i := range matrix {
+		matrix[i] = make([]int, len(s2)+1)
+	}
+
+	// Initialize first row and column
+	for i := 0; i <= len(s1); i++ {
+		matrix[i][0] = i
+	}
+	for j := 0; j <= len(s2); j++ {
+		matrix[0][j] = j
+	}
+
+	// Fill the matrix
+	for i := 1; i <= len(s1); i++ {
+		for j := 1; j <= len(s2); j++ {
+			cost := 1
+			if s1[i-1] == s2[j-1] {
+				cost = 0
+			}
+
+			matrix[i][j] = min(
+				matrix[i-1][j]+1,      // deletion
+				matrix[i][j-1]+1,      // insertion
+				matrix[i-1][j-1]+cost, // substitution
+			)
+		}
+	}
+
+	return matrix[len(s1)][len(s2)]
+}
+
+// min returns the minimum of three integers
+func min(a, b, c int) int {
+	if a < b {
+		if a < c {
+			return a
+		}
+		return c
+	}
+	if b < c {
+		return b
+	}
+	return c
+}
+
+// findSimilarNames finds names similar to the target name using Levenshtein distance
+// Returns up to maxSuggestions names with distance <= maxDistance
+func findSimilarNames(target string, candidates []string, maxDistance int, maxSuggestions int) []string {
+	type suggestion struct {
+		name     string
+		distance int
+	}
+
+	suggestions := make([]suggestion, 0)
+
+	// Calculate distances for all candidates
+	for _, candidate := range candidates {
+		distance := levenshteinDistance(target, candidate)
+		if distance <= maxDistance && distance > 0 {
+			suggestions = append(suggestions, suggestion{candidate, distance})
+		}
+	}
+
+	// Sort by distance (simple bubble sort for small lists)
+	for i := 0; i < len(suggestions); i++ {
+		for j := i + 1; j < len(suggestions); j++ {
+			if suggestions[j].distance < suggestions[i].distance {
+				suggestions[i], suggestions[j] = suggestions[j], suggestions[i]
+			}
+		}
+	}
+
+	// Return top suggestions
+	result := make([]string, 0, maxSuggestions)
+	for i := 0; i < len(suggestions) && i < maxSuggestions; i++ {
+		result = append(result, suggestions[i].name)
+	}
+
+	return result
+}
+
 // Checker performs type checking on an AST
 type Checker struct {
 	env    *Environment
@@ -959,7 +1076,53 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 func (c *Checker) checkIdentifier(node *ast.Identifier) Type {
 	typ, ok := c.env.Get(node.Value)
 	if !ok {
-		c.addError(fmt.Sprintf("Undefined variable '%s'", node.Value), node.Token)
+		// Build error message with suggestions
+		errorMsg := fmt.Sprintf("Undefined variable '%s'", node.Value)
+
+		// Collect all available names from environment, classes, interfaces, etc.
+		candidates := c.env.GetAllNames()
+
+		// Add class names
+		for className := range c.classes {
+			candidates = append(candidates, className)
+		}
+
+		// Add interface names
+		for interfaceName := range c.interfaces {
+			candidates = append(candidates, interfaceName)
+		}
+
+		// Add enum names
+		for enumName := range c.enums {
+			candidates = append(candidates, enumName)
+		}
+
+		// Add type alias names
+		for aliasName := range c.typeAliases {
+			candidates = append(candidates, aliasName)
+		}
+
+		// Find similar names
+		suggestions := findSimilarNames(node.Value, candidates, 3, 3)
+
+		// Add suggestions to error message
+		if len(suggestions) > 0 {
+			errorMsg += ". Did you mean"
+			if len(suggestions) == 1 {
+				errorMsg += fmt.Sprintf(" '%s'?", suggestions[0])
+			} else {
+				errorMsg += ":"
+				for i, suggestion := range suggestions {
+					if i == len(suggestions)-1 {
+						errorMsg += fmt.Sprintf(" or '%s'?", suggestion)
+					} else {
+						errorMsg += fmt.Sprintf(" '%s',", suggestion)
+					}
+				}
+			}
+		}
+
+		c.addError(errorMsg, node.Token)
 		return Any
 	}
 	return typ

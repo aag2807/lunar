@@ -1,0 +1,48 @@
+-- Lua 5.1 Package/Module Library Type Declarations
+-- This file provides type definitions for Lua's module loading and package management
+
+-- Loader function type - returns loader function or error message
+declare type LoaderFunction function(modname: string): function | string
+
+-- Package module interface
+declare interface Package {
+    -- The path used by require to search for Lua loaders
+    -- Semicolon-separated list of path templates with ? as placeholder
+    path: string
+
+    -- The path used by require to search for C loaders
+    -- Semicolon-separated list of path templates with ? as placeholder
+    cpath: string
+
+    -- A table used by require to control which modules are already loaded
+    -- Keys are module names, values are the values returned by the module
+    loaded: table<string, any>
+
+    -- A table used by require to control how to load modules
+    -- Keys are module names, values are loader functions
+    preload: table<string, function>
+
+    -- A table used by require that controls how to load modules
+    -- Each entry is a searcher function
+    loaders: LoaderFunction[]
+
+    -- Sets a metatable for module with __index pointing to the global environment
+    -- This allows the module to use global variables
+    seeall: function(module: table<string, any>): void
+}
+end
+
+-- Global package table
+declare const package: Package
+
+-- Loads the given module
+-- First checks package.loaded to see if module is already loaded
+-- Otherwise searches for a loader using package.loaders
+-- Returns the value returned by the module (or true if no value)
+declare function require(modname: string): any end
+
+-- Creates a module
+-- If there is no package.loaded[name], creates a new table and sets it as the
+-- value of package.loaded[name] and _G[name]
+-- Sets this table as the environment of the current function
+declare function module(name: string, ...): void end

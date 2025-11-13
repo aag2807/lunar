@@ -140,12 +140,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `string`, `table`, and `type` can now be used as variable/function names
 - Fixed codegen test expectations to match optimizer behavior
 
-## [Unreleased] - Planned for v1.2
+## [1.2.0] - 2025-11-13
+
+### Added - Enhanced Error Messages
+
+- **"Did you mean?" suggestions** for undefined variables
+  - Uses Levenshtein distance algorithm to find similar names
+  - Suggests up to 3 closest matches from available identifiers
+  - Includes variables, functions, classes, interfaces, enums, and type aliases
+  - Configurable distance threshold (currently 3 edits)
+  - Example: `Undefined variable 'usrName'. Did you mean 'userName'?`
+
+### Added - Additional Standard Library Declarations
+
+- **coroutine.d.lunar** - Complete type declarations for Lua coroutine library
+  - coroutine.create, resume, yield, status, running, wrap
+  - Thread type for coroutine values
+  - Full documentation in type signatures
+
+- **debug.d.lunar** - Complete type declarations for Lua debug library
+  - All debug introspection functions (getinfo, getlocal, traceback, etc.)
+  - DebugInfo type for debug information tables
+  - HookFunction type for debug hooks
+
+- **package.d.lunar** - Complete type declarations for Lua package/module system
+  - package.path, package.cpath, package.loaded, package.preload
+  - require() and module() function declarations
+  - LoaderFunction type for custom loaders
+
+### Added - Integration Tests
+
+- **End-to-end compilation tests** in test/integration directory
+  - Tests for basic type checking
+  - Tests for source map generation
+  - Tests for error message quality
+  - Automated Go-based test suite
+
+### Changed
+
+- Improved error messages now include contextual suggestions
+- All Lua 5.1 standard library modules now have type declarations
+
+## [Unreleased] - Future (v1.3+)
 
 ### Planned
-- Enhanced error messages with "Did you mean...?" suggestions
-- Additional standard library declarations (coroutine, debug, etc.)
 - Performance optimizations for large codebases
+- Watch mode for continuous compilation
+- Better IDE integration helpers
 
 ## [Unreleased] - Future (v2.0+)
 
@@ -160,5 +201,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History
 
+- **1.2.0** (2025-11-13) - "Did you mean?" suggestions, additional stdlib (coroutine, debug, package), integration tests
 - **1.1.0** (2025-11-13) - Context-aware keywords, source maps, complete stdlib support
 - **1.0.0** (2024-11-10) - Initial release with complete type system, OOP, generics, stdlib declarations, and tooling

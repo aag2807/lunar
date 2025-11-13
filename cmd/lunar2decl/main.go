@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const version = "1.1.0"
+const version = "1.2.0"
 
 func main() {
 	outputFile := flag.String("o", "", "Output declaration file (default: input.d.lunar)")

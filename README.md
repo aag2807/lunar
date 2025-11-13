@@ -315,7 +315,7 @@ lunar/
 
 ## Roadmap
 
-### v1.0 (Current) ✅
+### v1.0 ✅
 - [x] Complete type system
 - [x] Classes, interfaces, enums
 - [x] Generics
@@ -325,15 +325,18 @@ lunar/
 - [x] Improved error messages
 - [x] Declaration generator tool
 
-### v1.1 (Planned)
-- [ ] Context-aware keywords (full string/table stdlib support)
-- [ ] Enhanced error suggestions ("Did you mean...?")
-- [ ] More comprehensive stdlib coverage
+### v1.1 ✅
+- [x] Context-aware keywords (full string/table stdlib support)
+- [x] Source maps for debugging
+
+### v1.2 (Current) ✅
+- [x] Enhanced error suggestions ("Did you mean...?")
+- [x] Comprehensive stdlib coverage (coroutine, debug, package)
+- [x] Integration tests
 - [ ] Performance optimizations
 
 ### v2.0 (Future)
 - [ ] Language Server Protocol (LSP) for IDE integration
-- [ ] Source maps for debugging
 - [ ] Package manager integration
 - [ ] Code formatter
 

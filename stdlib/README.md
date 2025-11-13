@@ -12,6 +12,9 @@ This directory contains type declarations for Lua 5.1's standard library. These 
 - **os.d.lunar** - OS facilities (os.time, os.execute, etc.) ✓ Working
 - **string.d.lunar** - String manipulation functions (string.sub, string.upper, etc.) ✓ Working
 - **table.d.lunar** - Table manipulation functions (table.insert, table.concat, etc.) ✓ Working
+- **coroutine.d.lunar** - Coroutine functions (coroutine.create, coroutine.resume, etc.) ✓ Working
+- **debug.d.lunar** - Debug introspection functions (debug.getinfo, debug.traceback, etc.) ✓ Working
+- **package.d.lunar** - Module loading and package management (require, package.loaded, etc.) ✓ Working
 
 ## Context-Aware Keywords
 

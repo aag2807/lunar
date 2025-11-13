@@ -1,0 +1,7 @@
+-- Source map generation test
+function add(a: number, b: number): number
+    return a + b
+end
+
+local result: number = add(10, 20)
+print(result)

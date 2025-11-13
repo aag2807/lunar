@@ -1,0 +1,42 @@
+-- Lua 5.1 Coroutine Library Type Declarations
+-- This file provides type definitions for Lua's coroutine manipulation functions
+
+-- Thread type represents a coroutine
+declare type thread
+
+-- Coroutine module interface
+declare interface Coroutine {
+    -- Creates a new coroutine with body function f
+    -- Returns a thread value representing the new coroutine
+    create: function(f: function): thread
+
+    -- Starts or continues the execution of coroutine co
+    -- Returns true if successful, or false plus error message
+    -- Additional return values are passed from yield or the function return
+    resume: function(co: thread, ...): boolean | any
+
+    -- Suspends the execution of the calling coroutine
+    -- Arguments become extra return values of resume
+    yield: function(...): any
+
+    -- Returns the status of coroutine co as a string:
+    -- "running" (the coroutine is running, meaning it is the one calling status)
+    -- "suspended" (the coroutine is suspended in a call to yield, or not started yet)
+    -- "normal" (the coroutine is active but not running)
+    -- "dead" (the coroutine has finished its body function, or stopped with an error)
+    status: function(co: thread): string
+
+    -- Returns the running coroutine plus a boolean
+    -- The boolean is true when the running coroutine is the main one
+    running: function(): thread | nil
+
+    -- Creates a new coroutine with body f
+    -- Returns a function that resumes the coroutine each time it is called
+    -- Any arguments passed to the function behave as extra arguments to resume
+    -- Returns same values returned by resume, except the first boolean
+    wrap: function(f: function): function
+}
+end
+
+-- Global coroutine table
+declare const coroutine: Coroutine

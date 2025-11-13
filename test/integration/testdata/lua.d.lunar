@@ -1,0 +1,40 @@
+-- Lua 5.1 Core Global Functions
+-- This file provides type declarations for Lua's built-in global functions
+-- Automatically loaded with any Lunar project
+
+-- Basic Functions
+declare function print(message: any): void end
+-- Note: 'type' is a Lunar keyword, so we can't declare it here
+-- declare function type(value: any): string end
+declare function tonumber(value: any): any end
+declare function tostring(value: any): string end
+declare function error(message: string): void end
+declare function assert(condition: any, message: string): any end
+declare function pcall(func: any): boolean end
+declare function xpcall(func: any, errorHandler: any): boolean end
+
+-- Type Conversion
+declare function pairs(t: any): any end
+declare function ipairs(t: any): any end
+declare function next(t: any, key: any): any end
+
+-- Loading and Execution
+declare function loadstring(source: string): any end
+declare function loadfile(filename: string): any end
+declare function dofile(filename: string): any end
+declare function require(modulename: string): any end
+
+-- Metatables
+declare function getmetatable(object: any): any end
+declare function setmetatable(t: any, metatable: any): any end
+declare function rawget(t: any, key: any): any end
+declare function rawset(t: any, key: any, value: any): any end
+declare function rawequal(v1: any, v2: any): boolean end
+
+-- Collection Operations
+declare function select(index: number): any end
+declare function unpack(list: any): any end
+
+-- Global Environment
+declare const _G: any
+declare const _VERSION: string

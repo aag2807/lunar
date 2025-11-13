@@ -1175,11 +1175,14 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 				class.Properties = append(class.Properties, prop)
 			} else if p.peekTokenIs(lexer.LPAREN) {
 				// It's a method
-				method := p.parseMethodDeclaration()
+				method := p.parseMethodDeclaration(isAbstract)
 				method.IsStatic = isStatic
 				method.IsAbstract = isAbstract
 				class.Methods = append(class.Methods, method)
-				p.nextToken() // Advance past method's end
+				// Only advance past 'end' if method has statements (i.e., has a body)
+				if method.Body != nil && len(method.Body.Statements) > 0 {
+					p.nextToken() // Advance past method's end
+				}
 			} else {
 				p.nextToken()
 			}
@@ -1210,7 +1213,7 @@ func (p *Parser) parsePropertyDeclaration() *ast.PropertyDeclaration {
 	return prop
 }
 
-func (p *Parser) parseMethodDeclaration() *ast.FunctionDeclaration {
+func (p *Parser) parseMethodDeclaration(isAbstract bool) *ast.FunctionDeclaration {
 	method := &ast.FunctionDeclaration{
 		Token: p.curToken,
 		Name:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
@@ -1229,7 +1232,7 @@ func (p *Parser) parseMethodDeclaration() *ast.FunctionDeclaration {
 		method.ReturnType = p.parseType()
 	}
 
-	// Parse body
+	// Parse body - parseBlockStatement will handle both cases
 	method.Body = p.parseBlockStatement()
 
 	return method

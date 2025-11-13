@@ -10,17 +10,20 @@ This directory contains type declarations for Lua 5.1's standard library. These 
 - **math.d.lunar** - Mathematical functions (math.sin, math.random, etc.) ✓ Working
 - **io.d.lunar** - File I/O operations (io.open, io.read, etc.) ✓ Working
 - **os.d.lunar** - OS facilities (os.time, os.execute, etc.) ✓ Working
-- **string.d.lunar** - ⚠️ Currently disabled (see Known Limitations)
-- **table.d.lunar** - ⚠️ Currently disabled (see Known Limitations)
+- **string.d.lunar** - String manipulation functions (string.sub, string.upper, etc.) ✓ Working
+- **table.d.lunar** - Table manipulation functions (table.insert, table.concat, etc.) ✓ Working
 
-## Known Limitations
+## Context-Aware Keywords
 
-Currently, the `string` and `table` libraries cannot be declared because these names are reserved as type keywords in Lunar. This is a known limitation that may be addressed in a future version. For now:
+Lunar now supports **context-aware keywords** for `string`, `table`, and `type`. These keywords work as:
+- **Type names** in type annotation contexts: `local x: string = "hello"`
+- **Identifiers** in value contexts: `string.len("hello")` or `local myString = "test"`
 
-- ✓ You can use `math.*`, `io.*`, `os.*` functions with full type safety
-- ✓ Core global functions like `print()`, `tostring()`, `tonumber()` work
-- ✗ `string.*` and `table.*` functions are not type-checked
-- Note: The Lua `type()` function also cannot be declared as it conflicts with the `type` keyword
+This means you get full type safety for both:
+- Primitive types (`string`, `number`, `boolean`, etc.)
+- Standard library modules (`string.*`, `table.*` functions)
+
+All standard library declarations are now fully functional!
 
 ## Usage
 
@@ -71,6 +74,30 @@ if file ~= nil then
     local content: string = file:read("*all")
     file:close()
 end
+```
+
+### Using String Library (Now Working!)
+
+```lunar
+-- string.d.lunar provides types automatically
+local str: string = "Hello, World!"
+local len: number = string.len(str)
+local upper: string = string.upper(str)
+local sub: string = string.sub(str, 1, 5)
+
+-- Context-aware: 'string' works both as a type and module name!
+```
+
+### Using Table Library (Now Working!)
+
+```lunar
+-- table.d.lunar provides types automatically
+local tbl: any = {1, 2, 3}
+table.insert(tbl, 4)
+table.sort(tbl)
+local result: string = table.concat(tbl, ", ")
+
+-- Context-aware: 'table' works both as a type and module name!
 ```
 
 ## Coverage

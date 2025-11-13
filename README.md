@@ -39,8 +39,9 @@ end
 ✅ **Enums** - Type-safe enumeration values
 ✅ **Generics** - Write reusable, type-safe code
 ✅ **Union Types** - Flexible type combinations (`string | number`)
+✅ **Context-Aware Keywords** - `string`, `table`, `type` work as both types and identifiers
 ✅ **Declaration Files** - Type definitions for existing Lua libraries (`.d.lunar`)
-✅ **Standard Library Types** - Built-in declarations for Lua 5.1 stdlib
+✅ **Complete Standard Library Types** - Full type coverage including `string.*` and `table.*`
 ✅ **Excellent Error Messages** - Clear, helpful errors with source context
 ✅ **Clean Lua Output** - Generates readable, efficient Lua code
 ✅ **100% Lua Compatible** - Use any Lua library seamlessly

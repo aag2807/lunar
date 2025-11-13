@@ -1,0 +1,44 @@
+-- Context-Aware Keywords Example
+-- Demonstrates how string, table, and type work as both types and identifiers
+
+-- Using 'string' as both a type and module name
+local message: string = "Hello, Lunar!"
+local length: number = string.len(message)
+local upper: string = string.upper(message)
+
+print("Message: " .. message)
+print("Length: " .. tostring(length))
+print("Uppercase: " .. upper)
+
+-- Using 'table' as both a type keyword and module name
+local numbers: any = {1, 2, 3, 4, 5}
+table.insert(numbers, 6)
+table.sort(numbers)
+local result: string = table.concat(numbers, ", ")
+
+print("Numbers: " .. result)
+
+-- Context-aware keywords can even be used as variable names!
+local myString: string = "I'm a string variable"
+local myTable: number = 42
+
+-- And in function names
+function string(): void
+    print("Function named 'string'")
+end
+
+function table(x: number): number
+    local two: number = 2
+    return x * two
+end
+
+-- Call our custom functions
+string()
+local doubled: number = table(21)
+print("Doubled: " .. tostring(doubled))
+
+-- This demonstrates the power of context-aware keywords:
+-- - In type annotations (: string), 'string' refers to the primitive type
+-- - In expressions (string.len), 'string' refers to the stdlib module
+-- - As identifiers (function string()), it can be used as a name
+-- All three contexts work seamlessly together!

@@ -100,12 +100,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Type compatibility checking with `IsAssignableTo()` method
   - Generic type instantiation and constraint checking
 
-## [Unreleased] - Planned for v1.1
+## [1.1.0] - 2025-11-13
+
+### Added - Context-Aware Keywords
+
+- **Context-aware keyword support** for `string`, `table`, and `type`
+  - These keywords now work as type names in type contexts: `local x: string = "hello"`
+  - And as identifiers in value contexts: `string.len("hello")`
+  - Primitive types take precedence in type annotations
+  - Enables full standard library type coverage
+
+- **Complete Standard Library Support**
+  - `string.d.lunar` - Full type declarations for Lua string library (previously disabled)
+  - `table.d.lunar` - Full type declarations for Lua table library (previously disabled)
+  - All stdlib functions now have complete type safety
+
+### Changed
+- Parser now accepts contextual keywords as identifiers in value contexts
+- Type resolver prioritizes primitive types over environment variables
+- Updated all declaration parsing to support contextual keywords
+
+### Fixed
+- Resolved conflict between primitive type names and stdlib module names
+- `string`, `table`, and `type` can now be used as variable/function names
+
+## [Unreleased] - Planned for v1.2
 
 ### Planned
-- Context-aware keywords to enable full `string.*` and `table.*` stdlib support
 - Enhanced error messages with "Did you mean...?" suggestions
-- Additional standard library declarations
+- Additional standard library declarations (coroutine, debug, etc.)
 - Performance optimizations for large codebases
 
 ## [Unreleased] - Future (v2.0+)

@@ -331,10 +331,23 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 
 	switch node := expr.(type) {
 	case *ast.Identifier:
-		// Check for built-in types
-		if typ, ok := c.env.Get(node.Value); ok {
-			return typ
+		// Check for primitive types FIRST (before checking environment)
+		// This ensures primitive types take precedence over variables with the same name
+		switch node.Value {
+		case "string":
+			return String
+		case "number":
+			return Number
+		case "boolean":
+			return Boolean
+		case "nil":
+			return Nil
+		case "any":
+			return Any
+		case "void":
+			return Void
 		}
+
 		// Check for user-defined types
 		if classType, ok := c.classes[node.Value]; ok {
 			return classType
@@ -348,6 +361,12 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		if aliasType, ok := c.typeAliases[node.Value]; ok {
 			return aliasType
 		}
+
+		// Check environment last (for other types registered in environment)
+		if typ, ok := c.env.Get(node.Value); ok {
+			return typ
+		}
+
 		c.addError(fmt.Sprintf("Unknown type '%s'", node.Value), node.Token)
 		return Any
 

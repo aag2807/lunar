@@ -67,6 +67,10 @@ func New(l *lexer.Lexer) *Parser {
 	p.prefixParseFns = make(map[lexer.TokenType]prefixParseFn)
 	p.registerPrefix(lexer.IDENT, p.parseIdentifier)
 	p.registerPrefix(lexer.SELF, p.parseIdentifier) // self is like an identifier
+	// Context-aware keywords can be used as identifiers in value contexts
+	p.registerPrefix(lexer.STRING_TYPE, p.parseIdentifier)
+	p.registerPrefix(lexer.TABLE, p.parseIdentifier)
+	p.registerPrefix(lexer.TYPE, p.parseIdentifier)
 	p.registerPrefix(lexer.NUMBER, p.parseNumberLiteral)
 	p.registerPrefix(lexer.STRING, p.parseStringLiteral)
 	p.registerPrefix(lexer.TRUE, p.parseBooleanLiteral)
@@ -235,15 +239,12 @@ func (p *Parser) parseDotExpression(left ast.Expression) ast.Expression {
 		Left:  left,
 	}
 
-	// Right side of dot expression must be an identifier
-	if !p.expectPeek(lexer.IDENT) {
+	// Right side of dot expression must be an identifier - allows context-aware keywords
+	if !p.expectPeekIdentOrContextual() {
 		return nil
 	}
 
-	exp.Right = &ast.Identifier{
-		Token: p.curToken,
-		Value: p.curToken.Literal,
-	}
+	exp.Right = p.parseIdentifierOrContextual()
 
 	return exp
 }
@@ -328,11 +329,11 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 		IsConstant: p.curToken.Type == lexer.CONST,
 	}
 
-	// Parse identifier (name)
-	if !p.expectPeek(lexer.IDENT) {
+	// Parse identifier (name) - allows context-aware keywords
+	if !p.expectPeekIdentOrContextual() {
 		return nil
 	}
-	decl.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	decl.Name = p.parseIdentifierOrContextual()
 
 	// Parse type annotation if present
 	if p.peekTokenIs(lexer.COLON) {
@@ -678,6 +679,40 @@ func (p *Parser) peekTokenIs(t lexer.TokenType) bool {
 	return p.peekToken.Type == t
 }
 
+// Context-aware keyword helpers
+// These keywords can be used as type names OR as identifiers depending on context
+func (p *Parser) isContextualKeyword(t lexer.TokenType) bool {
+	return t == lexer.STRING_TYPE || t == lexer.TABLE || t == lexer.TYPE
+}
+
+func (p *Parser) curTokenIsIdentOrContextual() bool {
+	return p.curToken.Type == lexer.IDENT || p.isContextualKeyword(p.curToken.Type)
+}
+
+func (p *Parser) peekTokenIsIdentOrContextual() bool {
+	return p.peekToken.Type == lexer.IDENT || p.isContextualKeyword(p.peekToken.Type)
+}
+
+func (p *Parser) expectPeekIdentOrContextual() bool {
+	if p.peekTokenIsIdentOrContextual() {
+		p.nextToken()
+		return true
+	}
+
+	p.peekError(lexer.IDENT)
+	return false
+}
+
+func (p *Parser) parseIdentifierOrContextual() *ast.Identifier {
+	if p.curTokenIsIdentOrContextual() {
+		return &ast.Identifier{
+			Token: p.curToken,
+			Value: p.curToken.Literal,
+		}
+	}
+	return nil
+}
+
 func (p *Parser) parseParameter() *ast.Parameter {
 	param := &ast.Parameter{
 		Token: p.curToken,
@@ -725,11 +760,11 @@ func (p *Parser) parseFunctionDeclaration() *ast.FunctionDeclaration {
 		Token: p.curToken,
 	}
 
-	//parse function name
-	if !p.expectPeek(lexer.IDENT) {
+	//parse function name - allows context-aware keywords
+	if !p.expectPeekIdentOrContextual() {
 		return nil
 	}
-	fd.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	fd.Name = p.parseIdentifierOrContextual()
 
 	// Parse generic parameters if present: <T, U>
 	if p.peekTokenIs(lexer.LT) {
@@ -909,11 +944,11 @@ func (p *Parser) parseWhileStatement() *ast.WhileStatement {
 func (p *Parser) parseForStatement() *ast.ForStatement {
 	stmt := &ast.ForStatement{Token: p.curToken}
 
-	// Expect variable name
-	if !p.expectPeek(lexer.IDENT) {
+	// Expect variable name - allows context-aware keywords
+	if !p.expectPeekIdentOrContextual() {
 		return nil
 	}
-	stmt.Variable = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	stmt.Variable = p.parseIdentifierOrContextual()
 
 	// Check if it's a generic for (for...in) or numeric for (for...=)
 	if p.peekTokenIs(lexer.IN) {
@@ -1006,11 +1041,11 @@ func (p *Parser) parseTableLiteral() ast.Expression {
 	p.nextToken() // move past '{'
 
 	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
-		// Try to parse as key-value pair first
+		// Try to parse as key-value pair first - allows context-aware keywords
 		// Look ahead to see if this is a key = value pattern
-		if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.ASSIGN) {
+		if p.curTokenIsIdentOrContextual() && p.peekTokenIs(lexer.ASSIGN) {
 			// Key-value pair
-			key := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+			key := p.parseIdentifierOrContextual()
 			p.nextToken() // consume identifier
 			p.nextToken() // consume '='
 
@@ -1043,11 +1078,11 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 		Methods:    []*ast.FunctionDeclaration{},
 	}
 
-	// Parse class name
-	if !p.expectPeek(lexer.IDENT) {
+	// Parse class name - allows context-aware keywords
+	if !p.expectPeekIdentOrContextual() {
 		return nil
 	}
-	class.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	class.Name = p.parseIdentifierOrContextual()
 
 	// Parse generic parameters if present: <T, U>
 	if p.peekTokenIs(lexer.LT) {
@@ -1086,13 +1121,13 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 			visibility := p.curToken.Literal
 			p.nextToken()
 
-			if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.COLON) {
-				// It's a property
+			if p.curTokenIsIdentOrContextual() && p.peekTokenIs(lexer.COLON) {
+				// It's a property - allows context-aware keywords
 				prop := p.parsePropertyDeclaration()
 				prop.Visibility = visibility
 				class.Properties = append(class.Properties, prop)
-			} else if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.LPAREN) {
-				// It's a method
+			} else if p.curTokenIsIdentOrContextual() && p.peekTokenIs(lexer.LPAREN) {
+				// It's a method - allows context-aware keywords
 				method := p.parseMethodDeclaration()
 				class.Methods = append(class.Methods, method)
 			} else {
@@ -1187,11 +1222,11 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 		Properties: []*ast.PropertyDeclaration{},
 	}
 
-	// Parse interface name
-	if !p.expectPeek(lexer.IDENT) {
+	// Parse interface name - allows context-aware keywords
+	if !p.expectPeekIdentOrContextual() {
 		return nil
 	}
-	iface.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	iface.Name = p.parseIdentifierOrContextual()
 
 	// Parse extends clause
 	if p.peekTokenIs(lexer.EXTENDS) {
@@ -1216,9 +1251,9 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 
 	p.nextToken() // move past interface header
 
-	// Parse interface body
+	// Parse interface body - allows context-aware keywords
 	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
-		if p.curTokenIs(lexer.IDENT) {
+		if p.curTokenIsIdentOrContextual() {
 			if p.peekTokenIs(lexer.COLON) {
 				// Property
 				prop := p.parsePropertyDeclaration()
@@ -1267,20 +1302,20 @@ func (p *Parser) parseEnumDeclaration() *ast.EnumDeclaration {
 		Members: []*ast.EnumMember{},
 	}
 
-	// Parse enum name
-	if !p.expectPeek(lexer.IDENT) {
+	// Parse enum name - allows context-aware keywords
+	if !p.expectPeekIdentOrContextual() {
 		return nil
 	}
-	enum.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	enum.Name = p.parseIdentifierOrContextual()
 
 	p.nextToken() // move past enum name
 
-	// Parse enum members
+	// Parse enum members - allows context-aware keywords
 	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
-		if p.curTokenIs(lexer.IDENT) {
+		if p.curTokenIsIdentOrContextual() {
 			member := &ast.EnumMember{
 				Token: p.curToken,
-				Name:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+				Name:  p.parseIdentifierOrContextual(),
 			}
 
 			// Check for value assignment
@@ -1304,11 +1339,11 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 		Token: p.curToken,
 	}
 
-	// Parse type name
-	if !p.expectPeek(lexer.IDENT) {
+	// Parse type name - allows context-aware keywords
+	if !p.expectPeekIdentOrContextual() {
 		return nil
 	}
-	typeDecl.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	typeDecl.Name = p.parseIdentifierOrContextual()
 
 	// Parse generic parameters if present: <T, U>
 	if p.peekTokenIs(lexer.LT) {
@@ -1327,10 +1362,10 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 		// Object shape: type Name { properties } end
 		// Parse properties similar to interface
 		for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
-			if p.curTokenIs(lexer.IDENT) {
+			if p.curTokenIsIdentOrContextual() {
 				prop := &ast.PropertyDeclaration{
 					Token: p.curToken,
-					Name:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+					Name:  p.parseIdentifierOrContextual(),
 				}
 
 				if !p.expectPeek(lexer.COLON) {
@@ -1458,15 +1493,12 @@ func (p *Parser) parseGenericParameters() []*ast.Identifier {
 	p.nextToken() // move past '<' to first parameter
 
 	for !p.curTokenIs(lexer.GT) && !p.curTokenIs(lexer.EOF) {
-		if !p.curTokenIs(lexer.IDENT) {
+		if !p.curTokenIsIdentOrContextual() {
 			p.peekError(lexer.IDENT)
 			return nil
 		}
 
-		params = append(params, &ast.Identifier{
-			Token: p.curToken,
-			Value: p.curToken.Literal,
-		})
+		params = append(params, p.parseIdentifierOrContextual())
 
 		p.nextToken()
 

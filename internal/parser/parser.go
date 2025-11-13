@@ -1111,6 +1111,16 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 		class.GenericParams = p.parseGenericParameters()
 	}
 
+	// Parse extends clause (single inheritance)
+	if p.peekTokenIs(lexer.EXTENDS) {
+		p.nextToken() // consume 'extends'
+		p.nextToken() // move to parent class name
+		class.Extends = &ast.Identifier{
+			Token: p.curToken,
+			Value: p.curToken.Literal,
+		}
+	}
+
 	// Parse implements clause
 	if p.peekTokenIs(lexer.IMPLEMENTS) {
 		p.nextToken() // consume 'implements'

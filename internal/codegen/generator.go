@@ -434,6 +434,16 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 	// Create class table
 	output.WriteString(g.generateIndent())
 	output.WriteString(fmt.Sprintf("local %s = {}\n", className))
+
+	// Set up inheritance if there's a parent class
+	if node.Extends != nil {
+		if parentIdent, ok := node.Extends.(*ast.Identifier); ok {
+			parentName := parentIdent.Value
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("setmetatable(%s, {__index = %s})\n", className, parentName))
+		}
+	}
+
 	output.WriteString(g.generateIndent())
 	output.WriteString(fmt.Sprintf("%s.__index = %s\n", className, className))
 	output.WriteString("\n")

@@ -348,6 +348,17 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		}
 	}
 
+	// Resolve extends clause (parent class)
+	if node.Extends != nil {
+		if ident, ok := node.Extends.(*ast.Identifier); ok {
+			if parentClass, exists := c.classes[ident.Value]; exists {
+				classType.Parent = parentClass
+			} else {
+				c.addError(fmt.Sprintf("Parent class '%s' not found", ident.Value), ident.Token)
+			}
+		}
+	}
+
 	// Resolve implements clause
 	for _, impl := range node.Implements {
 		if ident, ok := impl.(*ast.Identifier); ok {
@@ -994,6 +1005,11 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		}
 	}
 
+	// Check that non-abstract classes implement all abstract methods from parent
+	if !node.IsAbstract && classType.Parent != nil {
+		c.checkAbstractMethodsImplemented(classType, classType.Parent, node.Token)
+	}
+
 	// Check constructor if present
 	if node.Constructor != nil {
 		prevEnv := c.env
@@ -1117,6 +1133,31 @@ func (c *Checker) checkClassImplementsInterface(class *ClassType, iface *Interfa
 	// Recursively check extended interfaces
 	for _, ext := range iface.Extends {
 		c.checkClassImplementsInterface(class, ext, token)
+	}
+}
+
+// checkAbstractMethodsImplemented verifies that a class implements all abstract methods from its parent
+func (c *Checker) checkAbstractMethodsImplemented(class *ClassType, parent *ClassType, token lexer.Token) {
+	// Recursively check all ancestors
+	if parent == nil {
+		return
+	}
+
+	// Check this parent's abstract methods
+	for methodName := range parent.AbstractMethods {
+		// Check if child class has this method
+		if _, ok := class.Methods[methodName]; !ok {
+			c.addError(
+				fmt.Sprintf("Class '%s' must implement abstract method '%s' from parent class '%s'",
+					class.Name, methodName, parent.Name),
+				token,
+			)
+		}
+	}
+
+	// Check grandparent
+	if parent.Parent != nil {
+		c.checkAbstractMethodsImplemented(class, parent.Parent, token)
 	}
 }
 
@@ -1320,12 +1361,16 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 			return classType
 		}
 
+		// Check for constructor (or allow default constructor with no args)
 		if classType.Constructor == nil {
-			c.addError(
-				fmt.Sprintf("Class '%s' has no constructor", classType.Name),
-				node.Token,
-			)
-			return classType // Still return the class type
+			// No explicit constructor - allow instantiation with zero arguments only
+			if len(node.Arguments) > 0 {
+				c.addError(
+					fmt.Sprintf("Class '%s' has no constructor and cannot accept arguments", classType.Name),
+					node.Token,
+				)
+			}
+			return classType
 		}
 
 		fnType := classType.Constructor

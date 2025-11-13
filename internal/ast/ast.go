@@ -549,6 +549,7 @@ type ClassDeclaration struct {
 	Token         lexer.Token // 'class' token
 	Name          *Identifier
 	GenericParams []*Identifier           // generic type parameters like <T, U>
+	Extends       Expression              // parent class name (single inheritance)
 	Properties    []*PropertyDeclaration
 	Methods       []*FunctionDeclaration
 	Constructor   *ConstructorDeclaration

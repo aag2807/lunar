@@ -515,6 +515,7 @@ func (t *TupleType) IsAssignableTo(other Type) bool {
 // ClassType represents a class type
 type ClassType struct {
 	Name             string
+	Parent           *ClassType                // Parent class (single inheritance)
 	Properties       map[string]Type           // Instance properties
 	Methods          map[string]*FunctionType  // Instance methods
 	StaticProperties map[string]Type           // Static properties
@@ -543,6 +544,16 @@ func (t *ClassType) IsAssignableTo(other Type) bool {
 	if _, isAny := other.(*AnyType); isAny {
 		return true
 	}
+	// Class is assignable to its parent class (inheritance)
+	if otherClass, ok := other.(*ClassType); ok {
+		current := t.Parent
+		for current != nil {
+			if current.Equals(otherClass) {
+				return true
+			}
+			current = current.Parent
+		}
+	}
 	// Class is assignable to interfaces it implements
 	if otherInterface, ok := other.(*InterfaceType); ok {
 		for _, impl := range t.Implements {
@@ -554,16 +565,30 @@ func (t *ClassType) IsAssignableTo(other Type) bool {
 	return false
 }
 
-// GetProperty returns the type of a property
+// GetProperty returns the type of a property (checks inheritance chain)
 func (t *ClassType) GetProperty(name string) (Type, bool) {
-	typ, ok := t.Properties[name]
-	return typ, ok
+	// Check own properties first
+	if typ, ok := t.Properties[name]; ok {
+		return typ, true
+	}
+	// Check parent class
+	if t.Parent != nil {
+		return t.Parent.GetProperty(name)
+	}
+	return nil, false
 }
 
-// GetMethod returns the type of a method
+// GetMethod returns the type of a method (checks inheritance chain)
 func (t *ClassType) GetMethod(name string) (*FunctionType, bool) {
-	typ, ok := t.Methods[name]
-	return typ, ok
+	// Check own methods first
+	if typ, ok := t.Methods[name]; ok {
+		return typ, true
+	}
+	// Check parent class
+	if t.Parent != nil {
+		return t.Parent.GetMethod(name)
+	}
+	return nil, false
 }
 
 // GetStaticProperty returns the type of a static property

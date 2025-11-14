@@ -1300,6 +1300,8 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 	switch node := expr.(type) {
 	case *ast.Identifier:
 		return c.checkIdentifier(node)
+	case *ast.SuperExpression:
+		return c.checkSuperExpression(node)
 	case *ast.NumberLiteral:
 		// Number literals infer as literal types for precision
 		return &NumberLiteralType{Value: node.Value}
@@ -1381,6 +1383,27 @@ func (c *Checker) checkIdentifier(node *ast.Identifier) Type {
 		return Any
 	}
 	return typ
+}
+
+// checkSuperExpression checks a super expression
+func (c *Checker) checkSuperExpression(node *ast.SuperExpression) Type {
+	// Super can only be used inside a class context
+	if c.currentClass == nil {
+		c.addError("'super' can only be used inside a class", node.Token)
+		return Any
+	}
+
+	// Class must have a parent
+	if c.currentClass.Parent == nil {
+		c.addError(
+			fmt.Sprintf("Class '%s' has no parent class, cannot use 'super'", c.currentClass.Name),
+			node.Token,
+		)
+		return Any
+	}
+
+	// Return the parent class type
+	return c.currentClass.Parent
 }
 
 // checkTableLiteral checks a table literal

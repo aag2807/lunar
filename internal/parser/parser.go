@@ -67,6 +67,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.prefixParseFns = make(map[lexer.TokenType]prefixParseFn)
 	p.registerPrefix(lexer.IDENT, p.parseIdentifier)
 	p.registerPrefix(lexer.SELF, p.parseIdentifier) // self is like an identifier
+	p.registerPrefix(lexer.SUPER, p.parseSuperExpression)
 	// Context-aware keywords can be used as identifiers in value contexts
 	p.registerPrefix(lexer.STRING_TYPE, p.parseIdentifier)
 	p.registerPrefix(lexer.TABLE, p.parseIdentifier)
@@ -119,6 +120,12 @@ func (p *Parser) parseIdentifier() ast.Expression {
 	return &ast.Identifier{
 		Token: p.curToken,
 		Value: p.curToken.Literal,
+	}
+}
+
+func (p *Parser) parseSuperExpression() ast.Expression {
+	return &ast.SuperExpression{
+		Token: p.curToken,
 	}
 }
 

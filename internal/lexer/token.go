@@ -76,6 +76,7 @@ const (
 	IMPLEMENTS  = "implements"
 	CONSTRUCTOR = "constructor"
 	SELF        = "self"
+	SUPER       = "super"
 	VOID        = "void"
 	EXPORT      = "export"
 	IMPORT      = "import"
@@ -126,6 +127,7 @@ var keywords = map[string]TokenType{
 	"implements":  IMPLEMENTS,
 	"constructor": CONSTRUCTOR,
 	"self":        SELF,
+	"super":       SUPER,
 	"and":         AND,
 	"or":          OR,
 	"not":         NOT,

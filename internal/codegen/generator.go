@@ -15,14 +15,17 @@ type Generator struct {
 	currentLine      int
 	currentColumn    int
 	sourceFile       string
-	classes          map[string]bool // Track defined classes for constructor calls
+	classes          map[string]bool   // Track defined classes for constructor calls
+	classParents     map[string]string // Track parent class names for super
+	currentClassName string            // Current class being generated
 }
 
 // New creates a new code generator
 func New() *Generator {
 	return &Generator{
-		indent:  0,
-		classes: make(map[string]bool),
+		indent:       0,
+		classes:      make(map[string]bool),
+		classParents: make(map[string]string),
 	}
 }
 
@@ -35,6 +38,7 @@ func NewWithSourceMap(sourceFile, generatedFile string) *Generator {
 		currentColumn:    0,
 		sourceFile:       sourceFile,
 		classes:          make(map[string]bool),
+		classParents:     make(map[string]string),
 	}
 }
 
@@ -431,6 +435,18 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 	// Track this class for constructor calls
 	g.classes[className] = true
 
+	// Track parent class name for super
+	if node.Extends != nil {
+		if parentIdent, ok := node.Extends.(*ast.Identifier); ok {
+			g.classParents[className] = parentIdent.Value
+		}
+	}
+
+	// Set current class context
+	prevClassName := g.currentClassName
+	g.currentClassName = className
+	defer func() { g.currentClassName = prevClassName }()
+
 	// Create class table
 	output.WriteString(g.generateIndent())
 	output.WriteString(fmt.Sprintf("local %s = {}\n", className))
@@ -580,6 +596,15 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 	switch node := expr.(type) {
 	case *ast.Identifier:
 		return node.Value
+	case *ast.SuperExpression:
+		// Generate parent class name
+		if g.currentClassName != "" {
+			if parentName, ok := g.classParents[g.currentClassName]; ok {
+				return parentName
+			}
+		}
+		// Fallback (should not happen if type checker passes)
+		return "super"
 	case *ast.NumberLiteral:
 		return node.Token.Literal
 	case *ast.StringLiteral:

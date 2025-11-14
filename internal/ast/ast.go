@@ -26,6 +26,15 @@ func (i *Identifier) expressionNode()      {}
 func (i *Identifier) TokenLiteral() string { return i.Token.Literal }
 func (i *Identifier) String() string       { return i.Value }
 
+// SuperExpression represents the 'super' keyword for accessing parent class members
+type SuperExpression struct {
+	Token lexer.Token // The 'super' token
+}
+
+func (se *SuperExpression) expressionNode()      {}
+func (se *SuperExpression) TokenLiteral() string { return se.Token.Literal }
+func (se *SuperExpression) String() string       { return "super" }
+
 type NumberLiteral struct {
 	Token lexer.Token
 	Value float64

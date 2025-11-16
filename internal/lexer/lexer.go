@@ -97,6 +97,8 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(SLASH, l.ch, l.line, l.column)
 	case '%':
 		tok = newToken(MODULO, l.ch, l.line, l.column)
+	case '#':
+		tok = newToken(HASH, l.ch, l.line, l.column)
 	case '.':
 		if l.peekChar() == '.' {
 			l.readChar()

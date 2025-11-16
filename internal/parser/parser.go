@@ -79,6 +79,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.NIL, p.parseNilLiteral)
 	p.registerPrefix(lexer.BANG, p.parsePrefixExpression)
 	p.registerPrefix(lexer.MINUS, p.parsePrefixExpression)
+	p.registerPrefix(lexer.HASH, p.parsePrefixExpression)
 	p.registerPrefix(lexer.NOT, p.parsePrefixExpression)
 	p.registerPrefix(lexer.LPAREN, p.parseGroupedExpression)
 	p.registerPrefix(lexer.LBRACE, p.parseTableLiteral)
@@ -1211,9 +1212,21 @@ func (p *Parser) parseTableLiteral() ast.Expression {
 
 	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
 		// Try to parse as key-value pair first - allows context-aware keywords
-		// Look ahead to see if this is a key = value pattern
-		if p.curTokenIsIdentOrContextual() && p.peekTokenIs(lexer.ASSIGN) {
-			// Key-value pair
+		// Check for [key] = value syntax
+		if p.curTokenIs(lexer.LBRACKET) {
+			p.nextToken() // consume '['
+			key := p.parseExpression(LOWEST)
+			if !p.expectPeek(lexer.RBRACKET) {
+				return nil
+			}
+			if !p.expectPeek(lexer.ASSIGN) {
+				return nil
+			}
+			p.nextToken() // move past '='
+			value := p.parseExpression(LOWEST)
+			table.Pairs[key] = value
+		} else if p.curTokenIsIdentOrContextual() && p.peekTokenIs(lexer.ASSIGN) {
+			// Key-value pair with identifier key
 			key := p.parseIdentifierOrContextual()
 			p.nextToken() // consume identifier
 			p.nextToken() // consume '='

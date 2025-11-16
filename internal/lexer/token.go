@@ -19,6 +19,7 @@ const (
 	ASTERISK = "*"
 	SLASH    = "/"
 	MODULO   = "%"
+	HASH     = "#"
 
 	//comparison
 	EQ         = "=="

@@ -1497,13 +1497,19 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 	// Check if this is a record-like table (all keys are string identifiers)
 	if len(node.Values) == 0 && len(node.Pairs) > 0 {
 		properties := make(map[string]Type)
+		methods := make(map[string]*FunctionType)
 		isRecord := true
 
 		for key, value := range node.Pairs {
 			// Check if key is an identifier (field name)
 			if ident, ok := key.(*ast.Identifier); ok {
 				valueType := c.checkExpression(value)
-				properties[ident.Value] = valueType
+				// Distinguish between methods (functions) and properties
+				if funcType, ok := valueType.(*FunctionType); ok {
+					methods[ident.Value] = funcType
+				} else {
+					properties[ident.Value] = valueType
+				}
 			} else {
 				// Not a simple identifier key, treat as regular table
 				isRecord = false
@@ -1516,7 +1522,7 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 			return &InterfaceType{
 				Name:       "<table literal>",
 				Properties: properties,
-				Methods:    make(map[string]*FunctionType),
+				Methods:    methods,
 				Extends:    []*InterfaceType{},
 			}
 		}

@@ -77,6 +77,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.TYPE, p.parseIdentifier)
 	p.registerPrefix(lexer.NUMBER, p.parseNumberLiteral)
 	p.registerPrefix(lexer.STRING, p.parseStringLiteral)
+	p.registerPrefix(lexer.TEMPLATE_STRING, p.parseTemplateLiteral)
 	p.registerPrefix(lexer.TRUE, p.parseBooleanLiteral)
 	p.registerPrefix(lexer.FALSE, p.parseBooleanLiteral)
 	p.registerPrefix(lexer.NIL, p.parseNilLiteral)
@@ -151,6 +152,69 @@ func (p *Parser) parseNumberLiteral() ast.Expression {
 
 func (p *Parser) parseStringLiteral() ast.Expression {
 	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
+}
+
+func (p *Parser) parseTemplateLiteral() ast.Expression {
+	token := p.curToken
+	template := &ast.TemplateLiteral{
+		Token:       token,
+		Parts:       []string{},
+		Expressions: []ast.Expression{},
+	}
+
+	// Parse the template string and extract parts and expressions
+	raw := token.Literal
+	var currentPart string
+	i := 0
+
+	for i < len(raw) {
+		// Look for ${ pattern
+		if i < len(raw)-1 && raw[i] == '$' && raw[i+1] == '{' {
+			// Add the current part
+			template.Parts = append(template.Parts, currentPart)
+			currentPart = ""
+
+			// Find the matching }
+			i += 2 // skip ${
+			braceCount := 1
+			exprStart := i
+
+			for i < len(raw) && braceCount > 0 {
+				if raw[i] == '{' {
+					braceCount++
+				} else if raw[i] == '}' {
+					braceCount--
+				}
+				if braceCount > 0 {
+					i++
+				}
+			}
+
+			// Parse the expression
+			exprStr := raw[exprStart:i]
+			exprLexer := lexer.New(exprStr)
+			exprParser := New(exprLexer)
+			expr := exprParser.parseExpression(LOWEST)
+
+			if len(exprParser.Errors()) > 0 {
+				for _, err := range exprParser.Errors() {
+					p.errors = append(p.errors, "Template expression error: "+err)
+				}
+				return nil
+			}
+
+			template.Expressions = append(template.Expressions, expr)
+			i++ // skip the closing }
+		} else {
+			currentPart += string(raw[i])
+			i++
+		}
+	}
+
+	// Add the final part
+	template.Parts = append(template.Parts, currentPart)
+
+	return template
 }
 
 func (p *Parser) parseBooleanLiteral() ast.Expression {

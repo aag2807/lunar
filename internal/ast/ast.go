@@ -55,6 +55,29 @@ func (i *StringLiteral) String() string {
 	return fmt.Sprintf("\"%s\"", i.Value)
 }
 
+type TemplateLiteral struct {
+	Token       lexer.Token // the backtick token
+	Parts       []string    // string parts between ${}
+	Expressions []Expression // expressions inside ${}
+}
+
+func (tl *TemplateLiteral) expressionNode()      {}
+func (tl *TemplateLiteral) TokenLiteral() string { return tl.Token.Literal }
+func (tl *TemplateLiteral) String() string {
+	var out string
+	out += "`"
+	for i, part := range tl.Parts {
+		out += part
+		if i < len(tl.Expressions) {
+			out += "${"
+			out += tl.Expressions[i].String()
+			out += "}"
+		}
+	}
+	out += "`"
+	return out
+}
+
 type BooleanLiteral struct {
 	Token lexer.Token
 	Value bool

@@ -164,6 +164,8 @@ func (g *Generator) getExpressionToken(expr ast.Expression) lexer.Token {
 		return node.Token
 	case *ast.StringLiteral:
 		return node.Token
+	case *ast.TemplateLiteral:
+		return node.Token
 	case *ast.BooleanLiteral:
 		return node.Token
 	case *ast.CallExpression:
@@ -654,6 +656,8 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 		return node.Token.Literal
 	case *ast.StringLiteral:
 		return fmt.Sprintf("\"%s\"", node.Value)
+	case *ast.TemplateLiteral:
+		return g.generateTemplateLiteral(node)
 	case *ast.BooleanLiteral:
 		if node.Value {
 			return "true"
@@ -855,6 +859,51 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 	}
 
 	return fmt.Sprintf("%s(%s)", function, strings.Join(args, ", "))
+}
+
+// generateTemplateLiteral generates code for a template literal
+func (g *Generator) generateTemplateLiteral(node *ast.TemplateLiteral) string {
+	// Template literals are converted to Lua string concatenation
+	// `Hello ${name}` becomes "Hello " .. tostring(name)
+
+	if len(node.Parts) == 1 && len(node.Expressions) == 0 {
+		// No interpolation, just a plain string
+		return fmt.Sprintf("\"%s\"", node.Parts[0])
+	}
+
+	var parts []string
+	for i, part := range node.Parts {
+		// Add the string part if it's not empty
+		if part != "" {
+			parts = append(parts, fmt.Sprintf("\"%s\"", part))
+		}
+
+		// Add the expression (converted to string) if there's one at this position
+		if i < len(node.Expressions) {
+			exprCode := g.generateExpression(node.Expressions[i])
+			// Use tostring() to convert the expression to a string
+			parts = append(parts, fmt.Sprintf("tostring(%s)", exprCode))
+		}
+	}
+
+	// Filter out empty parts
+	nonEmptyParts := []string{}
+	for _, part := range parts {
+		if part != "" && part != "\"\"" {
+			nonEmptyParts = append(nonEmptyParts, part)
+		}
+	}
+
+	if len(nonEmptyParts) == 0 {
+		return "\"\""
+	}
+
+	if len(nonEmptyParts) == 1 {
+		return nonEmptyParts[0]
+	}
+
+	// Concatenate all parts with ..
+	return strings.Join(nonEmptyParts, " .. ")
 }
 
 // generateDotExpression generates code for a dot expression

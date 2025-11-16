@@ -140,6 +140,10 @@ func (l *Lexer) NextToken() Token {
 		tok.Type = STRING
 		tok.Literal = l.readString()
 		return tok
+	case '`':
+		tok.Type = TEMPLATE_STRING
+		tok.Literal = l.readTemplateString()
+		return tok
 	case 0:
 		tok.Type = EOF
 		tok.Literal = ""
@@ -264,6 +268,48 @@ func (l *Lexer) readString() string {
 			break
 		}
 
+		if l.ch != 0 {
+			result = append(result, l.ch)
+		}
+	}
+
+	return string(result)
+}
+
+func (l *Lexer) readTemplateString() string {
+	var result []byte
+
+	for {
+		l.readChar()
+
+		// Handle escape sequences
+		if l.ch == '\\' {
+			l.readChar()
+			switch l.ch {
+			case 'n':
+				result = append(result, '\n')
+			case 't':
+				result = append(result, '\t')
+			case '`':
+				result = append(result, '`')
+			case '\\':
+				result = append(result, '\\')
+			case '$':
+				// Allow escaping ${} in templates
+				result = append(result, '$')
+			default:
+				result = append(result, l.ch)
+			}
+			continue
+		}
+
+		// End of template string
+		if l.ch == '`' {
+			l.readChar()
+			break
+		}
+
+		// Preserve ${} expressions as-is (parser will handle them)
 		if l.ch != 0 {
 			result = append(result, l.ch)
 		}

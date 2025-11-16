@@ -7,9 +7,10 @@ const (
 	EOF     = "EOF"
 
 	// identifiers + literals
-	IDENT  = "IDENT"
-	NUMBER = "NUMBER"
-	STRING = "STRING"
+	IDENT           = "IDENT"
+	NUMBER          = "NUMBER"
+	STRING          = "STRING"
+	TEMPLATE_STRING = "TEMPLATE_STRING" // backtick string with ${} interpolation
 
 	//operators
 	ASSIGN   = "="

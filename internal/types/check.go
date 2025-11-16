@@ -1784,6 +1784,8 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 	case *ast.StringLiteral:
 		// String literals infer as literal types for precision
 		return &StringLiteralType{Value: node.Value}
+	case *ast.TemplateLiteral:
+		return c.checkTemplateLiteral(node)
 	case *ast.BooleanLiteral:
 		return Boolean
 	case *ast.NilLiteral:
@@ -2559,6 +2561,17 @@ func (c *Checker) checkTypeAssertion(node *ast.TypeAssertion) Type {
 
 	// Return the target type - that's what the assertion claims it is
 	return targetType
+}
+
+func (c *Checker) checkTemplateLiteral(node *ast.TemplateLiteral) Type {
+	// Type check all expressions inside ${...}
+	for _, expr := range node.Expressions {
+		c.checkExpression(expr)
+		// We don't enforce that expressions are strings - they'll be converted at runtime
+	}
+
+	// Template literals always result in a string
+	return String
 }
 
 // canAccessMember checks if the current context can access a member with the given visibility

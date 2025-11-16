@@ -74,9 +74,46 @@ func (t *BooleanType) IsAssignableTo(other Type) bool {
 	if _, isAny := other.(*AnyType); isAny {
 		return true
 	}
+	// Boolean can be assigned to TypeGuardType (any boolean expression can be a type guard body)
+	if _, isTypeGuard := other.(*TypeGuardType); isTypeGuard {
+		return true
+	}
 	// Check if other is a union type that contains boolean
 	if unionType, isUnion := other.(*UnionType); isUnion {
 		return unionType.Contains(t)
+	}
+	return false
+}
+
+// TypeGuardType is a special return type for type guard functions
+// It behaves like boolean but carries information about the guarded type
+type TypeGuardType struct {
+	GuardedType Type // The type being guarded (e.g., "string" in "value is string")
+}
+
+func (t *TypeGuardType) String() string {
+	return "boolean" // Type guards return boolean at runtime
+}
+func (t *TypeGuardType) Equals(other Type) bool {
+	// Type guards are compatible with boolean
+	if _, ok := other.(*BooleanType); ok {
+		return true
+	}
+	if otherGuard, ok := other.(*TypeGuardType); ok {
+		return t.GuardedType.Equals(otherGuard.GuardedType)
+	}
+	return false
+}
+func (t *TypeGuardType) IsAssignableTo(other Type) bool {
+	// Type guards can be assigned to boolean
+	if _, ok := other.(*BooleanType); ok {
+		return true
+	}
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if otherGuard, ok := other.(*TypeGuardType); ok {
+		return t.GuardedType.IsAssignableTo(otherGuard.GuardedType)
 	}
 	return false
 }
@@ -116,6 +153,28 @@ func (t *VoidType) Equals(other Type) bool {
 	return ok
 }
 func (t *VoidType) IsAssignableTo(other Type) bool {
+	if t.Equals(other) {
+		return true
+	}
+	_, isAny := other.(*AnyType)
+	return isAny
+}
+
+// GenericParamType represents a generic type parameter (e.g., T in class Box<T>)
+type GenericParamType struct {
+	Name string // The parameter name (e.g., "T")
+}
+
+func (t *GenericParamType) String() string { return t.Name }
+func (t *GenericParamType) Equals(other Type) bool {
+	otherParam, ok := other.(*GenericParamType)
+	if !ok {
+		return false
+	}
+	return t.Name == otherParam.Name
+}
+func (t *GenericParamType) IsAssignableTo(other Type) bool {
+	// Generic parameters are only assignable to themselves or any
 	if t.Equals(other) {
 		return true
 	}
@@ -286,8 +345,9 @@ func (t *TableType) IsAssignableTo(other Type) bool {
 
 // FunctionType represents a function type
 type FunctionType struct {
-	Parameters []Type
-	ReturnType Type
+	Parameters    []Type
+	ReturnType    Type
+	GenericParams []string // Generic type parameter names (e.g., ["T", "U"])
 }
 
 func (t *FunctionType) String() string {
@@ -534,6 +594,7 @@ type ClassType struct {
 	Constructor         *FunctionType             // Constructor signature
 	Implements          []*InterfaceType
 	IsAbstract          bool                      // Whether class is abstract
+	GenericParams       []string                  // Generic type parameter names (e.g., ["T", "U"])
 }
 
 func (t *ClassType) String() string {
@@ -871,9 +932,13 @@ func IsStringType(t Type) bool {
 	return ok
 }
 
-// IsBooleanType checks if a type is boolean
+// IsBooleanType checks if a type is boolean (or a type guard, which acts like boolean)
 func IsBooleanType(t Type) bool {
 	_, ok := t.(*BooleanType)
+	if ok {
+		return true
+	}
+	_, ok = t.(*TypeGuardType)
 	return ok
 }
 

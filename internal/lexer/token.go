@@ -36,7 +36,8 @@ const (
 	NOT = "not"
 
 	//concat operator
-	CONCAT = ".."
+	CONCAT   = ".."
+	ELLIPSIS = "..."
 
 	//delimeters
 	COMMA    = ","

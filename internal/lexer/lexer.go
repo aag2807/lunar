@@ -109,8 +109,14 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(HASH, l.ch, l.line, l.column)
 	case '.':
 		if l.peekChar() == '.' {
-			l.readChar()
-			tok = Token{Type: CONCAT, Literal: "..", Line: l.line, Column: l.column}
+			// Check if it's ... or ..
+			l.readChar() // consume second dot
+			if l.peekChar() == '.' {
+				l.readChar() // consume third dot
+				tok = Token{Type: ELLIPSIS, Literal: "...", Line: l.line, Column: l.column}
+			} else {
+				tok = Token{Type: CONCAT, Literal: "..", Line: l.line, Column: l.column}
+			}
 		} else {
 			tok = newToken(DOT, l.ch, l.line, l.column)
 		}

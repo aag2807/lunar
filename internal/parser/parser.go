@@ -86,6 +86,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.LPAREN, p.parseGroupedExpression)
 	p.registerPrefix(lexer.LBRACE, p.parseTableLiteral)
 	p.registerPrefix(lexer.FUNCTION, p.parseFunctionExpression)
+	p.registerPrefix(lexer.ELLIPSIS, p.parseSpreadExpression)
 
 	//register infix operators
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
@@ -422,6 +423,17 @@ func (p *Parser) parsePrefixExpression() ast.Expression {
 
 	p.nextToken()
 	expression.Right = p.parseExpression(PREFIX)
+
+	return expression
+}
+
+func (p *Parser) parseSpreadExpression() ast.Expression {
+	expression := &ast.SpreadExpression{
+		Token: p.curToken,
+	}
+
+	p.nextToken()
+	expression.Value = p.parseExpression(LOWEST)
 
 	return expression
 }
@@ -872,8 +884,18 @@ func (p *Parser) parseIdentifierOrContextual() *ast.Identifier {
 func (p *Parser) parseParameter() *ast.Parameter {
 	param := &ast.Parameter{
 		Token: p.curToken,
-		Name:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
 	}
+
+	// Check for rest parameter (...name)
+	if p.curTokenIs(lexer.ELLIPSIS) {
+		param.IsRest = true
+		if !p.expectPeek(lexer.IDENT) {
+			return nil
+		}
+	}
+
+	param.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
 	if p.peekTokenIs(lexer.COLON) {
 		p.nextToken() // consumes :
 		p.nextToken() // moves onto type

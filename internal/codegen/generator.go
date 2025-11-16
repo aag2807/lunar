@@ -268,15 +268,35 @@ func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) s
 	output.WriteString("(")
 
 	// Parameters (without type annotations)
-	params := make([]string, len(node.Parameters))
+	params := make([]string, 0, len(node.Parameters))
+	var restParam *ast.Parameter
 	for i, param := range node.Parameters {
-		params[i] = param.Name.Value
+		if param.IsRest {
+			restParam = param
+			// Add ... to parameter list
+			params = append(params, "...")
+			break
+		}
+		params = append(params, param.Name.Value)
+		// Check if next param is rest, if so don't include regular params after
+		if i+1 < len(node.Parameters) && node.Parameters[i+1].IsRest {
+			restParam = node.Parameters[i+1]
+			params = append(params, "...")
+			break
+		}
 	}
 	output.WriteString(strings.Join(params, ", "))
 	output.WriteString(")\n")
 
 	// Body
 	g.indent++
+
+	// If there's a rest parameter, pack the varargs into a table
+	if restParam != nil {
+		output.WriteString(g.generateIndent())
+		output.WriteString(fmt.Sprintf("local %s = {...}\n", restParam.Name.Value))
+	}
+
 	for _, stmt := range node.Body.Statements {
 		output.WriteString(g.generateStatement(stmt))
 	}
@@ -662,6 +682,36 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 
 // generateTableLiteral generates code for a table literal
 func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
+	// Check if any value is a spread expression
+	hasSpread := false
+	for _, val := range node.Values {
+		if _, ok := val.(*ast.SpreadExpression); ok {
+			hasSpread = true
+			break
+		}
+	}
+
+	// If there are spread expressions in array values, we need special handling
+	if hasSpread {
+		var output strings.Builder
+		output.WriteString("(function() local __temp = {}; ")
+
+		for _, val := range node.Values {
+			if spread, ok := val.(*ast.SpreadExpression); ok {
+				// Insert all elements from the spread array
+				spreadValue := g.generateExpression(spread.Value)
+				output.WriteString(fmt.Sprintf("for _, __v in ipairs(%s) do table.insert(__temp, __v) end; ", spreadValue))
+			} else {
+				// Insert single element
+				output.WriteString(fmt.Sprintf("table.insert(__temp, %s); ", g.generateExpression(val)))
+			}
+		}
+
+		output.WriteString("return __temp end)()")
+		return output.String()
+	}
+
+	// No spread - use normal table literal generation
 	var output strings.Builder
 	output.WriteString("{")
 
@@ -757,6 +807,45 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 		}
 	}
 
+	// Check if any argument is a spread expression
+	hasSpread := false
+	for _, arg := range node.Arguments {
+		if _, ok := arg.(*ast.SpreadExpression); ok {
+			hasSpread = true
+			break
+		}
+	}
+
+	// If there are spread arguments, we need special handling
+	if hasSpread {
+		// Simple case: single spread argument
+		if len(node.Arguments) == 1 {
+			if spread, ok := node.Arguments[0].(*ast.SpreadExpression); ok {
+				spreadValue := g.generateExpression(spread.Value)
+				return fmt.Sprintf("%s(table.unpack(%s))", function, spreadValue)
+			}
+		}
+
+		// Complex case: mixed regular and spread arguments
+		// Build a table with all args and unpack it
+		var tableBuilder strings.Builder
+		tableBuilder.WriteString("{")
+		for i, arg := range node.Arguments {
+			if i > 0 {
+				tableBuilder.WriteString(", ")
+			}
+			if spread, ok := arg.(*ast.SpreadExpression); ok {
+				// Use table.unpack to spread the array
+				tableBuilder.WriteString(fmt.Sprintf("table.unpack(%s)", g.generateExpression(spread.Value)))
+			} else {
+				tableBuilder.WriteString(g.generateExpression(arg))
+			}
+		}
+		tableBuilder.WriteString("}")
+		return fmt.Sprintf("%s(table.unpack(%s))", function, tableBuilder.String())
+	}
+
+	// No spread arguments - normal case
 	args := make([]string, len(node.Arguments))
 	for i, arg := range node.Arguments {
 		args[i] = g.generateExpression(arg)

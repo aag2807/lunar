@@ -1089,10 +1089,32 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	// Create function type
 	params := make([]Type, len(node.Parameters))
 	for i, param := range node.Parameters {
-		if param.Type != nil {
-			params[i] = c.resolveTypeExpression(param.Type)
+		// Validate rest parameters
+		if param.IsRest {
+			// Rest parameter must be last
+			if i != len(node.Parameters)-1 {
+				c.addError("Rest parameter must be the last parameter", param.Token)
+			}
+			// Rest parameter type should be an array
+			if param.Type != nil {
+				paramType := c.resolveTypeExpression(param.Type)
+				if _, ok := paramType.(*ArrayType); !ok && !paramType.Equals(Any) {
+					c.addError(
+						fmt.Sprintf("Rest parameter must have array type, got '%s'", paramType.String()),
+						param.Token,
+					)
+				}
+				params[i] = paramType
+			} else {
+				// Default to any[] for rest parameters
+				params[i] = &ArrayType{ElementType: Any}
+			}
 		} else {
-			params[i] = Any
+			if param.Type != nil {
+				params[i] = c.resolveTypeExpression(param.Type)
+			} else {
+				params[i] = Any
+			}
 		}
 	}
 
@@ -1107,10 +1129,17 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		genericParams[i] = param.Value
 	}
 
+	// Check if the last parameter is a rest parameter
+	hasRestParam := false
+	if len(node.Parameters) > 0 && node.Parameters[len(node.Parameters)-1].IsRest {
+		hasRestParam = true
+	}
+
 	funcType := &FunctionType{
-		Parameters:    params,
-		ReturnType:    returnType,
-		GenericParams: genericParams,
+		Parameters:       params,
+		ReturnType:       returnType,
+		GenericParams:    genericParams,
+		HasRestParameter: hasRestParam,
 	}
 
 	// Restore environment and register function
@@ -1775,6 +1804,8 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 		return c.checkIndexExpression(node)
 	case *ast.GenericType:
 		return c.checkGenericInstantiation(node)
+	case *ast.SpreadExpression:
+		return c.checkSpreadExpression(node)
 	default:
 		return Any
 	}
@@ -1900,6 +1931,12 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 		seenTypes := make(map[string]Type)
 		for _, value := range node.Values {
 			valueType := c.checkExpression(value)
+			// If it's a spread expression, unwrap the array type
+			if _, ok := value.(*ast.SpreadExpression); ok {
+				if arrayType, isArray := valueType.(*ArrayType); isArray {
+					valueType = arrayType.ElementType
+				}
+			}
 			seenTypes[valueType.String()] = valueType
 		}
 
@@ -2067,8 +2104,17 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 
 		fnType := classType.Constructor
 
-		// Check argument count
-		if len(node.Arguments) != len(fnType.Parameters) {
+		// Check if any argument is a spread expression
+		hasSpread := false
+		for _, arg := range node.Arguments {
+			if _, ok := arg.(*ast.SpreadExpression); ok {
+				hasSpread = true
+				break
+			}
+		}
+
+		// Check argument count (skip if there are spread arguments)
+		if !hasSpread && len(node.Arguments) != len(fnType.Parameters) {
 			c.addError(
 				fmt.Sprintf("Constructor expects %d arguments, got %d",
 					len(fnType.Parameters), len(node.Arguments)),
@@ -2104,16 +2150,38 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 		return Any
 	}
 
+	// Check if any argument is a spread expression (used for multiple checks)
+	hasSpreadArgs := false
+	for _, arg := range node.Arguments {
+		if _, ok := arg.(*ast.SpreadExpression); ok {
+			hasSpreadArgs = true
+			break
+		}
+	}
+
 	// If the function is generic and called without explicit type arguments, try to infer them
 	if len(fnType.GenericParams) > 0 {
-		// Check argument count first
-		if len(node.Arguments) != len(fnType.Parameters) {
+		// Check argument count first (skip if there are spread arguments or function has rest parameter)
+		if !hasSpreadArgs && !fnType.HasRestParameter && len(node.Arguments) != len(fnType.Parameters) {
 			c.addError(
 				fmt.Sprintf("Function expects %d arguments, got %d",
 					len(fnType.Parameters), len(node.Arguments)),
 				node.Token,
 			)
 			return fnType.ReturnType
+		}
+
+		// If function has rest parameter, check minimum argument count
+		if !hasSpreadArgs && fnType.HasRestParameter {
+			minArgs := len(fnType.Parameters) - 1
+			if len(node.Arguments) < minArgs {
+				c.addError(
+					fmt.Sprintf("Function expects at least %d arguments, got %d",
+						minArgs, len(node.Arguments)),
+					node.Token,
+				)
+				return fnType.ReturnType
+			}
 		}
 
 		// Infer type arguments from call arguments
@@ -2158,8 +2226,8 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 		}
 	}
 
-	// Check argument count
-	if len(node.Arguments) != len(fnType.Parameters) {
+	// Check argument count (skip if there are spread arguments or function has rest parameter)
+	if !hasSpreadArgs && !fnType.HasRestParameter && len(node.Arguments) != len(fnType.Parameters) {
 		c.addError(
 			fmt.Sprintf("Function expects %d arguments, got %d",
 				len(fnType.Parameters), len(node.Arguments)),
@@ -2168,15 +2236,48 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 		return fnType.ReturnType
 	}
 
-	// Check argument types
-	for i, arg := range node.Arguments {
-		argType := c.checkExpression(arg)
-		if !argType.IsAssignableTo(fnType.Parameters[i]) {
+	// If function has rest parameter, check minimum argument count
+	if !hasSpreadArgs && fnType.HasRestParameter {
+		minArgs := len(fnType.Parameters) - 1 // All params except the rest parameter
+		if len(node.Arguments) < minArgs {
 			c.addError(
-				fmt.Sprintf("Argument %d: cannot pass type '%s' to parameter of type '%s'",
-					i+1, argType.String(), fnType.Parameters[i].String()),
+				fmt.Sprintf("Function expects at least %d arguments, got %d",
+					minArgs, len(node.Arguments)),
 				node.Token,
 			)
+			return fnType.ReturnType
+		}
+	}
+
+	// Check argument types (basic check, skip detailed checks with spread)
+	if !hasSpreadArgs {
+		for i, arg := range node.Arguments {
+			argType := c.checkExpression(arg)
+
+			// Determine which parameter type to check against
+			var paramType Type
+			if fnType.HasRestParameter && i >= len(fnType.Parameters)-1 {
+				// This argument goes to the rest parameter - unwrap array type
+				restParamType := fnType.Parameters[len(fnType.Parameters)-1]
+				if arrayType, ok := restParamType.(*ArrayType); ok {
+					paramType = arrayType.ElementType
+				} else {
+					paramType = Any
+				}
+			} else if i < len(fnType.Parameters) {
+				paramType = fnType.Parameters[i]
+			} else {
+				// This should not happen if our count checking is correct
+				continue
+			}
+
+			if !argType.IsAssignableTo(paramType) {
+				c.addError(
+					fmt.Sprintf("Argument %d: cannot pass type '%s' to parameter of type '%s'",
+						i+1, argType.String(), paramType.String()),
+					node.Token,
+				)
+			}
 		}
 	}
 
@@ -2404,6 +2505,31 @@ func (c *Checker) checkGenericInstantiation(node *ast.GenericType) Type {
 	}
 
 	c.addError(fmt.Sprintf("'%s' is not a generic type or function", baseIdent.Value), node.Token)
+	return Any
+}
+
+// checkSpreadExpression checks a spread expression
+func (c *Checker) checkSpreadExpression(node *ast.SpreadExpression) Type {
+	valueType := c.checkExpression(node.Value)
+
+	// Spread expression should contain an array or table
+	if arrayType, ok := valueType.(*ArrayType); ok {
+		return arrayType
+	}
+
+	if tableType, ok := valueType.(*TableType); ok {
+		return tableType
+	}
+
+	// If it's Any, allow it
+	if valueType.Equals(Any) {
+		return Any
+	}
+
+	c.addError(
+		fmt.Sprintf("Cannot spread type '%s', expected array or table", valueType.String()),
+		node.Token,
+	)
 	return Any
 }
 

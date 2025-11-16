@@ -154,6 +154,18 @@ func (ie *IndexExpression) String() string {
 	return fmt.Sprintf("%s[%s]", ie.Left.String(), ie.Index.String())
 }
 
+// SpreadExpression represents spread syntax ...expr
+type SpreadExpression struct {
+	Token lexer.Token // '...' token
+	Value Expression  // the expression being spread
+}
+
+func (se *SpreadExpression) expressionNode()      {}
+func (se *SpreadExpression) TokenLiteral() string { return se.Token.Literal }
+func (se *SpreadExpression) String() string {
+	return fmt.Sprintf("...%s", se.Value.String())
+}
+
 type TableLiteral struct {
 	Token  lexer.Token // '{' token
 	Pairs  map[Expression]Expression // for key-value pairs
@@ -351,15 +363,19 @@ func (tg *TypeGuardType) String() string {
 }
 
 type Parameter struct {
-	Token lexer.Token
-	Name  *Identifier
-	Type  Expression
+	Token  lexer.Token
+	Name   *Identifier
+	Type   Expression
+	IsRest bool // true for ...param
 }
 
 func (p *Parameter) expressionNode()      {}
 func (p *Parameter) TokenLiteral() string { return p.Token.Literal }
 func (p *Parameter) String() string {
 	var out strings.Builder
+	if p.IsRest {
+		out.WriteString("...")
+	}
 	out.WriteString(p.Name.String())
 	if p.Type != nil {
 		out.WriteString(": ")

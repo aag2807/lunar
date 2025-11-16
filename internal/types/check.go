@@ -648,6 +648,11 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		// Type guards always return boolean
 		return Boolean
 
+	case *ast.OptionalType:
+		// Optional type T? is syntactic sugar for T | nil
+		baseType := c.resolveTypeExpression(node.Type)
+		return &UnionType{Types: []Type{baseType, Nil}}
+
 	default:
 		c.addError(fmt.Sprintf("Cannot resolve type expression: %T", expr), lexer.Token{})
 		return Any

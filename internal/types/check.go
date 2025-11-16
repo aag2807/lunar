@@ -1444,7 +1444,37 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 		}
 	}
 
-	// For array-style or mixed tables, return a generic table type
+	// Check if this is an array-style table (has sequential Values, no Pairs)
+	if len(node.Values) > 0 && len(node.Pairs) == 0 {
+		// Infer element type from the values
+		// Collect all unique types
+		seenTypes := make(map[string]Type)
+		for _, value := range node.Values {
+			valueType := c.checkExpression(value)
+			seenTypes[valueType.String()] = valueType
+		}
+
+		// If all elements have the same type, use that type
+		if len(seenTypes) == 1 {
+			for _, t := range seenTypes {
+				return &ArrayType{ElementType: t}
+			}
+		}
+
+		// If elements have different types, create a union type
+		if len(seenTypes) > 1 {
+			types := make([]Type, 0, len(seenTypes))
+			for _, t := range seenTypes {
+				types = append(types, t)
+			}
+			return &ArrayType{ElementType: &UnionType{Types: types}}
+		}
+
+		// Empty array defaults to any[]
+		return &ArrayType{ElementType: Any}
+	}
+
+	// For mixed or key-value tables, return a generic table type
 	return &TableType{KeyType: Any, ValueType: Any}
 }
 

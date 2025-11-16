@@ -854,12 +854,20 @@ func (t *GenericType) IsAssignableTo(other Type) bool {
 // IsNumericType checks if a type is numeric
 func IsNumericType(t Type) bool {
 	_, ok := t.(*NumberType)
+	if ok {
+		return true
+	}
+	_, ok = t.(*NumberLiteralType)
 	return ok
 }
 
 // IsStringType checks if a type is a string
 func IsStringType(t Type) bool {
 	_, ok := t.(*StringType)
+	if ok {
+		return true
+	}
+	_, ok = t.(*StringLiteralType)
 	return ok
 }
 

@@ -94,7 +94,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.EQ, p.parseInfixExpression)
 	p.registerInfix(lexer.NOT_EQ, p.parseInfixExpression)
 	p.registerInfix(lexer.NOT_EQ_LUA, p.parseInfixExpression)
-	p.registerInfix(lexer.LT, p.parseInfixExpression)
+	p.registerInfix(lexer.LT, p.parseGenericOrLessThan)
 	p.registerInfix(lexer.GT, p.parseInfixExpression)
 	p.registerInfix(lexer.LT_EQ, p.parseInfixExpression)
 	p.registerInfix(lexer.GT_EQ, p.parseInfixExpression)
@@ -317,6 +317,95 @@ func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 	expression.Right = p.parseExpression(precedence)
 
 	return expression
+}
+
+// parseGenericOrLessThan disambiguates between generic type instantiation and less-than operator
+func (p *Parser) parseGenericOrLessThan(left ast.Expression) ast.Expression {
+	// Only try to parse as generic if left is an identifier or dot expression
+	switch left.(type) {
+	case *ast.Identifier, *ast.DotExpression:
+		// Try to parse as generic type instantiation
+		if genericExpr := p.tryParseGenericType(left); genericExpr != nil {
+			return genericExpr
+		}
+	}
+
+	// Fall back to less-than operator
+	return p.parseInfixExpression(left)
+}
+
+// tryParseGenericType attempts to parse generic type arguments
+// Returns nil if this isn't a generic type instantiation
+func (p *Parser) tryParseGenericType(baseExpr ast.Expression) ast.Expression {
+	// Save current position in case we need to backtrack
+	startToken := p.curToken
+	startPeek := p.peekToken
+
+	// Current token is '<', move past it
+	p.nextToken()
+
+	// Try to parse type arguments
+	typeArgs := []ast.Expression{}
+
+	// Parse first type argument
+	if !p.isTypeToken(p.curToken.Type) {
+		// Not a type token, this is a less-than operator
+		p.curToken = startToken
+		p.peekToken = startPeek
+		return nil
+	}
+
+	firstArg := p.parseType()
+	if firstArg == nil {
+		p.curToken = startToken
+		p.peekToken = startPeek
+		return nil
+	}
+	typeArgs = append(typeArgs, firstArg)
+
+	// Parse additional type arguments
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken() // consume comma
+		p.nextToken() // move to next type
+		arg := p.parseType()
+		if arg == nil {
+			p.curToken = startToken
+			p.peekToken = startPeek
+			return nil
+		}
+		typeArgs = append(typeArgs, arg)
+	}
+
+	// Must end with '>'
+	if !p.peekTokenIs(lexer.GT) {
+		p.curToken = startToken
+		p.peekToken = startPeek
+		return nil
+	}
+	p.nextToken() // consume '>'
+
+	// Successfully parsed generic type
+	token := startToken
+	if ident, ok := baseExpr.(*ast.Identifier); ok {
+		token = ident.Token
+	}
+
+	return &ast.GenericType{
+		Token:         token,
+		BaseType:      baseExpr,
+		TypeArguments: typeArgs,
+	}
+}
+
+// isTypeToken checks if a token can start a type expression
+func (p *Parser) isTypeToken(tokenType lexer.TokenType) bool {
+	switch tokenType {
+	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN,
+		lexer.ANY, lexer.VOID, lexer.NIL, lexer.TABLE, lexer.LPAREN:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Parser) parsePrefixExpression() ast.Expression {

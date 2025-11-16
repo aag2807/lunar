@@ -240,46 +240,57 @@ func NewChecker() *Checker {
 
 // loadStdlib loads the Lua standard library type definitions
 func (c *Checker) loadStdlib() {
-	// Try to find stdlib/lua.d.lunar relative to the current directory
-	stdlibPaths := []string{
-		"stdlib/lua.d.lunar",
-		"../stdlib/lua.d.lunar",
-		"../../stdlib/lua.d.lunar",
-		"../../../stdlib/lua.d.lunar",
+	// List of stdlib files to load
+	stdlibFiles := []string{"lua.d.lunar", "table.d.lunar", "string.d.lunar", "math.d.lunar"}
+
+	// Try to find stdlib directory relative to the current directory
+	stdlibDirs := []string{
+		"stdlib",
+		"../stdlib",
+		"../../stdlib",
+		"../../../stdlib",
 	}
 
-	var content []byte
-	var err error
-	for _, path := range stdlibPaths {
-		content, err = os.ReadFile(path)
-		if err == nil {
+	var foundDir string
+	for _, dir := range stdlibDirs {
+		if _, err := os.Stat(dir); err == nil {
+			foundDir = dir
 			break
 		}
 	}
 
-	if err != nil {
+	if foundDir == "" {
 		// If stdlib not found, silently continue (tests can still define what they need)
 		return
 	}
 
-	// Parse the stdlib file
-	l := lexer.New(string(content))
-	p := parser.New(l)
-	statements := p.Parse()
+	// Load each stdlib file
+	for _, filename := range stdlibFiles {
+		filepath := foundDir + "/" + filename
+		content, err := os.ReadFile(filepath)
+		if err != nil {
+			continue // Skip files that don't exist
+		}
 
-	if len(p.Errors()) > 0 {
-		// Stdlib file has parse errors, silently continue
-		return
-	}
+		// Parse the stdlib file
+		l := lexer.New(string(content))
+		p := parser.New(l)
+		statements := p.Parse()
 
-	// Register stdlib declarations
-	for _, stmt := range statements {
-		c.registerTypeDefinition(stmt)
-	}
+		if len(p.Errors()) > 0 {
+			// Stdlib file has parse errors, silently continue
+			continue
+		}
 
-	// Check stdlib statements to register functions and variables
-	for _, stmt := range statements {
-		c.checkStatement(stmt)
+		// Register stdlib declarations
+		for _, stmt := range statements {
+			c.registerTypeDefinition(stmt)
+		}
+
+		// Check stdlib statements to register functions and variables
+		for _, stmt := range statements {
+			c.checkStatement(stmt)
+		}
 	}
 }
 

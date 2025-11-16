@@ -243,6 +243,13 @@ func (t *ArrayType) IsAssignableTo(other Type) bool {
 	if otherArray, ok := other.(*ArrayType); ok {
 		return t.ElementType.IsAssignableTo(otherArray.ElementType)
 	}
+	// Special case: any[] is assignable to table<K, V> for flexibility
+	// This allows empty {} literals typed as any[] to be assigned to table types
+	if _, ok := other.(*TableType); ok {
+		if _, isAny := t.ElementType.(*AnyType); isAny {
+			return true
+		}
+	}
 	return false
 }
 

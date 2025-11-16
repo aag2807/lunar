@@ -34,6 +34,8 @@ type Comparator = (a: number, b: number) => boolean
 
 func TestFunctionTypeParameter(t *testing.T) {
 	input := `
+declare function print(message: any): void end
+
 function execute(callback: (message: string) => void): void
 	callback("Hello")
 end
@@ -179,6 +181,8 @@ end
 
 func TestFunctionParameterTypeMismatch(t *testing.T) {
 	input := `
+declare function print(message: any): void end
+
 function greet(name: string): void
 	print(name)
 end

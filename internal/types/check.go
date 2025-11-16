@@ -1449,8 +1449,8 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 		}
 	}
 
-	// Check if this is an array-style table (has sequential Values, no Pairs)
-	if len(node.Values) > 0 && len(node.Pairs) == 0 {
+	// Check if this is an array-style table (has sequential Values, or empty with no Pairs)
+	if len(node.Pairs) == 0 {
 		// Infer element type from the values
 		// Collect all unique types
 		seenTypes := make(map[string]Type)

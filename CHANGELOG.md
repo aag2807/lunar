@@ -100,19 +100,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Type compatibility checking with `IsAssignableTo()` method
   - Generic type instantiation and constraint checking
 
-## [Unreleased] - Planned for v1.1
+## [1.1.0] - 2025-11-13
+
+### Added - Context-Aware Keywords
+
+- **Context-aware keyword support** for `string`, `table`, and `type`
+  - These keywords now work as type names in type contexts: `local x: string = "hello"`
+  - And as identifiers in value contexts: `string.len("hello")`
+  - Primitive types take precedence in type annotations
+  - Enables full standard library type coverage
+
+- **Complete Standard Library Support**
+  - `string.d.lunar` - Full type declarations for Lua string library (previously disabled)
+  - `table.d.lunar` - Full type declarations for Lua table library (previously disabled)
+  - All stdlib functions now have complete type safety
+
+### Changed
+- Parser now accepts contextual keywords as identifiers in value contexts
+- Type resolver prioritizes primitive types over environment variables
+- Updated all declaration parsing to support contextual keywords
+
+### Added - Source Maps
+
+- **Source map generation** with `--source-map` flag
+  - Generates `.lua.map` files following Source Map v3 specification
+  - Proper VLQ (Variable Length Quantity) base64 encoding
+  - Maps generated Lua code back to original Lunar source
+  - Automatic source map comment insertion in generated Lua files
+  - Enables debugging with original source line numbers
+
+- **Source Map Infrastructure**
+  - `internal/sourcemap` package with full source map support
+  - Statement-level position tracking during code generation
+  - JSON and base64 encoding support for source maps
+  - Comprehensive test suite for VLQ encoding and source map generation
+
+### Fixed
+- Resolved conflict between primitive type names and stdlib module names
+- `string`, `table`, and `type` can now be used as variable/function names
+- Fixed codegen test expectations to match optimizer behavior
+
+## [1.2.0] - 2025-11-13
+
+### Added - Enhanced Error Messages
+
+- **"Did you mean?" suggestions** for undefined variables
+  - Uses Levenshtein distance algorithm to find similar names
+  - Suggests up to 3 closest matches from available identifiers
+  - Includes variables, functions, classes, interfaces, enums, and type aliases
+  - Configurable distance threshold (currently 3 edits)
+  - Example: `Undefined variable 'usrName'. Did you mean 'userName'?`
+
+### Added - Additional Standard Library Declarations
+
+- **coroutine.d.lunar** - Complete type declarations for Lua coroutine library
+  - coroutine.create, resume, yield, status, running, wrap
+  - Thread type for coroutine values
+  - Full documentation in type signatures
+
+- **debug.d.lunar** - Complete type declarations for Lua debug library
+  - All debug introspection functions (getinfo, getlocal, traceback, etc.)
+  - DebugInfo type for debug information tables
+  - HookFunction type for debug hooks
+
+- **package.d.lunar** - Complete type declarations for Lua package/module system
+  - package.path, package.cpath, package.loaded, package.preload
+  - require() and module() function declarations
+  - LoaderFunction type for custom loaders
+
+### Added - Integration Tests
+
+- **End-to-end compilation tests** in test/integration directory
+  - Tests for basic type checking
+  - Tests for source map generation
+  - Tests for error message quality
+  - Automated Go-based test suite
+
+### Changed
+
+- Improved error messages now include contextual suggestions
+- All Lua 5.1 standard library modules now have type declarations
+
+## [Unreleased] - Future (v1.3+)
 
 ### Planned
-- Context-aware keywords to enable full `string.*` and `table.*` stdlib support
-- Enhanced error messages with "Did you mean...?" suggestions
-- Additional standard library declarations
 - Performance optimizations for large codebases
+- Watch mode for continuous compilation
+- Better IDE integration helpers
 
 ## [Unreleased] - Future (v2.0+)
 
 ### Planned
 - Language Server Protocol (LSP) implementation for IDE support
-- Source maps for debugging compiled code
 - Package manager integration
 - Code formatter tool
 - Watch mode for continuous compilation
@@ -122,4 +201,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History
 
+- **1.2.0** (2025-11-13) - "Did you mean?" suggestions, additional stdlib (coroutine, debug, package), integration tests
+- **1.1.0** (2025-11-13) - Context-aware keywords, source maps, complete stdlib support
 - **1.0.0** (2024-11-10) - Initial release with complete type system, OOP, generics, stdlib declarations, and tooling

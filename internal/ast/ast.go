@@ -26,6 +26,15 @@ func (i *Identifier) expressionNode()      {}
 func (i *Identifier) TokenLiteral() string { return i.Token.Literal }
 func (i *Identifier) String() string       { return i.Value }
 
+// SuperExpression represents the 'super' keyword for accessing parent class members
+type SuperExpression struct {
+	Token lexer.Token // The 'super' token
+}
+
+func (se *SuperExpression) expressionNode()      {}
+func (se *SuperExpression) TokenLiteral() string { return se.Token.Literal }
+func (se *SuperExpression) String() string       { return "super" }
+
 type NumberLiteral struct {
 	Token lexer.Token
 	Value float64
@@ -356,6 +365,9 @@ type FunctionDeclaration struct {
 	Parameters    []*Parameter
 	ReturnType    Expression
 	Body          *BlockStatement
+	IsStatic      bool   // static method (when used in class)
+	IsAbstract    bool   // abstract method (when used in class)
+	Visibility    string // visibility modifier: public, private, protected (when used in class)
 }
 
 func (fd *FunctionDeclaration) statementNode()       {}
@@ -547,10 +559,12 @@ type ClassDeclaration struct {
 	Token         lexer.Token // 'class' token
 	Name          *Identifier
 	GenericParams []*Identifier           // generic type parameters like <T, U>
+	Extends       Expression              // parent class name (single inheritance)
 	Properties    []*PropertyDeclaration
 	Methods       []*FunctionDeclaration
 	Constructor   *ConstructorDeclaration
 	Implements    []Expression // interface names
+	IsAbstract    bool         // abstract class
 }
 
 func (cd *ClassDeclaration) statementNode()       {}
@@ -607,6 +621,8 @@ func (cd *ClassDeclaration) String() string {
 type PropertyDeclaration struct {
 	Token      lexer.Token // property name token
 	Visibility string      // "public", "private", "protected"
+	IsStatic   bool        // static property
+	IsReadonly bool        // readonly property
 	Name       *Identifier
 	Type       Expression
 }

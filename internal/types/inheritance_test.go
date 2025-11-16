@@ -6,103 +6,18 @@ import (
 	"testing"
 )
 
-func TestDeclareConst(t *testing.T) {
+func TestClassInheritance(t *testing.T) {
 	input := `
-declare const PI: number
-
-local radius: number = 5
-local circumference: number = PI
-`
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
-
-	checker := NewChecker()
-	errors := checker.Check(statements)
-
-	if len(errors) > 0 {
-		t.Errorf("Expected no type errors, got %d:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %s", err.Message)
-		}
-	}
-}
-
-func TestDeclareFunction(t *testing.T) {
-	input := `
-declare function print(message: string): void
-
-print("Hello, world!")
-`
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
-
-	checker := NewChecker()
-	errors := checker.Check(statements)
-
-	if len(errors) > 0 {
-		t.Errorf("Expected no type errors, got %d:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %s", err.Message)
-		}
-	}
-}
-
-func TestDeclareInterface(t *testing.T) {
-	input := `
-declare interface Graphics {
-	clear: function(): void
-	setColor: function(r: number, g: number, b: number): void
-}
+class Animal
+	name: string
 end
 
-declare const graphics: Graphics
-
-local g: Graphics = graphics
-`
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
-
-	checker := NewChecker()
-	errors := checker.Check(statements)
-
-	if len(errors) > 0 {
-		t.Errorf("Expected no type errors, got %d:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %s", err.Message)
-		}
-	}
-}
-
-func TestDeclareType(t *testing.T) {
-	input := `
-declare type Vector2
-	x: number
-	y: number
+class Dog extends Animal
+	breed: string
 end
 
-declare function distance(v1: Vector2, v2: Vector2): number
-
-local v1: Vector2 = { x = 0, y = 0 }
-local v2: Vector2 = { x = 3, y = 4 }
-local d: number = distance(v1, v2)
+local dog: Dog = Dog()
+local animal: Animal = dog
 `
 
 	l := lexer.New(input)
@@ -124,13 +39,124 @@ local d: number = distance(v1, v2)
 	}
 }
 
-func TestDeclareWithGeneric(t *testing.T) {
+func TestAbstractClassInheritance(t *testing.T) {
 	input := `
-declare type Optional<T> = T | nil
+abstract class Animal
+	abstract speak(): void
+end
 
-declare function getValue(): Optional<string>
+class Dog extends Animal
+	speak(): void
+		local x: number = 1
+	end
+end
+`
 
-local result: Optional<string> = getValue()
+	l := lexer.New(input)
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	checker := NewChecker()
+	errors := checker.Check(statements)
+
+	if len(errors) > 0 {
+		t.Errorf("Expected no type errors, got %d:", len(errors))
+		for _, err := range errors {
+			t.Errorf("  %s", err.Message)
+		}
+	}
+}
+
+func TestAbstractMethodNotImplemented(t *testing.T) {
+	input := `
+abstract class Animal
+	abstract speak(): void
+end
+
+class Dog extends Animal
+end
+`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	checker := NewChecker()
+	errors := checker.Check(statements)
+
+	// Should have 1 error: abstract method not implemented
+	if len(errors) != 1 {
+		t.Errorf("Expected 1 type error, got %d:", len(errors))
+		for _, err := range errors {
+			t.Errorf("  %s", err.Message)
+		}
+		return
+	}
+
+	expectedMsg := "Class 'Dog' must implement abstract method 'speak' from parent class 'Animal'"
+	if errors[0].Message != expectedMsg {
+		t.Errorf("Expected error: %s\nGot: %s", expectedMsg, errors[0].Message)
+	}
+}
+
+func TestParentPropertyAccess(t *testing.T) {
+	input := `
+class Animal
+	name: string
+end
+
+class Dog extends Animal
+	breed: string
+end
+
+local dog: Dog = Dog()
+local n: string = dog.name
+`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	checker := NewChecker()
+	errors := checker.Check(statements)
+
+	if len(errors) > 0 {
+		t.Errorf("Expected no type errors, got %d:", len(errors))
+		for _, err := range errors {
+			t.Errorf("  %s", err.Message)
+		}
+	}
+}
+
+func TestMultiLevelInheritance(t *testing.T) {
+	input := `
+class Animal
+	name: string
+end
+
+class Mammal extends Animal
+	furColor: string
+end
+
+class Dog extends Mammal
+	breed: string
+end
+
+local dog: Dog = Dog()
+local n: string = dog.name
+local fur: string = dog.furColor
 `
 
 	l := lexer.New(input)

@@ -1,0 +1,11 @@
+-- Basic type safety test
+local name: string = "Alice"
+local age: number = 25
+local active: boolean = true
+
+function greet(person: string): string
+    return "Hello, " .. person
+end
+
+local message: string = greet(name)
+print(message)

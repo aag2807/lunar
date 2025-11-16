@@ -96,7 +96,8 @@ func TestGenerateInfixExpression(t *testing.T) {
 
 	g := New()
 	result := g.generateExpression(expr)
-	expected := "(2 + 3)"
+	// Optimizer removes unnecessary parentheses for simple infix expressions
+	expected := "2 + 3"
 
 	if result != expected {
 		t.Errorf("Expected: %s, Got: %s", expected, result)

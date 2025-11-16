@@ -3,18 +3,82 @@ package codegen
 import (
 	"fmt"
 	"lunar/internal/ast"
+	"lunar/internal/lexer"
+	"lunar/internal/sourcemap"
 	"strings"
 )
 
 // Generator generates Lua code from an AST
 type Generator struct {
-	indent int
+	indent           int
+	sourceMapBuilder *sourcemap.Builder
+	currentLine      int
+	currentColumn    int
+	sourceFile       string
+	classes          map[string]bool   // Track defined classes for constructor calls
+	classParents     map[string]string // Track parent class names for super
+	currentClassName string            // Current class being generated
 }
 
 // New creates a new code generator
 func New() *Generator {
 	return &Generator{
-		indent: 0,
+		indent:       0,
+		classes:      make(map[string]bool),
+		classParents: make(map[string]string),
+	}
+}
+
+// NewWithSourceMap creates a new code generator with source map support
+func NewWithSourceMap(sourceFile, generatedFile string) *Generator {
+	return &Generator{
+		indent:           0,
+		sourceMapBuilder: sourcemap.NewBuilder(sourceFile, generatedFile),
+		currentLine:      1,
+		currentColumn:    0,
+		sourceFile:       sourceFile,
+		classes:          make(map[string]bool),
+		classParents:     make(map[string]string),
+	}
+}
+
+// GetSourceMap returns the built source map (if enabled)
+func (g *Generator) GetSourceMap() *sourcemap.SourceMap {
+	if g.sourceMapBuilder == nil {
+		return nil
+	}
+	return g.sourceMapBuilder.Build()
+}
+
+// trackMapping adds a source mapping if source maps are enabled
+func (g *Generator) trackMapping(sourceToken lexer.Token) {
+	if g.sourceMapBuilder == nil {
+		return
+	}
+
+	// Add mapping from current generated position to source position
+	g.sourceMapBuilder.AddMapping(
+		g.currentLine,
+		g.currentColumn,
+		sourceToken.Line,
+		sourceToken.Column-1, // Source maps use 0-based columns
+		"",
+	)
+}
+
+// write outputs text and updates position tracking
+func (g *Generator) write(text string) {
+	if g.sourceMapBuilder == nil {
+		return // Position tracking not needed without source maps
+	}
+
+	for _, char := range text {
+		if char == '\n' {
+			g.currentLine++
+			g.currentColumn = 0
+		} else {
+			g.currentColumn++
+		}
 	}
 }
 
@@ -23,17 +87,98 @@ func (g *Generator) Generate(statements []ast.Statement) string {
 	var output strings.Builder
 
 	for i, stmt := range statements {
+		// Track mapping at the start of each statement
+		if g.sourceMapBuilder != nil {
+			g.trackStatementMapping(stmt)
+		}
+
 		code := g.generateStatement(stmt)
 		if code != "" {
+			g.write(code)
 			output.WriteString(code)
 			// Add blank line between top-level declarations
 			if i < len(statements)-1 {
+				g.write("\n")
 				output.WriteString("\n")
 			}
 		}
 	}
 
 	return output.String()
+}
+
+// trackStatementMapping tracks the source mapping for a statement
+func (g *Generator) trackStatementMapping(stmt ast.Statement) {
+	if stmt == nil {
+		return
+	}
+
+	// Get the token from the statement
+	var token lexer.Token
+	switch node := stmt.(type) {
+	case *ast.VariableDeclaration:
+		token = node.Token
+	case *ast.FunctionDeclaration:
+		token = node.Token
+	case *ast.ExpressionStatement:
+		if node.Expression != nil {
+			token = g.getExpressionToken(node.Expression)
+		}
+	case *ast.ReturnStatement:
+		token = node.Token
+	case *ast.IfStatement:
+		token = node.Token
+	case *ast.WhileStatement:
+		token = node.Token
+	case *ast.ForStatement:
+		token = node.Token
+	case *ast.DoStatement:
+		token = node.Token
+	case *ast.BreakStatement:
+		token = node.Token
+	case *ast.AssignmentStatement:
+		if node.Name != nil {
+			token = g.getExpressionToken(node.Name)
+		}
+	case *ast.ClassDeclaration:
+		token = node.Token
+	case *ast.EnumDeclaration:
+		token = node.Token
+	case *ast.ExportStatement:
+		token = node.Token
+	case *ast.ImportStatement:
+		token = node.Token
+	default:
+		return
+	}
+
+	g.trackMapping(token)
+}
+
+// getExpressionToken gets the token from an expression
+func (g *Generator) getExpressionToken(expr ast.Expression) lexer.Token {
+	switch node := expr.(type) {
+	case *ast.Identifier:
+		return node.Token
+	case *ast.NumberLiteral:
+		return node.Token
+	case *ast.StringLiteral:
+		return node.Token
+	case *ast.BooleanLiteral:
+		return node.Token
+	case *ast.CallExpression:
+		return g.getExpressionToken(node.Function)
+	case *ast.InfixExpression:
+		return g.getExpressionToken(node.Left)
+	case *ast.PrefixExpression:
+		return node.Token
+	case *ast.DotExpression:
+		return g.getExpressionToken(node.Left)
+	case *ast.IndexExpression:
+		return g.getExpressionToken(node.Left)
+	default:
+		return lexer.Token{}
+	}
 }
 
 // generateStatement generates Lua code for a statement
@@ -287,9 +432,34 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 	var output strings.Builder
 	className := node.Name.Value
 
+	// Track this class for constructor calls
+	g.classes[className] = true
+
+	// Track parent class name for super
+	if node.Extends != nil {
+		if parentIdent, ok := node.Extends.(*ast.Identifier); ok {
+			g.classParents[className] = parentIdent.Value
+		}
+	}
+
+	// Set current class context
+	prevClassName := g.currentClassName
+	g.currentClassName = className
+	defer func() { g.currentClassName = prevClassName }()
+
 	// Create class table
 	output.WriteString(g.generateIndent())
 	output.WriteString(fmt.Sprintf("local %s = {}\n", className))
+
+	// Set up inheritance if there's a parent class
+	if node.Extends != nil {
+		if parentIdent, ok := node.Extends.(*ast.Identifier); ok {
+			parentName := parentIdent.Value
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("setmetatable(%s, {__index = %s})\n", className, parentName))
+		}
+	}
+
 	output.WriteString(g.generateIndent())
 	output.WriteString(fmt.Sprintf("%s.__index = %s\n", className, className))
 	output.WriteString("\n")
@@ -324,10 +494,44 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 		output.WriteString("\n")
 	}
 
-	// Generate methods
+	// Generate static properties
+	for _, prop := range node.Properties {
+		if prop.IsStatic {
+			// Static properties go directly on the class table
+			// They would need initialization in constructor or elsewhere
+			// For now, we'll just declare them as nil (can be set later)
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("%s.%s = nil\n", className, prop.Name.Value))
+		}
+	}
+	if len(node.Properties) > 0 {
+		hasStatic := false
+		for _, prop := range node.Properties {
+			if prop.IsStatic {
+				hasStatic = true
+				break
+			}
+		}
+		if hasStatic {
+			output.WriteString("\n")
+		}
+	}
+
+	// Generate methods (both static and instance)
 	for _, method := range node.Methods {
+		// Skip abstract methods (no implementation)
+		if method.IsAbstract {
+			continue
+		}
+
 		output.WriteString(g.generateIndent())
-		output.WriteString(fmt.Sprintf("function %s:%s(", className, method.Name.Value))
+		if method.IsStatic {
+			// Static methods use dot notation (no self parameter)
+			output.WriteString(fmt.Sprintf("function %s.%s(", className, method.Name.Value))
+		} else {
+			// Instance methods use colon notation (implicit self parameter)
+			output.WriteString(fmt.Sprintf("function %s:%s(", className, method.Name.Value))
+		}
 
 		params := make([]string, len(method.Parameters))
 		for i, param := range method.Parameters {
@@ -337,8 +541,10 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 		output.WriteString(")\n")
 
 		g.indent++
-		for _, stmt := range method.Body.Statements {
-			output.WriteString(g.generateStatement(stmt))
+		if method.Body != nil {
+			for _, stmt := range method.Body.Statements {
+				output.WriteString(g.generateStatement(stmt))
+			}
 		}
 		g.indent--
 
@@ -390,6 +596,15 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 	switch node := expr.(type) {
 	case *ast.Identifier:
 		return node.Value
+	case *ast.SuperExpression:
+		// Generate parent class name
+		if g.currentClassName != "" {
+			if parentName, ok := g.classParents[g.currentClassName]; ok {
+				return parentName
+			}
+		}
+		// Fallback (should not happen if type checker passes)
+		return "super"
 	case *ast.NumberLiteral:
 		return node.Token.Literal
 	case *ast.StringLiteral:
@@ -502,6 +717,13 @@ func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
 func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 	function := g.generateExpression(node.Function)
 
+	// Check if calling a class constructor (simple identifier that's a known class)
+	if ident, ok := node.Function.(*ast.Identifier); ok {
+		if g.classes[ident.Value] {
+			function = function + ".new"
+		}
+	}
+
 	args := make([]string, len(node.Arguments))
 	for i, arg := range node.Arguments {
 		args[i] = g.generateExpression(arg)
@@ -587,6 +809,21 @@ func GenerateWithOptions(statements []ast.Statement, optimize bool) string {
 
 	generator := New()
 	return generator.Generate(statements)
+}
+
+// GenerateWithSourceMap generates Lua code and source map
+func GenerateWithSourceMap(statements []ast.Statement, sourceFile, generatedFile string, optimize bool) (string, *sourcemap.SourceMap) {
+	// Run optimizer if enabled
+	if optimize {
+		optimizer := NewOptimizer(true)
+		statements = optimizer.OptimizeStatements(statements)
+	}
+
+	generator := NewWithSourceMap(sourceFile, generatedFile)
+	code := generator.Generate(statements)
+	sourceMap := generator.GetSourceMap()
+
+	return code, sourceMap
 }
 
 // needsParentheses determines if an expression needs parentheses

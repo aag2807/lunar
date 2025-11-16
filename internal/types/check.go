@@ -72,6 +72,123 @@ func (e *Environment) IsConst(name string) bool {
 	return false
 }
 
+// GetAllNames returns all variable names in this environment and outer scopes
+func (e *Environment) GetAllNames() []string {
+	names := make([]string, 0, len(e.store))
+	seen := make(map[string]bool)
+
+	// Collect names from current scope
+	for name := range e.store {
+		names = append(names, name)
+		seen[name] = true
+	}
+
+	// Collect names from outer scopes (avoiding duplicates)
+	if e.outer != nil {
+		for _, name := range e.outer.GetAllNames() {
+			if !seen[name] {
+				names = append(names, name)
+				seen[name] = true
+			}
+		}
+	}
+
+	return names
+}
+
+// levenshteinDistance calculates the edit distance between two strings
+// Used for "Did you mean?" suggestions
+func levenshteinDistance(s1, s2 string) int {
+	if len(s1) == 0 {
+		return len(s2)
+	}
+	if len(s2) == 0 {
+		return len(s1)
+	}
+
+	// Create a matrix for dynamic programming
+	matrix := make([][]int, len(s1)+1)
+	for i := range matrix {
+		matrix[i] = make([]int, len(s2)+1)
+	}
+
+	// Initialize first row and column
+	for i := 0; i <= len(s1); i++ {
+		matrix[i][0] = i
+	}
+	for j := 0; j <= len(s2); j++ {
+		matrix[0][j] = j
+	}
+
+	// Fill the matrix
+	for i := 1; i <= len(s1); i++ {
+		for j := 1; j <= len(s2); j++ {
+			cost := 1
+			if s1[i-1] == s2[j-1] {
+				cost = 0
+			}
+
+			matrix[i][j] = min(
+				matrix[i-1][j]+1,      // deletion
+				matrix[i][j-1]+1,      // insertion
+				matrix[i-1][j-1]+cost, // substitution
+			)
+		}
+	}
+
+	return matrix[len(s1)][len(s2)]
+}
+
+// min returns the minimum of three integers
+func min(a, b, c int) int {
+	if a < b {
+		if a < c {
+			return a
+		}
+		return c
+	}
+	if b < c {
+		return b
+	}
+	return c
+}
+
+// findSimilarNames finds names similar to the target name using Levenshtein distance
+// Returns up to maxSuggestions names with distance <= maxDistance
+func findSimilarNames(target string, candidates []string, maxDistance int, maxSuggestions int) []string {
+	type suggestion struct {
+		name     string
+		distance int
+	}
+
+	suggestions := make([]suggestion, 0)
+
+	// Calculate distances for all candidates
+	for _, candidate := range candidates {
+		distance := levenshteinDistance(target, candidate)
+		if distance <= maxDistance && distance > 0 {
+			suggestions = append(suggestions, suggestion{candidate, distance})
+		}
+	}
+
+	// Sort by distance (simple bubble sort for small lists)
+	for i := 0; i < len(suggestions); i++ {
+		for j := i + 1; j < len(suggestions); j++ {
+			if suggestions[j].distance < suggestions[i].distance {
+				suggestions[i], suggestions[j] = suggestions[j], suggestions[i]
+			}
+		}
+	}
+
+	// Return top suggestions
+	result := make([]string, 0, maxSuggestions)
+	for i := 0; i < len(suggestions) && i < maxSuggestions; i++ {
+		result = append(result, suggestions[i].name)
+	}
+
+	return result
+}
+
 // Checker performs type checking on an AST
 type Checker struct {
 	env    *Environment
@@ -86,6 +203,9 @@ type Checker struct {
 
 	// Current function return type (for checking return statements)
 	currentFunctionReturnType Type
+
+	// Current class context (for visibility checking)
+	currentClass *ClassType
 }
 
 // NewChecker creates a new type checker
@@ -148,10 +268,17 @@ func (c *Checker) registerTypeDefinition(stmt ast.Statement) {
 // registerClass registers a class type
 func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 	classType := &ClassType{
-		Name:       node.Name.Value,
-		Properties: make(map[string]Type),
-		Methods:    make(map[string]*FunctionType),
-		Implements: []*InterfaceType{},
+		Name:                node.Name.Value,
+		Properties:          make(map[string]Type),
+		Methods:             make(map[string]*FunctionType),
+		StaticProperties:    make(map[string]Type),
+		StaticMethods:       make(map[string]*FunctionType),
+		ReadonlyProps:       make(map[string]bool),
+		AbstractMethods:     make(map[string]bool),
+		PropertyVisibility:  make(map[string]string),
+		MethodVisibility:    make(map[string]string),
+		Implements:          []*InterfaceType{},
+		IsAbstract:          node.IsAbstract,
 	}
 
 	// Add generic type parameters to scope temporarily
@@ -166,7 +293,42 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 	// Register properties
 	for _, prop := range node.Properties {
 		propType := c.resolveTypeExpression(prop.Type)
-		classType.Properties[prop.Name.Value] = propType
+		propName := prop.Name.Value
+
+		// Track static vs instance properties
+		if prop.IsStatic {
+			classType.StaticProperties[propName] = propType
+		} else {
+			classType.Properties[propName] = propType
+		}
+
+		// Track readonly properties
+		if prop.IsReadonly {
+			classType.ReadonlyProps[propName] = true
+		}
+
+		// Track property visibility (default to public if not specified)
+		visibility := prop.Visibility
+		if visibility == "" {
+			visibility = "public"
+		}
+		classType.PropertyVisibility[propName] = visibility
+	}
+
+	// Register constructor
+	if node.Constructor != nil {
+		params := make([]Type, len(node.Constructor.Parameters))
+		for i, param := range node.Constructor.Parameters {
+			if param.Type != nil {
+				params[i] = c.resolveTypeExpression(param.Type)
+			} else {
+				params[i] = Any
+			}
+		}
+		classType.Constructor = &FunctionType{
+			Parameters: params,
+			ReturnType: classType, // Constructor returns an instance of the class
+		}
 	}
 
 	// Register methods
@@ -179,9 +341,40 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		if method.ReturnType != nil {
 			returnType = c.resolveTypeExpression(method.ReturnType)
 		}
-		classType.Methods[method.Name.Value] = &FunctionType{
+		funcType := &FunctionType{
 			Parameters: params,
 			ReturnType: returnType,
+		}
+		methodName := method.Name.Value
+
+		// Track static vs instance methods
+		if method.IsStatic {
+			classType.StaticMethods[methodName] = funcType
+		} else {
+			classType.Methods[methodName] = funcType
+		}
+
+		// Track abstract methods
+		if method.IsAbstract {
+			classType.AbstractMethods[methodName] = true
+		}
+
+		// Track method visibility (default to public if not specified)
+		visibility := method.Visibility
+		if visibility == "" {
+			visibility = "public"
+		}
+		classType.MethodVisibility[methodName] = visibility
+	}
+
+	// Resolve extends clause (parent class)
+	if node.Extends != nil {
+		if ident, ok := node.Extends.(*ast.Identifier); ok {
+			if parentClass, exists := c.classes[ident.Value]; exists {
+				classType.Parent = parentClass
+			} else {
+				c.addError(fmt.Sprintf("Parent class '%s' not found", ident.Value), ident.Token)
+			}
 		}
 	}
 
@@ -331,10 +524,23 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 
 	switch node := expr.(type) {
 	case *ast.Identifier:
-		// Check for built-in types
-		if typ, ok := c.env.Get(node.Value); ok {
-			return typ
+		// Check for primitive types FIRST (before checking environment)
+		// This ensures primitive types take precedence over variables with the same name
+		switch node.Value {
+		case "string":
+			return String
+		case "number":
+			return Number
+		case "boolean":
+			return Boolean
+		case "nil":
+			return Nil
+		case "any":
+			return Any
+		case "void":
+			return Void
 		}
+
 		// Check for user-defined types
 		if classType, ok := c.classes[node.Value]; ok {
 			return classType
@@ -348,6 +554,12 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		if aliasType, ok := c.typeAliases[node.Value]; ok {
 			return aliasType
 		}
+
+		// Check environment last (for other types registered in environment)
+		if typ, ok := c.env.Get(node.Value); ok {
+			return typ
+		}
+
 		c.addError(fmt.Sprintf("Unknown type '%s'", node.Value), node.Token)
 		return Any
 
@@ -755,6 +967,23 @@ func (c *Checker) checkAssignmentStatement(node *ast.AssignmentStatement) {
 		}
 	}
 
+	// Check if trying to assign to a readonly property
+	if dotExpr, ok := node.Name.(*ast.DotExpression); ok {
+		leftType := c.checkExpression(dotExpr.Left)
+		if classType, ok := leftType.(*ClassType); ok {
+			if rightIdent, ok := dotExpr.Right.(*ast.Identifier); ok {
+				propName := rightIdent.Value
+				if classType.IsReadonly(propName) {
+					c.addError(
+						fmt.Sprintf("Cannot assign to readonly property '%s'", propName),
+						node.Token,
+					)
+					return
+				}
+			}
+		}
+	}
+
 	targetType := c.checkExpression(node.Name)
 	valueType := c.checkExpression(node.Value)
 
@@ -774,12 +1003,45 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		return
 	}
 
+	// Check abstract methods: they should not have a body in abstract classes
+	// For now, we'll allow abstract methods to have no body
+	for _, method := range node.Methods {
+		if method.IsAbstract {
+			// Abstract methods shouldn't have implementation
+			if method.Body != nil && len(method.Body.Statements) > 0 {
+				c.addError(
+					fmt.Sprintf("Abstract method '%s' should not have an implementation", method.Name.Value),
+					method.Token,
+				)
+			}
+			// Abstract methods can only exist in abstract classes
+			if !node.IsAbstract {
+				c.addError(
+					fmt.Sprintf("Abstract method '%s' can only be declared in an abstract class", method.Name.Value),
+					method.Token,
+				)
+			}
+		}
+	}
+
+	// Check that non-abstract classes implement all abstract methods from parent
+	if !node.IsAbstract && classType.Parent != nil {
+		c.checkAbstractMethodsImplemented(classType, classType.Parent, node.Token)
+	}
+
+	// Check that method overrides have compatible signatures
+	if classType.Parent != nil {
+		c.checkMethodOverrides(classType, classType.Parent, node.Token)
+	}
+
 	// Check constructor if present
 	if node.Constructor != nil {
 		prevEnv := c.env
 		prevReturnType := c.currentFunctionReturnType
+		prevClass := c.currentClass
 		c.env = NewEnclosedEnvironment(prevEnv)
 		c.currentFunctionReturnType = Void
+		c.currentClass = classType
 
 		// Add generic type parameters to scope
 		for _, genericParam := range node.GenericParams {
@@ -803,13 +1065,16 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 
 		c.env = prevEnv
 		c.currentFunctionReturnType = prevReturnType
+		c.currentClass = prevClass
 	}
 
 	// Check methods
 	for _, method := range node.Methods {
 		prevEnv := c.env
 		prevReturnType := c.currentFunctionReturnType
+		prevClass := c.currentClass
 		c.env = NewEnclosedEnvironment(prevEnv)
+		c.currentClass = classType
 
 		// Add generic type parameters to scope
 		for _, genericParam := range node.GenericParams {
@@ -840,6 +1105,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 
 		c.env = prevEnv
 		c.currentFunctionReturnType = prevReturnType
+		c.currentClass = prevClass
 	}
 
 	// Check if class implements all interface methods
@@ -900,6 +1166,131 @@ func (c *Checker) checkClassImplementsInterface(class *ClassType, iface *Interfa
 	}
 }
 
+// checkAbstractMethodsImplemented verifies that a class implements all abstract methods from its parent
+func (c *Checker) checkAbstractMethodsImplemented(class *ClassType, parent *ClassType, token lexer.Token) {
+	// Recursively check all ancestors
+	if parent == nil {
+		return
+	}
+
+	// Check this parent's abstract methods
+	for methodName := range parent.AbstractMethods {
+		// Check if child class has this method
+		if _, ok := class.Methods[methodName]; !ok {
+			c.addError(
+				fmt.Sprintf("Class '%s' must implement abstract method '%s' from parent class '%s'",
+					class.Name, methodName, parent.Name),
+				token,
+			)
+		}
+	}
+
+	// Check grandparent
+	if parent.Parent != nil {
+		c.checkAbstractMethodsImplemented(class, parent.Parent, token)
+	}
+}
+
+// checkMethodOverrides verifies that overridden methods have compatible signatures
+func (c *Checker) checkMethodOverrides(class *ClassType, parent *ClassType, token lexer.Token) {
+	if parent == nil {
+		return
+	}
+
+	// Check each method in the child class
+	for methodName, childMethod := range class.Methods {
+		// Check if parent has a method with the same name
+		parentMethod, hasParentMethod := parent.GetMethod(methodName)
+		if !hasParentMethod {
+			continue // Not an override, skip
+		}
+
+		// Validate parameter count
+		if len(childMethod.Parameters) != len(parentMethod.Parameters) {
+			c.addError(
+				fmt.Sprintf("Method '%s' override has %d parameters, but parent method has %d parameters",
+					methodName, len(childMethod.Parameters), len(parentMethod.Parameters)),
+				token,
+			)
+			continue
+		}
+
+		// Validate parameter types
+		for i := 0; i < len(childMethod.Parameters); i++ {
+			childParamType := childMethod.Parameters[i]
+			parentParamType := parentMethod.Parameters[i]
+
+			// Parameters should have the same type (contravariance not supported yet)
+			if !childParamType.Equals(parentParamType) {
+				c.addError(
+					fmt.Sprintf("Method '%s' override parameter %d has type '%s', but parent method expects '%s'",
+						methodName, i+1, childParamType.String(), parentParamType.String()),
+					token,
+				)
+			}
+		}
+
+		// Validate return type (covariance: child can return more specific type)
+		if !childMethod.ReturnType.IsAssignableTo(parentMethod.ReturnType) {
+			c.addError(
+				fmt.Sprintf("Method '%s' override has return type '%s', but parent method returns '%s'",
+					methodName, childMethod.ReturnType.String(), parentMethod.ReturnType.String()),
+				token,
+			)
+		}
+
+		// Validate visibility (cannot be more restrictive)
+		childVisibility := class.MethodVisibility[methodName]
+		if childVisibility == "" {
+			childVisibility = "public"
+		}
+
+		// Find which parent class defines this method to get its visibility
+		var parentVisibility string
+		current := parent
+		for current != nil {
+			if _, ok := current.Methods[methodName]; ok {
+				parentVisibility = current.MethodVisibility[methodName]
+				if parentVisibility == "" {
+					parentVisibility = "public"
+				}
+				break
+			}
+			current = current.Parent
+		}
+
+		// Check if child is more restrictive than parent
+		if !c.isVisibilityCompatible(parentVisibility, childVisibility) {
+			c.addError(
+				fmt.Sprintf("Method '%s' override cannot reduce visibility from %s to %s",
+					methodName, parentVisibility, childVisibility),
+				token,
+			)
+		}
+	}
+
+	// Recursively check grandparent
+	if parent.Parent != nil {
+		c.checkMethodOverrides(class, parent.Parent, token)
+	}
+}
+
+// isVisibilityCompatible checks if child visibility is compatible with parent visibility
+// Child can be same or less restrictive (public > protected > private)
+func (c *Checker) isVisibilityCompatible(parentVis, childVis string) bool {
+	visibilityLevel := map[string]int{
+		"private":   1,
+		"protected": 2,
+		"public":    3,
+	}
+
+	parentLevel := visibilityLevel[parentVis]
+	childLevel := visibilityLevel[childVis]
+
+	// Child must be same or less restrictive (higher level)
+	return childLevel >= parentLevel
+}
+
 // checkExpression checks an expression and returns its type
 func (c *Checker) checkExpression(expr ast.Expression) Type {
 	if expr == nil {
@@ -909,6 +1300,8 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 	switch node := expr.(type) {
 	case *ast.Identifier:
 		return c.checkIdentifier(node)
+	case *ast.SuperExpression:
+		return c.checkSuperExpression(node)
 	case *ast.NumberLiteral:
 		// Number literals infer as literal types for precision
 		return &NumberLiteralType{Value: node.Value}
@@ -940,10 +1333,77 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 func (c *Checker) checkIdentifier(node *ast.Identifier) Type {
 	typ, ok := c.env.Get(node.Value)
 	if !ok {
-		c.addError(fmt.Sprintf("Undefined variable '%s'", node.Value), node.Token)
+		// Build error message with suggestions
+		errorMsg := fmt.Sprintf("Undefined variable '%s'", node.Value)
+
+		// Collect all available names from environment, classes, interfaces, etc.
+		candidates := c.env.GetAllNames()
+
+		// Add class names
+		for className := range c.classes {
+			candidates = append(candidates, className)
+		}
+
+		// Add interface names
+		for interfaceName := range c.interfaces {
+			candidates = append(candidates, interfaceName)
+		}
+
+		// Add enum names
+		for enumName := range c.enums {
+			candidates = append(candidates, enumName)
+		}
+
+		// Add type alias names
+		for aliasName := range c.typeAliases {
+			candidates = append(candidates, aliasName)
+		}
+
+		// Find similar names
+		suggestions := findSimilarNames(node.Value, candidates, 3, 3)
+
+		// Add suggestions to error message
+		if len(suggestions) > 0 {
+			errorMsg += ". Did you mean"
+			if len(suggestions) == 1 {
+				errorMsg += fmt.Sprintf(" '%s'?", suggestions[0])
+			} else {
+				errorMsg += ":"
+				for i, suggestion := range suggestions {
+					if i == len(suggestions)-1 {
+						errorMsg += fmt.Sprintf(" or '%s'?", suggestion)
+					} else {
+						errorMsg += fmt.Sprintf(" '%s',", suggestion)
+					}
+				}
+			}
+		}
+
+		c.addError(errorMsg, node.Token)
 		return Any
 	}
 	return typ
+}
+
+// checkSuperExpression checks a super expression
+func (c *Checker) checkSuperExpression(node *ast.SuperExpression) Type {
+	// Super can only be used inside a class context
+	if c.currentClass == nil {
+		c.addError("'super' can only be used inside a class", node.Token)
+		return Any
+	}
+
+	// Class must have a parent
+	if c.currentClass.Parent == nil {
+		c.addError(
+			fmt.Sprintf("Class '%s' has no parent class, cannot use 'super'", c.currentClass.Name),
+			node.Token,
+		)
+		return Any
+	}
+
+	// Return the parent class type
+	return c.currentClass.Parent
 }
 
 // checkTableLiteral checks a table literal
@@ -1043,6 +1503,56 @@ func (c *Checker) checkInfixExpression(node *ast.InfixExpression) Type {
 func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 	funcType := c.checkExpression(node.Function)
 
+	// Check if it's a class type (constructor call)
+	if classType, ok := funcType.(*ClassType); ok {
+		// Check if trying to instantiate an abstract class
+		if classType.IsAbstract {
+			c.addError(
+				fmt.Sprintf("Cannot instantiate abstract class '%s'", classType.Name),
+				node.Token,
+			)
+			return classType
+		}
+
+		// Check for constructor (or allow default constructor with no args)
+		if classType.Constructor == nil {
+			// No explicit constructor - allow instantiation with zero arguments only
+			if len(node.Arguments) > 0 {
+				c.addError(
+					fmt.Sprintf("Class '%s' has no constructor and cannot accept arguments", classType.Name),
+					node.Token,
+				)
+			}
+			return classType
+		}
+
+		fnType := classType.Constructor
+
+		// Check argument count
+		if len(node.Arguments) != len(fnType.Parameters) {
+			c.addError(
+				fmt.Sprintf("Constructor expects %d arguments, got %d",
+					len(fnType.Parameters), len(node.Arguments)),
+				node.Token,
+			)
+			return fnType.ReturnType
+		}
+
+		// Check argument types
+		for i, arg := range node.Arguments {
+			argType := c.checkExpression(arg)
+			if !argType.IsAssignableTo(fnType.Parameters[i]) {
+				c.addError(
+					fmt.Sprintf("Argument %d: cannot pass type '%s' to parameter of type '%s'",
+						i+1, argType.String(), fnType.Parameters[i].String()),
+					node.Token,
+				)
+			}
+		}
+
+		return fnType.ReturnType
+	}
+
 	// Check if it's a function type
 	fnType, ok := funcType.(*FunctionType)
 	if !ok {
@@ -1096,12 +1606,58 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 	// Check if left type has the property
 	switch typ := leftType.(type) {
 	case *ClassType:
-		// Check properties
-		if propType, ok := typ.GetProperty(propertyName); ok {
+		// Check static properties first (when accessing class directly like Math.PI)
+		if propType, ok := typ.GetStaticProperty(propertyName); ok {
+			// Check visibility for static properties
+			visibility := typ.PropertyVisibility[propertyName]
+			if visibility == "" {
+				visibility = "public"
+			}
+			if !c.canAccessMember(typ, visibility) {
+				c.addError(
+					fmt.Sprintf("Cannot access %s static property '%s' of class '%s'", visibility, propertyName, typ.Name),
+					node.Token,
+				)
+			}
 			return propType
 		}
-		// Check methods
+		// Check static methods
+		if methodType, ok := typ.GetStaticMethod(propertyName); ok {
+			// Check visibility for static methods
+			visibility := typ.MethodVisibility[propertyName]
+			if visibility == "" {
+				visibility = "public"
+			}
+			if !c.canAccessMember(typ, visibility) {
+				c.addError(
+					fmt.Sprintf("Cannot access %s static method '%s' of class '%s'", visibility, propertyName, typ.Name),
+					node.Token,
+				)
+			}
+			return methodType
+		}
+		// Check instance properties
+		if propType, ok := typ.GetProperty(propertyName); ok {
+			// Check visibility for instance properties
+			visibility := typ.GetPropertyVisibility(propertyName)
+			if !c.canAccessMember(typ, visibility) {
+				c.addError(
+					fmt.Sprintf("Cannot access %s property '%s' of class '%s'", visibility, propertyName, typ.Name),
+					node.Token,
+				)
+			}
+			return propType
+		}
+		// Check instance methods
 		if methodType, ok := typ.GetMethod(propertyName); ok {
+			// Check visibility for instance methods
+			visibility := typ.GetMethodVisibility(propertyName)
+			if !c.canAccessMember(typ, visibility) {
+				c.addError(
+					fmt.Sprintf("Cannot access %s method '%s' of class '%s'", visibility, propertyName, typ.Name),
+					node.Token,
+				)
+			}
 			return methodType
 		}
 		c.addError(
@@ -1172,6 +1728,31 @@ func (c *Checker) checkIndexExpression(node *ast.IndexExpression) Type {
 		// For other types, allow any index access
 		return Any
 	}
+}
+
+// canAccessMember checks if the current context can access a member with the given visibility
+func (c *Checker) canAccessMember(targetClass *ClassType, visibility string) bool {
+	// Public members are always accessible
+	if visibility == "public" || visibility == "" {
+		return true
+	}
+
+	// If no current class context, can only access public members
+	if c.currentClass == nil {
+		return false
+	}
+
+	// Private members can only be accessed from the same class
+	if visibility == "private" {
+		return c.currentClass.Equals(targetClass)
+	}
+
+	// Protected members can be accessed from the same class or child classes
+	if visibility == "protected" {
+		return c.currentClass.Equals(targetClass) || c.currentClass.IsChildOf(targetClass)
+	}
+
+	return false
 }
 
 // addError adds a type error to the checker

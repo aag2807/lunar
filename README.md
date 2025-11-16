@@ -39,8 +39,10 @@ end
 ✅ **Enums** - Type-safe enumeration values
 ✅ **Generics** - Write reusable, type-safe code
 ✅ **Union Types** - Flexible type combinations (`string | number`)
+✅ **Context-Aware Keywords** - `string`, `table`, `type` work as both types and identifiers
 ✅ **Declaration Files** - Type definitions for existing Lua libraries (`.d.lunar`)
-✅ **Standard Library Types** - Built-in declarations for Lua 5.1 stdlib
+✅ **Complete Standard Library Types** - Full type coverage including `string.*` and `table.*`
+✅ **Source Maps** - Debug with original Lunar source line numbers (Source Map v3)
 ✅ **Excellent Error Messages** - Clear, helpful errors with source context
 ✅ **Clean Lua Output** - Generates readable, efficient Lua code
 ✅ **100% Lua Compatible** - Use any Lua library seamlessly
@@ -128,16 +130,22 @@ lua hello.lua
 lunar input.lunar
 
 # Compile without type checking
-lunar input.lunar --no-type-check
+lunar -no-typecheck input.lunar
+
+# Generate source map for debugging
+lunar -source-map input.lunar
 
 # Specify output file
-lunar input.lunar -o output.lua
+lunar -o output.lua input.lunar
+
+# Combine options (note: flags must come before filename)
+lunar -source-map -o output.lua input.lunar
 
 # Show version
-lunar --version
+lunar -version
 
 # Show help
-lunar --help
+lunar -help
 ```
 
 ## Documentation
@@ -307,7 +315,7 @@ lunar/
 
 ## Roadmap
 
-### v1.0 (Current) ✅
+### v1.0 ✅
 - [x] Complete type system
 - [x] Classes, interfaces, enums
 - [x] Generics
@@ -317,17 +325,40 @@ lunar/
 - [x] Improved error messages
 - [x] Declaration generator tool
 
-### v1.1 (Planned)
-- [ ] Context-aware keywords (full string/table stdlib support)
-- [ ] Enhanced error suggestions ("Did you mean...?")
-- [ ] More comprehensive stdlib coverage
+### v1.1 ✅
+- [x] Context-aware keywords (full string/table stdlib support)
+- [x] Source maps for debugging
+
+### v1.2 (Current) ✅
+- [x] Enhanced error suggestions ("Did you mean...?")
+- [x] Comprehensive stdlib coverage (coroutine, debug, package)
+- [x] Integration tests
 - [ ] Performance optimizations
 
 ### v2.0 (Future)
 - [ ] Language Server Protocol (LSP) for IDE integration
-- [ ] Source maps for debugging
+  - **Design complete** - See [LSP Design](docs/LSP_DESIGN.md), [Neovim Setup](docs/NEOVIM_SETUP.md), and [Quick Start](docs/LSP_QUICKSTART.md)
+  - Implementation in progress
 - [ ] Package manager integration
 - [ ] Code formatter
+
+## LSP Development
+
+Lunar will have full Language Server Protocol support for IDE features. Documentation:
+
+- **[LSP Design Document](docs/LSP_DESIGN.md)** - Complete architecture and implementation plan
+- **[Neovim Setup Guide](docs/NEOVIM_SETUP.md)** - How to configure Neovim with Lunar LSP
+- **[LSP Quick Start](docs/LSP_QUICKSTART.md)** - Quick reference for implementers and users
+
+Features planned:
+- Real-time diagnostics (errors/warnings)
+- Go to definition
+- Hover type information
+- Autocompletion
+- Find references
+- Rename symbol
+- Document symbols
+- Workspace symbols
 
 ## Contributing
 

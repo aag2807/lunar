@@ -514,10 +514,19 @@ func (t *TupleType) IsAssignableTo(other Type) bool {
 
 // ClassType represents a class type
 type ClassType struct {
-	Name       string
-	Properties map[string]Type
-	Methods    map[string]*FunctionType
-	Implements []*InterfaceType
+	Name                string
+	Parent              *ClassType                // Parent class (single inheritance)
+	Properties          map[string]Type           // Instance properties
+	Methods             map[string]*FunctionType  // Instance methods
+	StaticProperties    map[string]Type           // Static properties
+	StaticMethods       map[string]*FunctionType  // Static methods
+	ReadonlyProps       map[string]bool           // Readonly property names
+	AbstractMethods     map[string]bool           // Abstract method names
+	PropertyVisibility  map[string]string         // Property visibility (public, private, protected)
+	MethodVisibility    map[string]string         // Method visibility (public, private, protected)
+	Constructor         *FunctionType             // Constructor signature
+	Implements          []*InterfaceType
+	IsAbstract          bool                      // Whether class is abstract
 }
 
 func (t *ClassType) String() string {
@@ -537,6 +546,16 @@ func (t *ClassType) IsAssignableTo(other Type) bool {
 	if _, isAny := other.(*AnyType); isAny {
 		return true
 	}
+	// Class is assignable to its parent class (inheritance)
+	if otherClass, ok := other.(*ClassType); ok {
+		current := t.Parent
+		for current != nil {
+			if current.Equals(otherClass) {
+				return true
+			}
+			current = current.Parent
+		}
+	}
 	// Class is assignable to interfaces it implements
 	if otherInterface, ok := other.(*InterfaceType); ok {
 		for _, impl := range t.Implements {
@@ -548,16 +567,99 @@ func (t *ClassType) IsAssignableTo(other Type) bool {
 	return false
 }
 
-// GetProperty returns the type of a property
+// GetProperty returns the type of a property (checks inheritance chain)
 func (t *ClassType) GetProperty(name string) (Type, bool) {
-	typ, ok := t.Properties[name]
+	// Check own properties first
+	if typ, ok := t.Properties[name]; ok {
+		return typ, true
+	}
+	// Check parent class
+	if t.Parent != nil {
+		return t.Parent.GetProperty(name)
+	}
+	return nil, false
+}
+
+// GetMethod returns the type of a method (checks inheritance chain)
+func (t *ClassType) GetMethod(name string) (*FunctionType, bool) {
+	// Check own methods first
+	if typ, ok := t.Methods[name]; ok {
+		return typ, true
+	}
+	// Check parent class
+	if t.Parent != nil {
+		return t.Parent.GetMethod(name)
+	}
+	return nil, false
+}
+
+// GetStaticProperty returns the type of a static property
+func (t *ClassType) GetStaticProperty(name string) (Type, bool) {
+	typ, ok := t.StaticProperties[name]
 	return typ, ok
 }
 
-// GetMethod returns the type of a method
-func (t *ClassType) GetMethod(name string) (*FunctionType, bool) {
-	typ, ok := t.Methods[name]
+// GetStaticMethod returns the type of a static method
+func (t *ClassType) GetStaticMethod(name string) (*FunctionType, bool) {
+	typ, ok := t.StaticMethods[name]
 	return typ, ok
+}
+
+// IsReadonly checks if a property is readonly
+func (t *ClassType) IsReadonly(name string) bool {
+	return t.ReadonlyProps[name]
+}
+
+// IsAbstractMethod checks if a method is abstract
+func (t *ClassType) IsAbstractMethod(name string) bool {
+	return t.AbstractMethods[name]
+}
+
+// GetPropertyVisibility returns the visibility of a property (checks inheritance chain)
+func (t *ClassType) GetPropertyVisibility(name string) string {
+	// Check own properties first
+	if _, ok := t.Properties[name]; ok {
+		if visibility, exists := t.PropertyVisibility[name]; exists {
+			return visibility
+		}
+		return "public" // default
+	}
+	// Check parent class
+	if t.Parent != nil {
+		return t.Parent.GetPropertyVisibility(name)
+	}
+	return "public" // default
+}
+
+// GetMethodVisibility returns the visibility of a method (checks inheritance chain)
+func (t *ClassType) GetMethodVisibility(name string) string {
+	// Check own methods first
+	if _, ok := t.Methods[name]; ok {
+		if visibility, exists := t.MethodVisibility[name]; exists {
+			return visibility
+		}
+		return "public" // default
+	}
+	// Check parent class
+	if t.Parent != nil {
+		return t.Parent.GetMethodVisibility(name)
+	}
+	return "public" // default
+}
+
+// IsChildOf checks if this class is a child (or descendant) of another class
+func (t *ClassType) IsChildOf(other *ClassType) bool {
+	if other == nil {
+		return false
+	}
+	current := t.Parent
+	for current != nil {
+		if current.Equals(other) {
+			return true
+		}
+		current = current.Parent
+	}
+	return false
 }
 
 // InterfaceType represents an interface type

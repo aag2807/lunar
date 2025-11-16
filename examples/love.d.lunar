@@ -3,12 +3,11 @@
 -- Place this file in your project to get type checking for LÖVE APIs
 
 -- Color type helper
-declare type Color {
+declare type Color
 	r: number
 	g: number
 	b: number
 	a: number
-}
 end
 
 -- Graphics module

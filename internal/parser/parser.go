@@ -360,6 +360,24 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 }
 
 func (p *Parser) parseType() ast.Expression {
+	// Check for type guard syntax: paramName is Type
+	if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.IS) {
+		paramName := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		p.nextToken() // consume identifier
+		p.nextToken() // consume 'is', now on guard type
+
+		guardType := p.parseType()
+		if guardType == nil {
+			return nil
+		}
+
+		return &ast.TypeGuardType{
+			Token:     paramName.Token,
+			ParamName: paramName,
+			GuardType: guardType,
+		}
+	}
+
 	var typeExpr ast.Expression
 
 	switch p.curToken.Type {

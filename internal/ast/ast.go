@@ -321,6 +321,19 @@ func (gt *GenericType) String() string {
 	return fmt.Sprintf("%s<%s>", gt.BaseType.String(), strings.Join(argStrs, ", "))
 }
 
+// TypeGuardType represents a type guard return type like "value is string"
+type TypeGuardType struct {
+	Token     lexer.Token // the parameter name token
+	ParamName *Identifier // the parameter being guarded (e.g., "value")
+	GuardType Expression  // the type being guarded (e.g., "string")
+}
+
+func (tg *TypeGuardType) expressionNode()      {}
+func (tg *TypeGuardType) TokenLiteral() string { return tg.Token.Literal }
+func (tg *TypeGuardType) String() string {
+	return fmt.Sprintf("%s is %s", tg.ParamName.String(), tg.GuardType.String())
+}
+
 type Parameter struct {
 	Token lexer.Token
 	Name  *Identifier

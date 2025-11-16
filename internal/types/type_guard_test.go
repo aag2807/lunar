@@ -8,6 +8,8 @@ import (
 
 func TestTypeGuardDeclaration(t *testing.T) {
 	input := `
+declare function type(v: any): string end
+
 function isString(value: any): value is string
 	return type(value) == "string"
 end
@@ -38,6 +40,8 @@ end
 
 func TestTypeGuardUsage(t *testing.T) {
 	input := `
+declare function type(v: any): string end
+
 function isString(value: any): value is string
 	return type(value) == "string"
 end
@@ -70,6 +74,8 @@ end
 
 func TestTypeGuardWithUnionType(t *testing.T) {
 	input := `
+declare function type(v: any): string end
+
 function isString(value: any): value is string
 	return type(value) == "string"
 end
@@ -138,6 +144,8 @@ end
 
 func TestTypeGuardBooleanReturn(t *testing.T) {
 	input := `
+declare function type(v: any): string end
+
 function isString(value: any): value is string
 	return type(value) == "string"
 end
@@ -167,6 +175,8 @@ local result2: boolean = isString(42)
 
 func TestMultipleTypeGuards(t *testing.T) {
 	input := `
+declare function type(v: any): string end
+
 function isString(value: any): value is string
 	return type(value) == "string"
 end

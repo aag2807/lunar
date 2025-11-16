@@ -82,6 +82,7 @@ const (
 	IMPORT      = "import"
 	FROM        = "from"
 	DECLARE     = "declare"
+	IS          = "is" // for type guards: value is Type
 
 	//types
 	ANY         = "any"
@@ -136,6 +137,7 @@ var keywords = map[string]TokenType{
 	"import":      IMPORT,
 	"from":        FROM,
 	"declare":     DECLARE,
+	"is":          IS,
 	"table":       TABLE,
 	"any":         ANY,
 	"string":      STRING_TYPE,

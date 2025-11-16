@@ -640,6 +640,14 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		// Number literal in type position becomes a literal type
 		return &NumberLiteralType{Value: node.Value}
 
+	case *ast.TypeGuardType:
+		// Type guard like "value is string" - the function returns boolean
+		// but we store the guard type information for potential flow typing
+		// For now, just validate that the guard type is valid
+		_ = c.resolveTypeExpression(node.GuardType)
+		// Type guards always return boolean
+		return Boolean
+
 	default:
 		c.addError(fmt.Sprintf("Cannot resolve type expression: %T", expr), lexer.Token{})
 		return Any

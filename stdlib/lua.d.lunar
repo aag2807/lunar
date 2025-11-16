@@ -4,8 +4,7 @@
 
 -- Basic Functions
 declare function print(message: any): void end
--- Note: 'type' is a Lunar keyword, so we can't declare it here
--- declare function type(value: any): string end
+declare function type(value: any): string end
 declare function tonumber(value: any): any end
 declare function tostring(value: any): string end
 declare function error(message: string): void end

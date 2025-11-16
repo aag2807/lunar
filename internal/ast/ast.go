@@ -126,15 +126,20 @@ func (ce *CallExpression) String() string {
 }
 
 type DotExpression struct {
-	Token lexer.Token
-	Left  Expression
-	Right Expression
+	Token      lexer.Token
+	Left       Expression
+	Right      Expression
+	IsOptional bool // true for optional chaining (?.)
 }
 
 func (de *DotExpression) expressionNode()      {}
 func (de *DotExpression) TokenLiteral() string { return de.Token.Literal }
 func (de *DotExpression) String() string {
-	return fmt.Sprintf("%s.%s", de.Left.String(), de.Right.String())
+	operator := "."
+	if de.IsOptional {
+		operator = "?."
+	}
+	return fmt.Sprintf("%s%s%s", de.Left.String(), operator, de.Right.String())
 }
 
 type IndexExpression struct {

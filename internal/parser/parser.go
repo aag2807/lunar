@@ -22,24 +22,26 @@ const (
 )
 
 var precedences = map[lexer.TokenType]int{
-	lexer.OR:         OR_PREC,
-	lexer.AND:        AND_PREC,
-	lexer.EQ:         EQUALS,
-	lexer.NOT_EQ:     EQUALS,
-	lexer.NOT_EQ_LUA: EQUALS,
-	lexer.LT:         LESSGREATER,
-	lexer.GT:         LESSGREATER,
-	lexer.LT_EQ:      LESSGREATER,
-	lexer.GT_EQ:      LESSGREATER,
-	lexer.PLUS:       SUM,
-	lexer.MINUS:      SUM,
-	lexer.ASTERISK:   PRODUCT,
-	lexer.SLASH:      PRODUCT,
-	lexer.MODULO:     PRODUCT,
-	lexer.DOT:        DOT,
-	lexer.LBRACKET:   CALL, // index has same precedence as function call
-	lexer.LPAREN:     CALL,
-	lexer.CONCAT:     SUM,
+	lexer.NULLISH_COALESCE: OR_PREC, // ?? has same precedence as ||
+	lexer.OR:               OR_PREC,
+	lexer.AND:              AND_PREC,
+	lexer.EQ:               EQUALS,
+	lexer.NOT_EQ:           EQUALS,
+	lexer.NOT_EQ_LUA:       EQUALS,
+	lexer.LT:               LESSGREATER,
+	lexer.GT:               LESSGREATER,
+	lexer.LT_EQ:            LESSGREATER,
+	lexer.GT_EQ:            LESSGREATER,
+	lexer.PLUS:             SUM,
+	lexer.MINUS:            SUM,
+	lexer.ASTERISK:         PRODUCT,
+	lexer.SLASH:            PRODUCT,
+	lexer.MODULO:           PRODUCT,
+	lexer.DOT:              DOT,
+	lexer.OPTIONAL_CHAIN:   DOT, // ?. has same precedence as .
+	lexer.LBRACKET:         CALL, // index has same precedence as function call
+	lexer.LPAREN:           CALL,
+	lexer.CONCAT:           SUM,
 }
 
 type prefixParseFn func() ast.Expression
@@ -104,7 +106,9 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(lexer.LPAREN, p.parseCallExpression)
 	p.registerInfix(lexer.DOT, p.parseDotExpression)
+	p.registerInfix(lexer.OPTIONAL_CHAIN, p.parseDotExpression)
 	p.registerInfix(lexer.CONCAT, p.parseInfixExpression)
+	p.registerInfix(lexer.NULLISH_COALESCE, p.parseInfixExpression)
 
 	// read to tokens to initialize curtoken
 	p.nextToken()
@@ -244,8 +248,9 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 
 func (p *Parser) parseDotExpression(left ast.Expression) ast.Expression {
 	exp := &ast.DotExpression{
-		Token: p.curToken,
-		Left:  left,
+		Token:      p.curToken,
+		Left:       left,
+		IsOptional: p.curToken.Type == lexer.OPTIONAL_CHAIN,
 	}
 
 	// Right side of dot expression must be an identifier - allows context-aware keywords

@@ -2020,6 +2020,19 @@ func (c *Checker) checkInfixExpression(node *ast.InfixExpression) Type {
 		// String concatenation
 		return String
 
+	case "??":
+		// Nullish coalescing - returns right value if left is nil
+		// If left is T?, result is T | R (where R is right type)
+		// In practice, if left is optional, unwrap it and union with right
+		if _, ok := leftType.(*OptionalType); ok {
+			// Left is optional, so result is the unwrapped left type OR right type
+			// For simplicity, return right type (as it's the fallback)
+			return rightType
+		}
+		// If left is not optional, ?? still works (returns left if not nil, otherwise right)
+		// Result type is left | right, but for simplicity return right type
+		return rightType
+
 	default:
 		return Any
 	}
@@ -2183,8 +2196,24 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 
 	propertyName := rightIdent.Value
 
+	// Handle optional chaining - unwrap optional types
+	isLeftOptional := false
+	actualLeftType := leftType
+	if optType, ok := leftType.(*OptionalType); ok {
+		isLeftOptional = true
+		actualLeftType = optType.BaseType
+	}
+
+	// Helper function to wrap result if needed
+	wrapIfOptional := func(resultType Type) Type {
+		if node.IsOptional || isLeftOptional {
+			return &OptionalType{BaseType: resultType}
+		}
+		return resultType
+	}
+
 	// Check if left type has the property
-	switch typ := leftType.(type) {
+	switch typ := actualLeftType.(type) {
 	case *ClassType:
 		// Check static properties first (when accessing class directly like Math.PI)
 		if propType, ok := typ.GetStaticProperty(propertyName); ok {
@@ -2199,7 +2228,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return propType
+			return wrapIfOptional(propType)
 		}
 		// Check static methods
 		if methodType, ok := typ.GetStaticMethod(propertyName); ok {
@@ -2214,7 +2243,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return methodType
+			return wrapIfOptional(methodType)
 		}
 		// Check instance properties
 		if propType, ok := typ.GetProperty(propertyName); ok {
@@ -2226,7 +2255,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return propType
+			return wrapIfOptional(propType)
 		}
 		// Check instance methods
 		if methodType, ok := typ.GetMethod(propertyName); ok {
@@ -2238,42 +2267,42 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return methodType
+			return wrapIfOptional(methodType)
 		}
 		// In Lua, accessing a non-existent property returns nil at runtime
 		// Allow this for type guards and dynamic property access
 		// Return 'any' to be permissive (the property might exist in subclasses)
-		return Any
+		return wrapIfOptional(Any)
 
 	case *InterfaceType:
 		// Check properties
 		if propType, ok := typ.GetProperty(propertyName); ok {
-			return propType
+			return wrapIfOptional(propType)
 		}
 		// Check methods
 		if methodType, ok := typ.GetMethod(propertyName); ok {
-			return methodType
+			return wrapIfOptional(methodType)
 		}
 		c.addError(
 			fmt.Sprintf("Type '%s' has no property or method '%s'", typ.String(), propertyName),
 			node.Token,
 		)
-		return Any
+		return wrapIfOptional(Any)
 
 	case *EnumType:
 		// Check enum members
 		if memberType, ok := typ.GetMemberType(propertyName); ok {
-			return memberType
+			return wrapIfOptional(memberType)
 		}
 		c.addError(
 			fmt.Sprintf("Enum '%s' has no member '%s'", typ.String(), propertyName),
 			node.Token,
 		)
-		return Any
+		return wrapIfOptional(Any)
 
 	default:
 		// For other types, allow any property access (could be table access)
-		return Any
+		return wrapIfOptional(Any)
 	}
 }
 

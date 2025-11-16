@@ -485,6 +485,23 @@ func (t *OptionalType) IsAssignableTo(other Type) bool {
 	if otherOpt, ok := other.(*OptionalType); ok {
 		return t.BaseType.IsAssignableTo(otherOpt.BaseType)
 	}
+	// Optional type T? should be assignable to union T | nil
+	if otherUnion, ok := other.(*UnionType); ok {
+		// Check if the union represents T | nil
+		hasNil := false
+		hasBaseType := false
+		for _, typ := range otherUnion.Types {
+			if _, isNil := typ.(*NilType); isNil {
+				hasNil = true
+			} else if t.BaseType.Equals(typ) || t.BaseType.IsAssignableTo(typ) {
+				hasBaseType = true
+			}
+		}
+		// If union is exactly T | nil (2 types), it's compatible with T?
+		if hasNil && hasBaseType && len(otherUnion.Types) == 2 {
+			return true
+		}
+	}
 	// Optional is NOT assignable to non-optional (must unwrap first)
 	return false
 }

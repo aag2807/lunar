@@ -716,6 +716,12 @@ func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
 	operator := node.Operator
 	right := g.generateExpression(node.Right)
 
+	// Handle nullish coalescing operator (??)
+	if operator == "??" {
+		// Generate: (function() local __temp = left; if __temp ~= nil then return __temp else return right end end)()
+		return fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp else return %s end end)()", left, right)
+	}
+
 	// Convert operators to Lua equivalents
 	switch operator {
 	case "!=":
@@ -763,6 +769,13 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 func (g *Generator) generateDotExpression(node *ast.DotExpression) string {
 	left := g.generateExpression(node.Left)
 	right := g.generateExpression(node.Right)
+
+	// Handle optional chaining (?.)
+	if node.IsOptional {
+		// Generate safe navigation: (function() if left ~= nil then return left.right else return nil end end)()
+		// For efficiency, use a simpler pattern when left is a simple identifier
+		return fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp.%s else return nil end end)()", left, right)
+	}
 
 	return fmt.Sprintf("%s.%s", left, right)
 }

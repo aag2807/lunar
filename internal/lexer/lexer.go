@@ -74,7 +74,15 @@ func (l *Lexer) NextToken() Token {
 			tok = newToken(ASSIGN, l.ch, l.line, l.column)
 		}
 	case '?':
-		tok = newToken(QUESTION, l.ch, l.line, l.column)
+		if l.peekChar() == '.' {
+			l.readChar()
+			tok = Token{Type: OPTIONAL_CHAIN, Literal: "?.", Line: l.line, Column: l.column}
+		} else if l.peekChar() == '?' {
+			l.readChar()
+			tok = Token{Type: NULLISH_COALESCE, Literal: "??", Line: l.line, Column: l.column}
+		} else {
+			tok = newToken(QUESTION, l.ch, l.line, l.column)
+		}
 	case '|':
 		tok = newToken(PIPE, l.ch, l.line, l.column)
 	case '<':

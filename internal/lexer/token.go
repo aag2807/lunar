@@ -99,6 +99,10 @@ const (
 	QUESTION = "?"
 	TABLE    = "table"
 	PIPE     = "|"
+
+	// Optional chaining and nullish coalescing
+	OPTIONAL_CHAIN     = "?."
+	NULLISH_COALESCE   = "??"
 )
 
 // Map of keywords

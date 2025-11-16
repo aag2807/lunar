@@ -721,6 +721,23 @@ func (t *InterfaceType) IsAssignableTo(other Type) bool {
 		// If we have all required properties and methods, we're compatible
 		return true
 	}
+
+	// Check if this interface (table literal) is assignable to a table type
+	// e.g., { john = 95, jane = 87 } should be assignable to table<string, number>
+	if otherTable, ok := other.(*TableType); ok {
+		// For table literals (which have identifier keys), all keys are strings
+		// Check that all property types are assignable to the table's value type
+		for _, propType := range t.Properties {
+			if !propType.IsAssignableTo(otherTable.ValueType) {
+				return false
+			}
+		}
+		// If we have no methods and all property values match, we're compatible
+		if len(t.Methods) == 0 {
+			return true
+		}
+	}
+
 	return false
 }
 

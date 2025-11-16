@@ -460,6 +460,62 @@ func (t *UnionType) Contains(typ Type) bool {
 	return false
 }
 
+// IntersectionType represents an intersection of multiple types (T1 & T2)
+type IntersectionType struct {
+	Types []Type
+}
+
+func (t *IntersectionType) String() string {
+	typeStrs := make([]string, 0, len(t.Types))
+	for _, typ := range t.Types {
+		if typ != nil {
+			typeStrs = append(typeStrs, typ.String())
+		}
+	}
+	return strings.Join(typeStrs, " & ")
+}
+
+func (t *IntersectionType) Equals(other Type) bool {
+	otherIntersection, ok := other.(*IntersectionType)
+	if !ok {
+		return false
+	}
+	if len(t.Types) != len(otherIntersection.Types) {
+		return false
+	}
+	// Check if all types match (order-independent)
+	for _, typ := range t.Types {
+		found := false
+		for _, otherTyp := range otherIntersection.Types {
+			if typ.Equals(otherTyp) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func (t *IntersectionType) IsAssignableTo(other Type) bool {
+	if t.Equals(other) {
+		return true
+	}
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	// An intersection type is assignable to a type if ANY of its members is assignable
+	// Because the intersection has ALL the properties/capabilities of each member
+	for _, typ := range t.Types {
+		if typ.IsAssignableTo(other) {
+			return true
+		}
+	}
+	return false
+}
+
 // OptionalType represents an optional type (T | nil)
 type OptionalType struct {
 	BaseType Type

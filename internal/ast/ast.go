@@ -336,6 +336,23 @@ func (ut *UnionType) String() string {
 	return strings.Join(typeStrs, " | ")
 }
 
+type IntersectionType struct {
+	Token lexer.Token // '&' token
+	Types []Expression
+}
+
+func (it *IntersectionType) expressionNode()      {}
+func (it *IntersectionType) TokenLiteral() string { return it.Token.Literal }
+func (it *IntersectionType) String() string {
+	typeStrs := []string{}
+	for _, t := range it.Types {
+		if t != nil {
+			typeStrs = append(typeStrs, t.String())
+		}
+	}
+	return strings.Join(typeStrs, " & ")
+}
+
 type TupleType struct {
 	Token lexer.Token // '(' token
 	Types []Expression

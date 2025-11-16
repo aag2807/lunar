@@ -659,6 +659,19 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		}
 		return &UnionType{Types: types}
 
+	case *ast.IntersectionType:
+		types := make([]Type, 0, len(node.Types))
+		for _, t := range node.Types {
+			resolvedType := c.resolveTypeExpression(t)
+			// Flatten nested intersections
+			if intersectionType, isIntersection := resolvedType.(*IntersectionType); isIntersection {
+				types = append(types, intersectionType.Types...)
+			} else {
+				types = append(types, resolvedType)
+			}
+		}
+		return &IntersectionType{Types: types}
+
 	case *ast.TupleType:
 		elements := make([]Type, len(node.Types))
 		for i, elem := range node.Types {

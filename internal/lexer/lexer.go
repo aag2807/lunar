@@ -107,6 +107,8 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(MODULO, l.ch, l.line, l.column)
 	case '#':
 		tok = newToken(HASH, l.ch, l.line, l.column)
+	case '&':
+		tok = newToken(AMPERSAND, l.ch, l.line, l.column)
 	case '.':
 		if l.peekChar() == '.' {
 			// Check if it's ... or ..

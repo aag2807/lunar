@@ -839,20 +839,57 @@ func (p *Parser) parseTypeSuffix(baseType ast.Expression) ast.Expression {
 
 		default:
 			// No more high-precedence suffixes
-			goto checkUnion
+			goto checkIntersection
 		}
 	}
 
-checkUnion:
-	// Second pass: handle union types (lowest precedence)
+checkIntersection:
+	// Second pass: handle intersection types (higher precedence than unions)
+	if p.peekTokenIs(lexer.AMPERSAND) {
+		types := []ast.Expression{currentType}
+		intersectionToken := p.peekToken
+		for p.peekTokenIs(lexer.AMPERSAND) {
+			p.nextToken() // consume '&'
+			p.nextToken() // move to next type
+			// Parse the next type WITHOUT processing intersections or unions
+			nextType := p.parseNonUnionIntersectionType()
+			if nextType != nil {
+				types = append(types, nextType)
+			}
+		}
+		currentType = &ast.IntersectionType{
+			Token: intersectionToken,
+			Types: types,
+		}
+	}
+
+	// Third pass: handle union types (lowest precedence)
 	if p.peekTokenIs(lexer.PIPE) {
 		types := []ast.Expression{currentType}
 		unionToken := p.peekToken
 		for p.peekTokenIs(lexer.PIPE) {
 			p.nextToken() // consume '|'
 			p.nextToken() // move to next type
-			// Parse the next type WITHOUT processing unions (to avoid nested unions)
-			nextType := p.parseNonUnionType()
+			// Parse the next type WITHOUT processing unions
+			// But we DO process intersections, so A | B & C parses as A | (B & C)
+			nextType := p.parseNonUnionIntersectionType()
+			// Check if this type has intersection suffix
+			if p.peekTokenIs(lexer.AMPERSAND) {
+				intersectionTypes := []ast.Expression{nextType}
+				intersectionToken := p.peekToken
+				for p.peekTokenIs(lexer.AMPERSAND) {
+					p.nextToken() // consume '&'
+					p.nextToken() // move to next type
+					intersectionMember := p.parseNonUnionIntersectionType()
+					if intersectionMember != nil {
+						intersectionTypes = append(intersectionTypes, intersectionMember)
+					}
+				}
+				nextType = &ast.IntersectionType{
+					Token: intersectionToken,
+					Types: intersectionTypes,
+				}
+			}
 			if nextType != nil {
 				types = append(types, nextType)
 			}
@@ -866,9 +903,9 @@ checkUnion:
 	return currentType
 }
 
-// parseNonUnionType parses a type with all suffixes EXCEPT union types
-// This is used when parsing union members to avoid nested union structures
-func (p *Parser) parseNonUnionType() ast.Expression {
+// parseNonUnionIntersectionType parses a type with all suffixes EXCEPT union and intersection types
+// This is used when parsing union/intersection members to avoid nested structures
+func (p *Parser) parseNonUnionIntersectionType() ast.Expression {
 	var typeExpr ast.Expression
 
 	switch p.curToken.Type {

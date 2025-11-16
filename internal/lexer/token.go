@@ -18,9 +18,10 @@ const (
 	MINUS    = "-"
 	BANG     = "!"
 	ASTERISK = "*"
-	SLASH    = "/"
-	MODULO   = "%"
-	HASH     = "#"
+	SLASH     = "/"
+	MODULO    = "%"
+	HASH      = "#"
+	AMPERSAND = "&" // for intersection types Type1 & Type2
 
 	//comparison
 	EQ         = "=="

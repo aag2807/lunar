@@ -65,6 +65,7 @@ const (
 	CONST       = "const"
 	RETURN      = "return"
 	IF          = "if"
+	ELSEIF      = "elseif"
 	ELSE        = "else"
 	THEN        = "then"
 	FOR         = "for"
@@ -117,6 +118,7 @@ var keywords = map[string]TokenType{
 	"const":       CONST,
 	"return":      RETURN,
 	"if":          IF,
+	"elseif":      ELSEIF,
 	"else":        ELSE,
 	"then":        THEN,
 	"for":         FOR,

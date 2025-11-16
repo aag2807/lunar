@@ -411,6 +411,41 @@ func (fd *FunctionDeclaration) String() string {
 	return out.String()
 }
 
+// FunctionExpression represents an anonymous function expression
+type FunctionExpression struct {
+	Token         lexer.Token       // The 'function' token
+	GenericParams []*Identifier     // generic type parameters like <T, U>
+	Parameters    []*Parameter
+	ReturnType    Expression
+	Body          *BlockStatement
+}
+
+func (fe *FunctionExpression) expressionNode()      {}
+func (fe *FunctionExpression) TokenLiteral() string { return fe.Token.Literal }
+func (fe *FunctionExpression) String() string {
+	var out strings.Builder
+
+	params := []string{}
+	for _, p := range fe.Parameters {
+		params = append(params, p.String())
+	}
+
+	out.WriteString("function(")
+	out.WriteString(strings.Join(params, ", "))
+	out.WriteString(")")
+
+	if fe.ReturnType != nil {
+		out.WriteString(": ")
+		out.WriteString(fe.ReturnType.String())
+	}
+
+	out.WriteString(" ")
+	out.WriteString(fe.Body.String())
+	out.WriteString(" end")
+
+	return out.String()
+}
+
 type ReturnStatement struct {
 	Token       lexer.Token
 	ReturnValue Expression
@@ -488,13 +523,13 @@ func (ws *WhileStatement) String() string {
 }
 
 type ForStatement struct {
-	Token    lexer.Token // 'for' token
-	Variable *Identifier
-	Start    Expression // for numeric: start value
-	End      Expression // for numeric: end value
-	Step     Expression // for numeric: step value (optional)
-	Iterator Expression // for generic: iterator expression
-	Body     *BlockStatement
+	Token     lexer.Token // 'for' token
+	Variables []*Identifier // loop variables (can be multiple for generic for loops)
+	Start     Expression // for numeric: start value
+	End       Expression // for numeric: end value
+	Step      Expression // for numeric: step value (optional)
+	Iterator  Expression // for generic: iterator expression
+	Body      *BlockStatement
 	IsGeneric bool // true if generic for, false if numeric for
 }
 
@@ -504,7 +539,14 @@ func (fs *ForStatement) String() string {
 	var out strings.Builder
 
 	out.WriteString("for ")
-	out.WriteString(fs.Variable.String())
+
+	// Write all loop variables
+	for i, v := range fs.Variables {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(v.String())
+	}
 
 	if fs.IsGeneric {
 		out.WriteString(" in ")

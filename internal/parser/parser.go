@@ -82,6 +82,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.NOT, p.parsePrefixExpression)
 	p.registerPrefix(lexer.LPAREN, p.parseGroupedExpression)
 	p.registerPrefix(lexer.LBRACE, p.parseTableLiteral)
+	p.registerPrefix(lexer.FUNCTION, p.parseFunctionExpression)
 
 	//register infix operators
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
@@ -814,6 +815,37 @@ func (p *Parser) parseFunctionDeclaration() *ast.FunctionDeclaration {
 	return fd
 }
 
+// parseFunctionExpression parses anonymous function expressions like: function(x: number): number return x end
+func (p *Parser) parseFunctionExpression() ast.Expression {
+	fe := &ast.FunctionExpression{
+		Token: p.curToken, // 'function' token
+	}
+
+	// Parse generic parameters if present: <T, U>
+	if p.peekTokenIs(lexer.LT) {
+		p.nextToken() // consume <
+		fe.GenericParams = p.parseGenericParameters()
+	}
+
+	// Parse the parameters
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+	fe.Parameters = p.parseFunctionParameters()
+
+	// Parse optional return type
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // consume :
+		p.nextToken() // move onto return type
+		fe.ReturnType = p.parseType()
+	}
+
+	// Parse the body
+	fe.Body = p.parseBlockStatement()
+
+	return fe
+}
+
 func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	block := &ast.BlockStatement{
 		Token:      p.curToken,
@@ -920,11 +952,19 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 		return nil
 	}
 
-	// Parse consequence block (stops at 'else' or 'end')
+	// Parse consequence block (stops at 'else', 'elseif' or 'end')
 	stmt.Consequence = p.parseIfBlockStatement()
 
-	// Check for else
-	if p.curTokenIs(lexer.ELSE) {
+	// Check for elseif (treat as nested if in alternative)
+	if p.curTokenIs(lexer.ELSEIF) {
+		// Recursively parse elseif as a new if statement
+		elseIfStmt := p.parseIfStatement()
+		stmt.Alternative = &ast.BlockStatement{
+			Token:      p.curToken,
+			Statements: []ast.Statement{elseIfStmt},
+		}
+	} else if p.curTokenIs(lexer.ELSE) {
+		// Check for else
 		stmt.Alternative = p.parseBlockStatement()
 	}
 
@@ -939,7 +979,7 @@ func (p *Parser) parseIfBlockStatement() *ast.BlockStatement {
 
 	p.nextToken()
 
-	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.ELSE) && !p.curTokenIs(lexer.EOF) {
+	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.ELSE) && !p.curTokenIs(lexer.ELSEIF) && !p.curTokenIs(lexer.EOF) {
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
@@ -972,11 +1012,23 @@ func (p *Parser) parseWhileStatement() *ast.WhileStatement {
 func (p *Parser) parseForStatement() *ast.ForStatement {
 	stmt := &ast.ForStatement{Token: p.curToken}
 
-	// Expect variable name - allows context-aware keywords
+	// Parse loop variables (can be multiple for generic for loops)
+	stmt.Variables = []*ast.Identifier{}
+
+	// Expect first variable name - allows context-aware keywords
 	if !p.expectPeekIdentOrContextual() {
 		return nil
 	}
-	stmt.Variable = p.parseIdentifierOrContextual()
+	stmt.Variables = append(stmt.Variables, p.parseIdentifierOrContextual())
+
+	// Parse additional variables if comma-separated
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken() // consume comma
+		if !p.expectPeekIdentOrContextual() {
+			return nil
+		}
+		stmt.Variables = append(stmt.Variables, p.parseIdentifierOrContextual())
+	}
 
 	// Check if it's a generic for (for...in) or numeric for (for...=)
 	if p.peekTokenIs(lexer.IN) {

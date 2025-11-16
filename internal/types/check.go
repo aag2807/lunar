@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"lunar/internal/ast"
 	"lunar/internal/lexer"
+	"lunar/internal/parser"
+	"os"
 )
 
 // TypeError represents a type error
@@ -220,7 +222,7 @@ func NewChecker() *Checker {
 	env.Set("void", Void)
 	env.Set("any", Any)
 
-	return &Checker{
+	checker := &Checker{
 		env:                env,
 		errors:             []*TypeError{},
 		classes:            make(map[string]*ClassType),
@@ -228,6 +230,56 @@ func NewChecker() *Checker {
 		enums:              make(map[string]*EnumType),
 		typeAliases:        make(map[string]Type),
 		genericTypeAliases: make(map[string]*GenericTypeAlias),
+	}
+
+	// Load standard library declarations
+	checker.loadStdlib()
+
+	return checker
+}
+
+// loadStdlib loads the Lua standard library type definitions
+func (c *Checker) loadStdlib() {
+	// Try to find stdlib/lua.d.lunar relative to the current directory
+	stdlibPaths := []string{
+		"stdlib/lua.d.lunar",
+		"../stdlib/lua.d.lunar",
+		"../../stdlib/lua.d.lunar",
+		"../../../stdlib/lua.d.lunar",
+	}
+
+	var content []byte
+	var err error
+	for _, path := range stdlibPaths {
+		content, err = os.ReadFile(path)
+		if err == nil {
+			break
+		}
+	}
+
+	if err != nil {
+		// If stdlib not found, silently continue (tests can still define what they need)
+		return
+	}
+
+	// Parse the stdlib file
+	l := lexer.New(string(content))
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		// Stdlib file has parse errors, silently continue
+		return
+	}
+
+	// Register stdlib declarations
+	for _, stmt := range statements {
+		c.registerTypeDefinition(stmt)
+	}
+
+	// Check stdlib statements to register functions and variables
+	for _, stmt := range statements {
+		c.checkStatement(stmt)
 	}
 }
 
@@ -896,8 +948,16 @@ func (c *Checker) checkForStatement(node *ast.ForStatement) {
 	prevEnv := c.env
 	c.env = NewEnclosedEnvironment(prevEnv)
 
-	// Check loop variable
-	c.env.Set(node.Variable.Value, Number)
+	// Check loop variables
+	for _, variable := range node.Variables {
+		// For generic for loops, variables can be any type (index, value, etc.)
+		// For numeric for loops, variable is a number (loop counter)
+		if node.IsGeneric {
+			c.env.Set(variable.Value, Any)
+		} else {
+			c.env.Set(variable.Value, Number)
+		}
+	}
 
 	if node.IsGeneric {
 		// Generic for loop (for-in)
@@ -1327,6 +1387,8 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 		return Nil
 	case *ast.TableLiteral:
 		return c.checkTableLiteral(node)
+	case *ast.FunctionExpression:
+		return c.checkFunctionExpression(node)
 	case *ast.PrefixExpression:
 		return c.checkPrefixExpression(node)
 	case *ast.InfixExpression:
@@ -1481,6 +1543,44 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 
 	// For mixed or key-value tables, return a generic table type
 	return &TableType{KeyType: Any, ValueType: Any}
+}
+
+// checkFunctionExpression checks an anonymous function expression
+func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
+	// Create new environment for function scope
+	prevEnv := c.env
+	c.env = NewEnclosedEnvironment(prevEnv)
+
+	// Resolve parameter types and add to environment
+	paramTypes := make([]Type, len(node.Parameters))
+	for i, param := range node.Parameters {
+		paramType := c.resolveTypeExpression(param.Type)
+		paramTypes[i] = paramType
+		c.env.Set(param.Name.Value, paramType)
+	}
+
+	// Resolve return type
+	var returnType Type = Void
+	if node.ReturnType != nil {
+		returnType = c.resolveTypeExpression(node.ReturnType)
+	}
+
+	// Set currentFunctionReturnType for return statement checking
+	prevReturnType := c.currentFunctionReturnType
+	c.currentFunctionReturnType = returnType
+
+	// Type check the body
+	c.checkBlockStatement(node.Body)
+
+	// Restore environment and return type
+	c.env = prevEnv
+	c.currentFunctionReturnType = prevReturnType
+
+	// Return the function type
+	return &FunctionType{
+		Parameters: paramTypes,
+		ReturnType: returnType,
+	}
 }
 
 // checkPrefixExpression checks a prefix expression

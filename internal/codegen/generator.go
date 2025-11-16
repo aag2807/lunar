@@ -351,7 +351,14 @@ func (g *Generator) generateForStatement(node *ast.ForStatement) string {
 
 	output.WriteString(g.generateIndent())
 	output.WriteString("for ")
-	output.WriteString(node.Variable.Value)
+
+	// Write all loop variables
+	for i, v := range node.Variables {
+		if i > 0 {
+			output.WriteString(", ")
+		}
+		output.WriteString(v.Value)
+	}
 
 	if node.IsGeneric {
 		// Generic for loop: for k, v in pairs(table) do
@@ -628,6 +635,8 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 		return g.generateDotExpression(node)
 	case *ast.IndexExpression:
 		return g.generateIndexExpression(node)
+	case *ast.FunctionExpression:
+		return g.generateFunctionExpression(node)
 	default:
 		return ""
 	}
@@ -746,6 +755,33 @@ func (g *Generator) generateIndexExpression(node *ast.IndexExpression) string {
 	index := g.generateExpression(node.Index)
 
 	return fmt.Sprintf("%s[%s]", left, index)
+}
+
+// generateFunctionExpression generates code for an anonymous function expression
+func (g *Generator) generateFunctionExpression(node *ast.FunctionExpression) string {
+	var output strings.Builder
+
+	output.WriteString("function(")
+
+	// Parameters (without type annotations)
+	params := make([]string, len(node.Parameters))
+	for i, param := range node.Parameters {
+		params[i] = param.Name.Value
+	}
+	output.WriteString(strings.Join(params, ", "))
+	output.WriteString(")\n")
+
+	// Body
+	g.indent++
+	for _, stmt := range node.Body.Statements {
+		output.WriteString(g.generateStatement(stmt))
+	}
+	g.indent--
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("end")
+
+	return output.String()
 }
 
 // generateIndent generates the current indentation

@@ -195,7 +195,7 @@ func TestGenerateForStatement(t *testing.T) {
 	// for i = 1, 10 do break end
 	stmt := &ast.ForStatement{
 		Token:     lexer.Token{Type: lexer.FOR, Literal: "for"},
-		Variable:  &ast.Identifier{Value: "i"},
+		Variables: []*ast.Identifier{{Value: "i"}},
 		Start:     &ast.NumberLiteral{Token: lexer.Token{Literal: "1"}, Value: 1},
 		End:       &ast.NumberLiteral{Token: lexer.Token{Literal: "10"}, Value: 10},
 		IsGeneric: false,

@@ -234,11 +234,24 @@ func (g *Generator) generateVariableDeclaration(node *ast.VariableDeclaration) s
 	var output strings.Builder
 	output.WriteString(g.generateIndent())
 	output.WriteString("local ")
-	output.WriteString(node.Name.Value)
 
-	if node.Value != nil {
+	// Write all variable names
+	for i, name := range node.Names {
+		if i > 0 {
+			output.WriteString(", ")
+		}
+		output.WriteString(name.Value)
+	}
+
+	// Write values if present
+	if len(node.Values) > 0 {
 		output.WriteString(" = ")
-		output.WriteString(g.generateExpression(node.Value))
+		for i, val := range node.Values {
+			if i > 0 {
+				output.WriteString(", ")
+			}
+			output.WriteString(g.generateExpression(val))
+		}
 	}
 
 	output.WriteString("\n")
@@ -281,9 +294,14 @@ func (g *Generator) generateReturnStatement(node *ast.ReturnStatement) string {
 	output.WriteString(g.generateIndent())
 	output.WriteString("return")
 
-	if node.ReturnValue != nil {
+	if len(node.ReturnValues) > 0 {
 		output.WriteString(" ")
-		output.WriteString(g.generateExpression(node.ReturnValue))
+		for i, val := range node.ReturnValues {
+			if i > 0 {
+				output.WriteString(", ")
+			}
+			output.WriteString(g.generateExpression(val))
+		}
 	}
 
 	output.WriteString("\n")

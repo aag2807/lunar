@@ -907,6 +907,13 @@ func (c *Checker) substituteType(typ Type, substitutions map[string]Type) Type {
 	case *OptionalType:
 		return &OptionalType{BaseType: c.substituteType(t.BaseType, substitutions)}
 
+	case *TupleType:
+		newElements := make([]Type, len(t.Elements))
+		for i, elem := range t.Elements {
+			newElements[i] = c.substituteType(elem, substitutions)
+		}
+		return &TupleType{Elements: newElements}
+
 	default:
 		// For all other types (primitives, classes, etc.), return as-is
 		return t
@@ -962,39 +969,107 @@ func (c *Checker) checkStatement(stmt ast.Statement) {
 
 // checkVariableDeclaration checks a variable declaration
 func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
-	var declaredType Type
-	if node.Type != nil {
-		declaredType = c.resolveTypeExpression(node.Type)
+	// Resolve declared types for each variable
+	declaredTypes := make([]Type, len(node.Names))
+	for i, typ := range node.Types {
+		if typ != nil {
+			declaredTypes[i] = c.resolveTypeExpression(typ)
+		}
 	}
 
-	var valueType Type
-	if node.Value != nil {
-		valueType = c.checkExpression(node.Value)
-	} else {
-		valueType = Nil
+	// Handle no value assignment
+	if len(node.Values) == 0 {
+		// Register variables with their declared types (or nil)
+		for i, name := range node.Names {
+			var varType Type
+			if declaredTypes[i] != nil {
+				varType = declaredTypes[i]
+			} else {
+				varType = Nil
+			}
+
+			if node.IsConstant {
+				c.env.SetConst(name.Value, varType)
+			} else {
+				c.env.Set(name.Value, varType)
+			}
+		}
+		return
 	}
 
-	// If type is declared, check if value is assignable
-	if declaredType != nil {
-		if !valueType.IsAssignableTo(declaredType) {
-			c.addError(
-				fmt.Sprintf("Cannot assign type '%s' to variable of type '%s'",
-					valueType.String(), declaredType.String()),
-				node.Token,
-			)
-		}
-		// Use SetConst if variable is declared as const
-		if node.IsConstant {
-			c.env.SetConst(node.Name.Value, declaredType)
+	// Get value types
+	var valueTypes []Type
+
+	// If there's only one value and it's a call expression, it might return a tuple
+	if len(node.Values) == 1 {
+		valueType := c.checkExpression(node.Values[0])
+
+		// Check if it's a tuple type (multiple return values)
+		if tupleType, ok := valueType.(*TupleType); ok {
+			valueTypes = tupleType.Elements
 		} else {
-			c.env.Set(node.Name.Value, declaredType)
+			valueTypes = []Type{valueType}
 		}
 	} else {
-		// Infer type from value
-		if node.IsConstant {
-			c.env.SetConst(node.Name.Value, valueType)
+		// Multiple values - evaluate each
+		valueTypes = make([]Type, len(node.Values))
+		for i, val := range node.Values {
+			valueTypes[i] = c.checkExpression(val)
+		}
+	}
+
+	// Check that the number of variables matches number of values
+	if len(node.Names) != len(valueTypes) {
+		c.addError(
+			fmt.Sprintf("Number of variables (%d) does not match number of values (%d)",
+				len(node.Names), len(valueTypes)),
+			node.Token,
+		)
+		// Register variables anyway to avoid cascading errors
+		for i, name := range node.Names {
+			var varType Type = Any
+			if i < len(declaredTypes) && declaredTypes[i] != nil {
+				varType = declaredTypes[i]
+			} else if i < len(valueTypes) {
+				varType = valueTypes[i]
+			}
+
+			if node.IsConstant {
+				c.env.SetConst(name.Value, varType)
+			} else {
+				c.env.Set(name.Value, varType)
+			}
+		}
+		return
+	}
+
+	// Register each variable with type checking
+	for i, name := range node.Names {
+		declaredType := declaredTypes[i]
+		valueType := valueTypes[i]
+
+		// Determine final type and check assignability
+		var finalType Type
+		if declaredType != nil {
+			// Type is declared - check if value is assignable
+			if !valueType.IsAssignableTo(declaredType) {
+				c.addError(
+					fmt.Sprintf("Cannot assign type '%s' to variable '%s' of type '%s'",
+						valueType.String(), name.Value, declaredType.String()),
+					node.Token,
+				)
+			}
+			finalType = declaredType
 		} else {
-			c.env.Set(node.Name.Value, valueType)
+			// Infer type from value
+			finalType = valueType
+		}
+
+		// Register variable
+		if node.IsConstant {
+			c.env.SetConst(name.Value, finalType)
+		} else {
+			c.env.Set(name.Value, finalType)
 		}
 	}
 }
@@ -1073,7 +1148,8 @@ func (c *Checker) checkReturnStatement(node *ast.ReturnStatement) {
 		return
 	}
 
-	if node.ReturnValue == nil {
+	// Handle empty return
+	if len(node.ReturnValues) == 0 {
 		if !IsVoidType(c.currentFunctionReturnType) {
 			c.addError(
 				fmt.Sprintf("Function must return a value of type '%s'",
@@ -1084,13 +1160,55 @@ func (c *Checker) checkReturnStatement(node *ast.ReturnStatement) {
 		return
 	}
 
-	returnType := c.checkExpression(node.ReturnValue)
-	if !returnType.IsAssignableTo(c.currentFunctionReturnType) {
+	// Handle single return value
+	if len(node.ReturnValues) == 1 {
+		returnType := c.checkExpression(node.ReturnValues[0])
+		if !returnType.IsAssignableTo(c.currentFunctionReturnType) {
+			c.addError(
+				fmt.Sprintf("Cannot return type '%s' from function with return type '%s'",
+					returnType.String(), c.currentFunctionReturnType.String()),
+				node.Token,
+			)
+		}
+		return
+	}
+
+	// Handle multiple return values - must match TupleType
+	returnTypes := make([]Type, len(node.ReturnValues))
+	for i, val := range node.ReturnValues {
+		returnTypes[i] = c.checkExpression(val)
+	}
+
+	// Check if expected return type is a tuple
+	tupleType, ok := c.currentFunctionReturnType.(*TupleType)
+	if !ok {
 		c.addError(
-			fmt.Sprintf("Cannot return type '%s' from function with return type '%s'",
-				returnType.String(), c.currentFunctionReturnType.String()),
+			fmt.Sprintf("Cannot return multiple values from function with return type '%s'",
+				c.currentFunctionReturnType.String()),
 			node.Token,
 		)
+		return
+	}
+
+	// Check tuple element count
+	if len(returnTypes) != len(tupleType.Elements) {
+		c.addError(
+			fmt.Sprintf("Function expects %d return values, got %d",
+				len(tupleType.Elements), len(returnTypes)),
+			node.Token,
+		)
+		return
+	}
+
+	// Check each return value type
+	for i, retType := range returnTypes {
+		if !retType.IsAssignableTo(tupleType.Elements[i]) {
+			c.addError(
+				fmt.Sprintf("Return value %d: cannot return type '%s', expected '%s'",
+					i+1, retType.String(), tupleType.Elements[i].String()),
+				node.Token,
+			)
+		}
 	}
 }
 
@@ -2323,17 +2441,21 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 	// For ambient declarations, we only register types, not check implementations
 	switch decl := node.Declaration.(type) {
 	case *ast.VariableDeclaration:
-		// Register the variable with its declared type
-		if decl.Type != nil {
-			declaredType := c.resolveTypeExpression(decl.Type)
-			if decl.IsConstant {
-				c.env.SetConst(decl.Name.Value, declaredType)
+		// Register each variable with its declared type
+		for i, name := range decl.Names {
+			var varType Type
+			if i < len(decl.Types) && decl.Types[i] != nil {
+				varType = c.resolveTypeExpression(decl.Types[i])
 			} else {
-				c.env.Set(decl.Name.Value, declaredType)
+				// No type annotation on ambient declaration - use any
+				varType = Any
 			}
-		} else {
-			// No type annotation on ambient declaration - use any
-			c.env.Set(decl.Name.Value, Any)
+
+			if decl.IsConstant {
+				c.env.SetConst(name.Value, varType)
+			} else {
+				c.env.Set(name.Value, varType)
+			}
 		}
 
 	case *ast.FunctionDeclaration:

@@ -191,9 +191,9 @@ type Statement interface {
 
 type VariableDeclaration struct {
 	Token      lexer.Token
-	Name       *Identifier
-	Type       Expression
-	Value      Expression
+	Names      []*Identifier // Support multiple variables (e.g., local x, y = 1, 2)
+	Types      []Expression  // Type annotations for each variable
+	Values     []Expression  // Values for each variable
 	IsConstant bool
 }
 
@@ -208,18 +208,29 @@ func (vd *VariableDeclaration) String() string {
 		out.WriteString("local ")
 	}
 
-	out.WriteString(vd.Name.String())
+	// Write all variable names with types
+	for i, name := range vd.Names {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(name.String())
 
-	// Type annotation
-	if vd.Type != nil {
-		out.WriteString(": ")
-		out.WriteString(vd.Type.String())
+		// Type annotation
+		if i < len(vd.Types) && vd.Types[i] != nil {
+			out.WriteString(": ")
+			out.WriteString(vd.Types[i].String())
+		}
 	}
 
 	// Value assignment
-	if vd.Value != nil {
+	if len(vd.Values) > 0 {
 		out.WriteString(" = ")
-		out.WriteString(vd.Value.String())
+		for i, val := range vd.Values {
+			if i > 0 {
+				out.WriteString(", ")
+			}
+			out.WriteString(val.String())
+		}
 	}
 
 	return out.String()
@@ -447,8 +458,8 @@ func (fe *FunctionExpression) String() string {
 }
 
 type ReturnStatement struct {
-	Token       lexer.Token
-	ReturnValue Expression
+	Token        lexer.Token
+	ReturnValues []Expression // Support multiple return values
 }
 
 func (rs *ReturnStatement) statementNode()       {}
@@ -456,8 +467,13 @@ func (rs *ReturnStatement) TokenLiteral() string { return rs.Token.Literal }
 func (rs *ReturnStatement) String() string {
 	var out strings.Builder
 	out.WriteString("return ")
-	if rs.ReturnValue != nil {
-		out.WriteString(rs.ReturnValue.String())
+	for i, val := range rs.ReturnValues {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		if val != nil {
+			out.WriteString(val.String())
+		}
 	}
 	return out.String()
 }

@@ -425,26 +425,61 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 	decl := &ast.VariableDeclaration{
 		Token:      p.curToken,
 		IsConstant: p.curToken.Type == lexer.CONST,
+		Names:      []*ast.Identifier{},
+		Types:      []ast.Expression{},
+		Values:     []ast.Expression{},
 	}
 
-	// Parse identifier (name) - allows context-aware keywords
+	// Parse first identifier (name) - allows context-aware keywords
 	if !p.expectPeekIdentOrContextual() {
 		return nil
 	}
-	decl.Name = p.parseIdentifierOrContextual()
+	decl.Names = append(decl.Names, p.parseIdentifierOrContextual())
 
 	// Parse type annotation if present
 	if p.peekTokenIs(lexer.COLON) {
 		p.nextToken() // consume :
 		p.nextToken() // move to type
-		decl.Type = p.parseType()
+		decl.Types = append(decl.Types, p.parseType())
 	}
 
-	// Parse initializer if present
+	// Parse additional variables after commas
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken() // consume previous token/type
+		p.nextToken() // consume comma, now on next identifier
+
+		if !p.curTokenIs(lexer.IDENT) {
+			p.errors = append(p.errors, fmt.Sprintf("expected identifier after comma, got %s", p.curToken.Type))
+			return nil
+		}
+
+		decl.Names = append(decl.Names, p.parseIdentifierOrContextual())
+
+		// Parse type annotation if present
+		if p.peekTokenIs(lexer.COLON) {
+			p.nextToken() // consume :
+			p.nextToken() // move to type
+			decl.Types = append(decl.Types, p.parseType())
+		} else {
+			// No type for this variable
+			decl.Types = append(decl.Types, nil)
+		}
+	}
+
+	// Parse initializer(s) if present
 	if p.peekTokenIs(lexer.ASSIGN) {
 		p.nextToken() // consume =
 		p.nextToken() // move to expression
-		decl.Value = p.parseExpression(LOWEST)
+
+		// Parse first value
+		decl.Values = append(decl.Values, p.parseExpression(LOWEST))
+
+		// Parse additional values after commas (for multiple assignment)
+		for p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // consume current expression
+			p.nextToken() // consume comma
+			decl.Values = append(decl.Values, p.parseExpression(LOWEST))
+		}
 	}
 
 	return decl
@@ -960,7 +995,23 @@ func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 
 	p.nextToken() // move past 'return'
 
-	stmt.ReturnValue = p.parseExpression(LOWEST)
+	// Parse multiple return values separated by commas
+	stmt.ReturnValues = []ast.Expression{}
+
+	// If we hit a newline or end, return empty
+	if p.curTokenIs(lexer.EOF) || p.curToken.Line != stmt.Token.Line {
+		return stmt
+	}
+
+	// Parse first return value
+	stmt.ReturnValues = append(stmt.ReturnValues, p.parseExpression(LOWEST))
+
+	// Parse additional return values after commas
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken() // consume current expression
+		p.nextToken() // consume comma
+		stmt.ReturnValues = append(stmt.ReturnValues, p.parseExpression(LOWEST))
+	}
 
 	return stmt
 }

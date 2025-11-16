@@ -194,7 +194,45 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 }
 
 func (p *Parser) parseGroupedExpression() ast.Expression {
-	p.nextToken() // consumes the first '('
+	// We're at '('. Need to disambiguate between:
+	// - Grouped expression: (a + b)
+	// - Arrow function: (x: number) => x * 2
+
+	// Save state for lookahead
+	savedState := p.SaveState()
+
+	// Quick checks for obvious arrow functions
+	if p.peekTokenIs(lexer.RPAREN) || p.peekTokenIs(lexer.ELLIPSIS) {
+		// () => or (...args) => pattern
+		return p.parseArrowFunction()
+	}
+
+	// Look ahead to detect arrow function patterns
+	// Pattern: (ident : type) or (ident , ...) or (ident) =>
+	if p.peekTokenIs(lexer.IDENT) {
+		p.nextToken() // move from '(' to ident
+
+		// Now curToken = ident, check what follows
+		if p.peekTokenIs(lexer.COLON) || p.peekTokenIs(lexer.COMMA) {
+			// (ident : ...) or (ident , ...) - arrow function
+			p.RestoreState(savedState)
+			return p.parseArrowFunction()
+		}
+
+		if p.peekTokenIs(lexer.RPAREN) {
+			// (ident) - check if followed by =>
+			p.nextToken() // move to ')'
+			if p.peekTokenIs(lexer.ARROW) {
+				// (ident) => - arrow function
+				p.RestoreState(savedState)
+				return p.parseArrowFunction()
+			}
+		}
+	}
+
+	// Restore state and parse as grouped expression
+	p.RestoreState(savedState)
+	p.nextToken() // consume '('
 
 	exp := p.parseExpression(LOWEST)
 
@@ -203,6 +241,117 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 	}
 
 	return exp
+}
+
+// looksLikeArrowFunction does a quick lookahead to see if this looks like an arrow function
+func (p *Parser) looksLikeArrowFunction() bool {
+	// We're currently at '(', check only the immediate next token (peekToken)
+	// This is a simple, safe lookahead without state manipulation
+
+	// Definite arrow function indicators:
+	// - () => (empty params)
+	// - (...args) => (rest parameter)
+
+	if p.peekTokenIs(lexer.RPAREN) {
+		// () pattern - empty params almost always means arrow function
+		return true
+	}
+
+	if p.peekTokenIs(lexer.ELLIPSIS) {
+		// (...args) pattern - rest parameter definitely arrow function
+		return true
+	}
+
+	// For other cases like (x: type) or (x, y) or (x) =>
+	// we can't easily detect without deeper lookahead
+	// Return false to default to grouped expression
+	// Users will need to use one of the above patterns or we'll parse as grouped expr
+	return false
+}
+
+func (p *Parser) parseArrowFunction() ast.Expression {
+	// Save current position
+	startToken := p.curToken
+
+	// Debug: log what tokens we're starting with
+	// fmt.Printf("parseArrowFunction: curToken=%s, peekToken=%s\n", p.curToken.Literal, p.peekToken.Literal)
+
+	// We're at '(', so parse parameters
+	p.nextToken() // consume '('
+
+	// Debug: log after consuming (
+	// fmt.Printf("after consuming (: curToken=%s, peekToken=%s\n", p.curToken.Literal, p.peekToken.Literal)
+
+	// Parse parameters - could be empty ()
+	params := []*ast.Parameter{}
+
+	if !p.curTokenIs(lexer.RPAREN) {
+		// Parse first parameter
+		param := p.parseParameter()
+		if param == nil {
+			return nil
+		}
+		params = append(params, param)
+
+		// Parse remaining parameters
+		for p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // consume comma
+			p.nextToken() // move to next param
+			param = p.parseParameter()
+			if param == nil {
+				return nil
+			}
+			params = append(params, param)
+		}
+
+		// Expect ')' after parameters
+		if !p.expectPeek(lexer.RPAREN) {
+			return nil
+		}
+	}
+	// If we started at ')', we're already there, no need to expect it again
+
+	// Parse optional return type annotation
+	var returnType ast.Expression
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // consume :
+		p.nextToken() // move to type
+		returnType = p.parseType()
+	}
+
+	// Expect '=>'
+	if !p.expectPeek(lexer.ARROW) {
+		return nil
+	}
+
+	p.nextToken() // move to body
+
+	// Create arrow function expression
+	fe := &ast.FunctionExpression{
+		Token:      startToken,
+		Parameters: params,
+		ReturnType: returnType,
+	}
+
+	// Parse body - can be single expression or block
+	if p.curTokenIs(lexer.LBRACE) {
+		// Block body
+		fe.Body = p.parseBlockStatement()
+	} else {
+		// Single expression body - wrap in return statement
+		expr := p.parseExpression(LOWEST)
+		fe.Body = &ast.BlockStatement{
+			Token: p.curToken,
+			Statements: []ast.Statement{
+				&ast.ReturnStatement{
+					Token:        p.curToken,
+					ReturnValues: []ast.Expression{expr},
+				},
+			},
+		}
+	}
+
+	return fe
 }
 
 func (p *Parser) expectPeek(t lexer.TokenType) bool {
@@ -873,6 +1022,29 @@ func (p *Parser) curTokenIsIdentOrContextual() bool {
 
 func (p *Parser) peekTokenIsIdentOrContextual() bool {
 	return p.peekToken.Type == lexer.IDENT || p.isContextualKeyword(p.peekToken.Type)
+}
+
+// ParserState represents a saved state of the parser for lookahead
+type ParserState struct {
+	curToken   lexer.Token
+	peekToken  lexer.Token
+	lexerState lexer.LexerState
+}
+
+// SaveState saves the current parser state for lookahead
+func (p *Parser) SaveState() ParserState {
+	return ParserState{
+		curToken:   p.curToken,
+		peekToken:  p.peekToken,
+		lexerState: p.l.SaveState(),
+	}
+}
+
+// RestoreState restores a previously saved parser state
+func (p *Parser) RestoreState(state ParserState) {
+	p.curToken = state.curToken
+	p.peekToken = state.peekToken
+	p.l.RestoreState(state.lexerState)
 }
 
 func (p *Parser) expectPeekIdentOrContextual() bool {

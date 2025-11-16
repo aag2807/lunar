@@ -1984,6 +1984,16 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 	var returnType Type = Void
 	if node.ReturnType != nil {
 		returnType = c.resolveTypeExpression(node.ReturnType)
+	} else {
+		// Try to infer return type for arrow functions with single expression body
+		if len(node.Body.Statements) == 1 {
+			if retStmt, ok := node.Body.Statements[0].(*ast.ReturnStatement); ok {
+				if len(retStmt.ReturnValues) == 1 {
+					// Infer from the single return expression
+					returnType = c.checkExpression(retStmt.ReturnValues[0])
+				}
+			}
+		}
 	}
 
 	// Set currentFunctionReturnType for return statement checking

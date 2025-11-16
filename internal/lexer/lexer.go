@@ -296,3 +296,32 @@ func isLetter(ch byte) bool {
 func isDigit(ch byte) bool {
 	return '0' <= ch && ch <= '9'
 }
+
+// LexerState represents a saved state of the lexer for lookahead
+type LexerState struct {
+	position     int
+	readPosition int
+	ch           byte
+	line         int
+	column       int
+}
+
+// SaveState saves the current lexer state for lookahead
+func (l *Lexer) SaveState() LexerState {
+	return LexerState{
+		position:     l.position,
+		readPosition: l.readPosition,
+		ch:           l.ch,
+		line:         l.line,
+		column:       l.column,
+	}
+}
+
+// RestoreState restores a previously saved lexer state
+func (l *Lexer) RestoreState(state LexerState) {
+	l.position = state.position
+	l.readPosition = state.readPosition
+	l.ch = state.ch
+	l.line = state.line
+	l.column = state.column
+}

@@ -675,6 +675,9 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 		return g.generateIndexExpression(node)
 	case *ast.FunctionExpression:
 		return g.generateFunctionExpression(node)
+	case *ast.TypeAssertion:
+		// Type assertions are compile-time only, just return the expression
+		return g.generateExpression(node.Expression)
 	default:
 		return ""
 	}

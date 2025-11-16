@@ -86,6 +86,7 @@ const (
 	FROM        = "from"
 	DECLARE     = "declare"
 	IS          = "is" // for type guards: value is Type
+	AS          = "as" // for type assertions: value as Type
 
 	//types
 	ANY         = "any"
@@ -146,6 +147,7 @@ var keywords = map[string]TokenType{
 	"from":        FROM,
 	"declare":     DECLARE,
 	"is":          IS,
+	"as":          AS,
 	"table":       TABLE,
 	"any":         ANY,
 	"string":      STRING_TYPE,

@@ -166,6 +166,19 @@ func (se *SpreadExpression) String() string {
 	return fmt.Sprintf("...%s", se.Value.String())
 }
 
+// TypeAssertion represents type assertion syntax value as Type
+type TypeAssertion struct {
+	Token      lexer.Token // 'as' token
+	Expression Expression  // the expression being asserted
+	TargetType Expression  // the type to assert to
+}
+
+func (ta *TypeAssertion) expressionNode()      {}
+func (ta *TypeAssertion) TokenLiteral() string { return ta.Token.Literal }
+func (ta *TypeAssertion) String() string {
+	return fmt.Sprintf("(%s as %s)", ta.Expression.String(), ta.TargetType.String())
+}
+
 type TableLiteral struct {
 	Token  lexer.Token // '{' token
 	Pairs  map[Expression]Expression // for key-value pairs

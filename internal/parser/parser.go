@@ -22,6 +22,7 @@ const (
 )
 
 var precedences = map[lexer.TokenType]int{
+	lexer.AS:               PREFIX,  // type assertions have same precedence as prefix operators
 	lexer.NULLISH_COALESCE: OR_PREC, // ?? has same precedence as ||
 	lexer.OR:               OR_PREC,
 	lexer.AND:              AND_PREC,
@@ -110,6 +111,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.OPTIONAL_CHAIN, p.parseDotExpression)
 	p.registerInfix(lexer.CONCAT, p.parseInfixExpression)
 	p.registerInfix(lexer.NULLISH_COALESCE, p.parseInfixExpression)
+	p.registerInfix(lexer.AS, p.parseTypeAssertion)
 
 	// read to tokens to initialize curtoken
 	p.nextToken()
@@ -324,6 +326,18 @@ func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 	expression.Right = p.parseExpression(precedence)
 
 	return expression
+}
+
+func (p *Parser) parseTypeAssertion(left ast.Expression) ast.Expression {
+	assertion := &ast.TypeAssertion{
+		Token:      p.curToken,
+		Expression: left,
+	}
+
+	p.nextToken()
+	assertion.TargetType = p.parseType()
+
+	return assertion
 }
 
 // parseGenericOrLessThan disambiguates between generic type instantiation and less-than operator

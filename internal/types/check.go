@@ -1806,6 +1806,8 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 		return c.checkGenericInstantiation(node)
 	case *ast.SpreadExpression:
 		return c.checkSpreadExpression(node)
+	case *ast.TypeAssertion:
+		return c.checkTypeAssertion(node)
 	default:
 		return Any
 	}
@@ -2531,6 +2533,22 @@ func (c *Checker) checkSpreadExpression(node *ast.SpreadExpression) Type {
 		node.Token,
 	)
 	return Any
+}
+
+// checkTypeAssertion checks a type assertion (value as Type)
+func (c *Checker) checkTypeAssertion(node *ast.TypeAssertion) Type {
+	// Check the expression being asserted (ensures it's valid)
+	c.checkExpression(node.Expression)
+
+	// Resolve the target type
+	targetType := c.resolveTypeExpression(node.TargetType)
+
+	// Type assertions are generally allowed, but we can warn about impossible casts
+	// For now, we'll be permissive - the developer knows what they're doing
+	// We could add stricter checking here in the future
+
+	// Return the target type - that's what the assertion claims it is
+	return targetType
 }
 
 // canAccessMember checks if the current context can access a member with the given visibility

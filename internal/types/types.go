@@ -724,6 +724,7 @@ type ClassType struct {
 	Implements          []*InterfaceType
 	IsAbstract          bool                      // Whether class is abstract
 	GenericParams       []string                  // Generic type parameter names (e.g., ["T", "U"])
+	IndexSignature      *IndexSignature           // [key: KeyType]: ValueType
 }
 
 func (t *ClassType) String() string {
@@ -864,10 +865,17 @@ func (t *ClassType) IsChildOf(other *ClassType) bool {
 
 // InterfaceType represents an interface type
 type InterfaceType struct {
-	Name       string
-	Methods    map[string]*FunctionType
-	Properties map[string]Type
-	Extends    []*InterfaceType
+	Name           string
+	Methods        map[string]*FunctionType
+	Properties     map[string]Type
+	Extends        []*InterfaceType
+	IndexSignature *IndexSignature // [key: KeyType]: ValueType
+}
+
+// IndexSignature represents an index signature like [key: string]: number
+type IndexSignature struct {
+	KeyType   Type // Usually string or number
+	ValueType Type
 }
 
 func (t *InterfaceType) String() string {

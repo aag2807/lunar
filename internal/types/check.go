@@ -478,6 +478,16 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		classType.MethodVisibility[methodName] = visibility
 	}
 
+	// Register index signature if present
+	if node.IndexSignature != nil {
+		keyType := c.resolveTypeExpression(node.IndexSignature.KeyType)
+		valueType := c.resolveTypeExpression(node.IndexSignature.ValueType)
+		classType.IndexSignature = &IndexSignature{
+			KeyType:   keyType,
+			ValueType: valueType,
+		}
+	}
+
 	// Resolve extends clause (parent class)
 	if node.Extends != nil {
 		if ident, ok := node.Extends.(*ast.Identifier); ok {
@@ -538,6 +548,16 @@ func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
 			Parameters:    params,
 			ReturnType:    returnType,
 			GenericParams: []string{}, // Interface methods are not separately generic
+		}
+	}
+
+	// Register index signature if present
+	if node.IndexSignature != nil {
+		keyType := c.resolveTypeExpression(node.IndexSignature.KeyType)
+		valueType := c.resolveTypeExpression(node.IndexSignature.ValueType)
+		interfaceType.IndexSignature = &IndexSignature{
+			KeyType:   keyType,
+			ValueType: valueType,
 		}
 	}
 

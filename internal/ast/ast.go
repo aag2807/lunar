@@ -712,15 +712,16 @@ func (as *AssignmentStatement) String() string {
 }
 
 type ClassDeclaration struct {
-	Token         lexer.Token // 'class' token
-	Name          *Identifier
-	GenericParams []*Identifier           // generic type parameters like <T, U>
-	Extends       Expression              // parent class name (single inheritance)
-	Properties    []*PropertyDeclaration
-	Methods       []*FunctionDeclaration
-	Constructor   *ConstructorDeclaration
-	Implements    []Expression // interface names
-	IsAbstract    bool         // abstract class
+	Token          lexer.Token // 'class' token
+	Name           *Identifier
+	GenericParams  []*Identifier              // generic type parameters like <T, U>
+	Extends        Expression                 // parent class name (single inheritance)
+	Properties     []*PropertyDeclaration
+	Methods        []*FunctionDeclaration
+	Constructor    *ConstructorDeclaration
+	Implements     []Expression               // interface names
+	IndexSignature *IndexSignatureDeclaration // [key: KeyType]: ValueType
+	IsAbstract     bool                       // abstract class
 }
 
 func (cd *ClassDeclaration) statementNode()       {}
@@ -797,6 +798,26 @@ func (pd *PropertyDeclaration) String() string {
 	return out.String()
 }
 
+type IndexSignatureDeclaration struct {
+	Token     lexer.Token // '[' token
+	KeyName   *Identifier // The parameter name (e.g., "key")
+	KeyType   Expression  // The key type (e.g., string or number)
+	ValueType Expression  // The value type
+}
+
+func (isd *IndexSignatureDeclaration) statementNode()       {}
+func (isd *IndexSignatureDeclaration) TokenLiteral() string { return isd.Token.Literal }
+func (isd *IndexSignatureDeclaration) String() string {
+	var out strings.Builder
+	out.WriteString("[")
+	out.WriteString(isd.KeyName.String())
+	out.WriteString(": ")
+	out.WriteString(isd.KeyType.String())
+	out.WriteString("]: ")
+	out.WriteString(isd.ValueType.String())
+	return out.String()
+}
+
 type ConstructorDeclaration struct {
 	Token      lexer.Token // 'constructor' token
 	Parameters []*Parameter
@@ -823,11 +844,12 @@ func (cd *ConstructorDeclaration) String() string {
 }
 
 type InterfaceDeclaration struct {
-	Token      lexer.Token // 'interface' token
-	Name       *Identifier
-	Methods    []*InterfaceMethod
-	Properties []*PropertyDeclaration
-	Extends    []Expression // parent interface names
+	Token          lexer.Token // 'interface' token
+	Name           *Identifier
+	Methods        []*InterfaceMethod
+	Properties     []*PropertyDeclaration
+	IndexSignature *IndexSignatureDeclaration // [key: KeyType]: ValueType
+	Extends        []Expression               // parent interface names
 }
 
 func (id *InterfaceDeclaration) statementNode()       {}

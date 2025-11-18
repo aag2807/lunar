@@ -1722,6 +1722,17 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 
 	// Parse class body
 	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+		// Check for index signature first (before modifiers)
+		if p.curTokenIs(lexer.LBRACKET) {
+			// Index signature: [key: KeyType]: ValueType
+			indexSig := p.parseIndexSignature()
+			if indexSig != nil {
+				class.IndexSignature = indexSig
+			}
+			p.nextToken() // move past index signature
+			continue
+		}
+
 		// Track modifiers for current member
 		isStatic := false
 		isAbstract := false
@@ -1880,7 +1891,14 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 
 	// Parse interface body - allows context-aware keywords
 	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
-		if p.curTokenIsIdentOrContextual() {
+		if p.curTokenIs(lexer.LBRACKET) {
+			// Index signature: [key: KeyType]: ValueType
+			indexSig := p.parseIndexSignature()
+			if indexSig != nil {
+				iface.IndexSignature = indexSig
+			}
+			p.nextToken() // move past index signature
+		} else if p.curTokenIsIdentOrContextual() {
 			if p.peekTokenIs(lexer.COLON) {
 				// Property
 				prop := p.parsePropertyDeclaration()
@@ -1921,6 +1939,47 @@ func (p *Parser) parseInterfaceMethod() *ast.InterfaceMethod {
 
 	p.nextToken() // move past method signature
 	return method
+}
+
+func (p *Parser) parseIndexSignature() *ast.IndexSignatureDeclaration {
+	indexSig := &ast.IndexSignatureDeclaration{
+		Token: p.curToken, // '['
+	}
+
+	p.nextToken() // move to key name
+
+	if !p.curTokenIsIdentOrContextual() {
+		msg := fmt.Sprintf("expected identifier for index signature key name, got %s instead", p.curToken.Type)
+		p.errors = append(p.errors, msg)
+		return nil
+	}
+
+	indexSig.KeyName = &ast.Identifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
+
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	p.nextToken() // move to key type
+	indexSig.KeyType = p.parseType()
+
+	if !p.expectPeek(lexer.RBRACKET) {
+		return nil
+	}
+
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	p.nextToken() // move to value type
+	indexSig.ValueType = p.parseType()
+
+	// Don't call nextToken() here - let the caller decide when to advance
+	// p.nextToken() // move past index signature
+	return indexSig
 }
 
 func (p *Parser) parseEnumDeclaration() *ast.EnumDeclaration {

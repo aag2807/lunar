@@ -11,11 +11,11 @@ func TestGenerateVariableDeclaration(t *testing.T) {
 	// local x = 5
 	stmt := &ast.VariableDeclaration{
 		Token: lexer.Token{Type: lexer.LOCAL, Literal: "local"},
-		Name:  &ast.Identifier{Value: "x"},
-		Value: &ast.NumberLiteral{
+		Names: []*ast.Identifier{{Value: "x"}},
+		Values: []ast.Expression{&ast.NumberLiteral{
 			Token: lexer.Token{Literal: "5"},
 			Value: 5,
-		},
+		}},
 	}
 
 	g := New()
@@ -126,10 +126,10 @@ func TestGenerateReturnStatement(t *testing.T) {
 	// return 42
 	stmt := &ast.ReturnStatement{
 		Token: lexer.Token{Type: lexer.RETURN, Literal: "return"},
-		ReturnValue: &ast.NumberLiteral{
+		ReturnValues: []ast.Expression{&ast.NumberLiteral{
 			Token: lexer.Token{Literal: "42"},
 			Value: 42,
-		},
+		}},
 	}
 
 	g := New()
@@ -150,10 +150,10 @@ func TestGenerateIfStatement(t *testing.T) {
 			Statements: []ast.Statement{
 				&ast.ReturnStatement{
 					Token: lexer.Token{Type: lexer.RETURN, Literal: "return"},
-					ReturnValue: &ast.NumberLiteral{
+					ReturnValues: []ast.Expression{&ast.NumberLiteral{
 						Token: lexer.Token{Literal: "1"},
 						Value: 1,
-					},
+					}},
 				},
 			},
 		},
@@ -390,13 +390,13 @@ func TestGenerateMultipleStatements(t *testing.T) {
 	statements := []ast.Statement{
 		&ast.VariableDeclaration{
 			Token: lexer.Token{Type: lexer.LOCAL, Literal: "local"},
-			Name:  &ast.Identifier{Value: "x"},
-			Value: &ast.NumberLiteral{Token: lexer.Token{Literal: "10"}, Value: 10},
+			Names: []*ast.Identifier{{Value: "x"}},
+			Values: []ast.Expression{&ast.NumberLiteral{Token: lexer.Token{Literal: "10"}, Value: 10}},
 		},
 		&ast.VariableDeclaration{
 			Token: lexer.Token{Type: lexer.LOCAL, Literal: "local"},
-			Name:  &ast.Identifier{Value: "y"},
-			Value: &ast.NumberLiteral{Token: lexer.Token{Literal: "20"}, Value: 20},
+			Names: []*ast.Identifier{{Value: "y"}},
+			Values: []ast.Expression{&ast.NumberLiteral{Token: lexer.Token{Literal: "20"}, Value: 20}},
 		},
 	}
 

@@ -22,6 +22,7 @@ const (
 	MODULO    = "%"
 	HASH      = "#"
 	AMPERSAND = "&" // for intersection types Type1 & Type2
+	AT        = "@" // for decorators @decoratorName
 
 	//comparison
 	EQ         = "=="
@@ -64,6 +65,11 @@ const (
 	STATIC      = "static"
 	ABSTRACT    = "abstract"
 	READONLY    = "readonly"
+	GET         = "get"
+	SET         = "set"
+	NAMESPACE   = "namespace"
+	ASYNC       = "async"
+	AWAIT       = "await"
 	FUNCTION    = "function"
 	LOCAL       = "local"
 	CONST       = "const"
@@ -89,6 +95,8 @@ const (
 	DECLARE     = "declare"
 	IS          = "is" // for type guards: value is Type
 	AS          = "as" // for type assertions: value as Type
+	KEYOF       = "keyof" // for keyof operator: keyof T
+	TYPEOF      = "typeof" // for typeof operator: typeof value
 
 	//types
 	ANY         = "any"
@@ -98,6 +106,8 @@ const (
 	NIL         = "nil"
 	TRUE        = "true"
 	FALSE       = "false"
+	NEVER       = "never"
+	UNKNOWN     = "unknown"
 
 	ARROW    = "=>"
 	QUESTION = "?"
@@ -122,6 +132,11 @@ var keywords = map[string]TokenType{
 	"static":      STATIC,
 	"abstract":    ABSTRACT,
 	"readonly":    READONLY,
+	"get":         GET,
+	"set":         SET,
+	"namespace":   NAMESPACE,
+	"async":       ASYNC,
+	"await":       AWAIT,
 	"function":    FUNCTION,
 	"local":       LOCAL,
 	"const":       CONST,
@@ -150,6 +165,8 @@ var keywords = map[string]TokenType{
 	"declare":     DECLARE,
 	"is":          IS,
 	"as":          AS,
+	"keyof":       KEYOF,
+	"typeof":      TYPEOF,
 	"table":       TABLE,
 	"any":         ANY,
 	"string":      STRING_TYPE,
@@ -158,6 +175,8 @@ var keywords = map[string]TokenType{
 	"nil":         NIL,
 	"true":        TRUE,
 	"false":       FALSE,
+	"never":       NEVER,
+	"unknown":     UNKNOWN,
 }
 
 type Token struct {

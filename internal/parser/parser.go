@@ -5,6 +5,7 @@ import (
 	"lunar/internal/ast"
 	"lunar/internal/lexer"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -89,6 +90,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.LBRACE, p.parseTableLiteral)
 	p.registerPrefix(lexer.FUNCTION, p.parseFunctionExpression)
 	p.registerPrefix(lexer.ELLIPSIS, p.parseSpreadExpression)
+	p.registerPrefix(lexer.AWAIT, p.parseAwaitExpression)
 
 	//register infix operators
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
@@ -635,7 +637,7 @@ func (p *Parser) tryParseGenericType(baseExpr ast.Expression) ast.Expression {
 func (p *Parser) isTypeToken(tokenType lexer.TokenType) bool {
 	switch tokenType {
 	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN,
-		lexer.ANY, lexer.VOID, lexer.NIL, lexer.TABLE, lexer.LPAREN:
+		lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN, lexer.TABLE, lexer.LPAREN:
 		return true
 	default:
 		return false
@@ -661,6 +663,17 @@ func (p *Parser) parseSpreadExpression() ast.Expression {
 
 	p.nextToken()
 	expression.Value = p.parseExpression(LOWEST)
+
+	return expression
+}
+
+func (p *Parser) parseAwaitExpression() ast.Expression {
+	expression := &ast.AwaitExpression{
+		Token: p.curToken, // 'await' token
+	}
+
+	p.nextToken()
+	expression.Expression = p.parseExpression(PREFIX)
 
 	return expression
 }
@@ -754,9 +767,18 @@ func (p *Parser) parseType() ast.Expression {
 	case lexer.LPAREN:
 		// Could be tuple type or function type
 		return p.parseTupleOrFunctionType()
+	case lexer.LBRACE:
+		// Mapped type: { [K in T]: U }
+		return p.parseMappedType()
 	case lexer.TABLE:
 		// table<K, V>
 		typeExpr = p.parseTableType()
+	case lexer.KEYOF:
+		// keyof T
+		return p.parseKeyofType()
+	case lexer.TYPEOF:
+		// typeof value
+		return p.parseTypeofExpression()
 	case lexer.STRING:
 		// String literal in type position (for literal types)
 		typeExpr = &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
@@ -764,7 +786,16 @@ func (p *Parser) parseType() ast.Expression {
 		// Number literal in type position (for literal types)
 		value, _ := strconv.ParseFloat(p.curToken.Literal, 64)
 		typeExpr = &ast.NumberLiteral{Token: p.curToken, Value: value}
-	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL:
+	case lexer.TRUE:
+		// Boolean literal type: true
+		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: true}
+	case lexer.FALSE:
+		// Boolean literal type: false
+		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: false}
+	case lexer.TEMPLATE_STRING:
+		// Template literal type: `Hello ${string}` or `${T}_${U}`
+		return p.parseTemplateLiteralType()
+	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
 		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	default:
 		return nil
@@ -774,13 +805,155 @@ func (p *Parser) parseType() ast.Expression {
 	return p.parseTypeSuffix(typeExpr)
 }
 
+// parseMappedType parses mapped types: { [K in T]: U }
+// Also supports: { readonly [K in T]: U }, { [K in T]?: U }, { readonly [K in T]?: U }
+func (p *Parser) parseMappedType() ast.Expression {
+	mappedType := &ast.MappedType{
+		Token: p.curToken, // '{'
+	}
+
+	// Check for 'readonly' modifier
+	if p.peekTokenIs(lexer.READONLY) {
+		p.nextToken() // consume 'readonly'
+		mappedType.IsReadonly = true
+	}
+
+	if !p.expectPeek(lexer.LBRACKET) {
+		return nil
+	}
+	p.nextToken() // move past '['
+
+	// Parse the type parameter (K)
+	if !p.curTokenIs(lexer.IDENT) {
+		return nil
+	}
+	mappedType.TypeParam = &ast.Identifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
+
+	// Expect 'in' keyword
+	if !p.expectPeek(lexer.IN) {
+		return nil
+	}
+
+	// Parse the constraint (what K iterates over)
+	p.nextToken() // move to constraint type
+	mappedType.Constraint = p.parseType()
+	if mappedType.Constraint == nil {
+		return nil
+	}
+
+	// Expect ']'
+	if !p.expectPeek(lexer.RBRACKET) {
+		return nil
+	}
+
+	// Check for optional '?' modifier
+	if p.peekTokenIs(lexer.QUESTION) {
+		p.nextToken() // consume '?'
+		mappedType.IsOptional = true
+	}
+
+	// Expect ':'
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	// Parse the value type
+	p.nextToken() // move to value type
+	mappedType.ValueType = p.parseType()
+	if mappedType.ValueType == nil {
+		return nil
+	}
+
+	// Expect '}'
+	if !p.expectPeek(lexer.RBRACE) {
+		return nil
+	}
+
+	return mappedType
+}
+
+// parseTemplateLiteralType parses template literal types: `Hello ${string}` or `${T}_${U}`
+func (p *Parser) parseTemplateLiteralType() ast.Expression {
+	templateLiteral := &ast.TemplateLiteralType{
+		Token:      p.curToken,
+		RawLiteral: p.curToken.Literal,
+		Parts:      []string{},
+		Types:      []ast.Expression{},
+	}
+
+	// Parse the template string to extract parts and type expressions
+	// The template string is in p.curToken.Literal
+	content := p.curToken.Literal
+	var parts []string
+	var types []ast.Expression
+	var currentPart strings.Builder
+
+	i := 0
+	for i < len(content) {
+		if i < len(content)-1 && content[i] == '$' && content[i+1] == '{' {
+			// Found ${...} - save current part and parse the type
+			parts = append(parts, currentPart.String())
+			currentPart.Reset()
+
+			// Find the matching }
+			i += 2 // Skip ${
+			start := i
+			braceCount := 1
+			for i < len(content) && braceCount > 0 {
+				if content[i] == '{' {
+					braceCount++
+				} else if content[i] == '}' {
+					braceCount--
+				}
+				if braceCount > 0 {
+					i++
+				}
+			}
+
+			if braceCount != 0 {
+				// Unmatched braces
+				return nil
+			}
+
+			// Parse the type expression
+			typeStr := content[start:i]
+			// Create a mini-parser for the type expression
+			typeLexer := lexer.New(typeStr)
+			typeParser := New(typeLexer)
+			typeParser.nextToken() // Initialize parser
+			typeExpr := typeParser.parseType()
+			if typeExpr == nil {
+				return nil
+			}
+			types = append(types, typeExpr)
+
+			i++ // Skip closing }
+		} else {
+			// Regular character
+			currentPart.WriteByte(content[i])
+			i++
+		}
+	}
+
+	// Add the final part
+	parts = append(parts, currentPart.String())
+
+	templateLiteral.Parts = parts
+	templateLiteral.Types = types
+
+	return templateLiteral
+}
+
 func (p *Parser) parseSimpleType() ast.Expression {
 	switch p.curToken.Type {
 	case lexer.LPAREN:
 		return p.parseTupleOrFunctionType()
 	case lexer.TABLE:
 		return p.parseTableType()
-	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL:
+	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
 		return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	default:
 		return nil
@@ -795,14 +968,27 @@ func (p *Parser) parseTypeSuffix(baseType ast.Expression) ast.Expression {
 	for {
 		switch {
 		case p.peekTokenIs(lexer.LBRACKET):
-			// Array type: T[]
+			// Could be array type T[] or indexed access type T[K]
 			p.nextToken() // consume '['
-			if !p.expectPeek(lexer.RBRACKET) {
-				return nil
-			}
-			currentType = &ast.ArrayType{
-				Token:       baseType.(*ast.Identifier).Token,
-				ElementType: currentType,
+			p.nextToken() // move to content or ']'
+
+			if p.curTokenIs(lexer.RBRACKET) {
+				// Empty brackets: T[] is array type
+				currentType = &ast.ArrayType{
+					Token:       baseType.(*ast.Identifier).Token,
+					ElementType: currentType,
+				}
+			} else {
+				// Non-empty brackets: T[K] is indexed access type
+				indexType := p.parseType()
+				if !p.expectPeek(lexer.RBRACKET) {
+					return nil
+				}
+				currentType = &ast.IndexExpression{
+					Token: p.curToken,
+					Left:  currentType,
+					Index: indexType,
+				}
 			}
 
 		case p.peekTokenIs(lexer.LT):
@@ -852,7 +1038,8 @@ checkIntersection:
 			p.nextToken() // consume '&'
 			p.nextToken() // move to next type
 			// Parse the next type WITHOUT processing intersections or unions
-			nextType := p.parseNonUnionIntersectionType()
+			// skipOptional=false since parseTypeSuffix is called from normal parseType context
+			nextType := p.parseNonUnionIntersectionType(false)
 			if nextType != nil {
 				types = append(types, nextType)
 			}
@@ -872,7 +1059,8 @@ checkIntersection:
 			p.nextToken() // move to next type
 			// Parse the next type WITHOUT processing unions
 			// But we DO process intersections, so A | B & C parses as A | (B & C)
-			nextType := p.parseNonUnionIntersectionType()
+			// skipOptional=false since parseTypeSuffix is called from normal parseType context
+			nextType := p.parseNonUnionIntersectionType(false)
 			// Check if this type has intersection suffix
 			if p.peekTokenIs(lexer.AMPERSAND) {
 				intersectionTypes := []ast.Expression{nextType}
@@ -880,7 +1068,215 @@ checkIntersection:
 				for p.peekTokenIs(lexer.AMPERSAND) {
 					p.nextToken() // consume '&'
 					p.nextToken() // move to next type
-					intersectionMember := p.parseNonUnionIntersectionType()
+					intersectionMember := p.parseNonUnionIntersectionType(false)
+					if intersectionMember != nil {
+						intersectionTypes = append(intersectionTypes, intersectionMember)
+					}
+				}
+				nextType = &ast.IntersectionType{
+					Token: intersectionToken,
+					Types: intersectionTypes,
+				}
+			}
+			if nextType != nil {
+				types = append(types, nextType)
+			}
+		}
+		currentType = &ast.UnionType{
+			Token: unionToken,
+			Types: types,
+		}
+	}
+
+	// Fourth pass: handle conditional types (lowest precedence)
+	// T extends U ? X : Y
+	if p.peekTokenIs(lexer.EXTENDS) {
+		checkType := currentType
+		p.nextToken() // consume 'extends'
+		p.nextToken() // move to extends type
+
+		// Parse the extends type (without allowing nested conditionals)
+		// skipOptional=true to prevent consuming the ? that's part of the conditional syntax
+		extendsType := p.parseSimpleTypeWithSuffixes(true)
+
+		// After parseSimpleTypeWithSuffixes, we're positioned at the last token
+		// of the extends type. We need to check if the NEXT token is ?
+		if !p.peekTokenIs(lexer.QUESTION) {
+			return nil
+		}
+		p.nextToken() // consume ?
+
+		p.nextToken() // move to true type
+		// Use parseType() to allow nested conditional types in true branch
+		trueType := p.parseType()
+
+		if !p.peekTokenIs(lexer.COLON) {
+			return nil
+		}
+		p.nextToken() // consume :
+
+		p.nextToken() // move to false type
+		// Use parseType() to allow nested conditional types in false branch
+		falseType := p.parseType()
+
+		// After parsing falseType, we're positioned correctly at its last token
+		// Don't advance further - let the caller handle positioning
+
+		// Get the token from checkType
+		var condToken lexer.Token
+		switch ct := checkType.(type) {
+		case *ast.Identifier:
+			condToken = ct.Token
+		case *ast.UnionType:
+			condToken = ct.Token
+		case *ast.IntersectionType:
+			condToken = ct.Token
+		default:
+			condToken = p.curToken
+		}
+
+		currentType = &ast.ConditionalType{
+			Token:       condToken,
+			CheckType:   checkType,
+			ExtendsType: extendsType,
+			TrueType:    trueType,
+			FalseType:   falseType,
+		}
+	}
+
+	return currentType
+}
+
+// parseSimpleTypeWithSuffixes parses a type with all suffixes including union and intersection,
+// but NOT conditional types (to avoid infinite recursion in conditional type parsing)
+// skipOptional: if true, don't parse ? as optional type (used when parsing conditional type extends clause)
+func (p *Parser) parseSimpleTypeWithSuffixes(skipOptional bool) ast.Expression {
+	var typeExpr ast.Expression
+
+	switch p.curToken.Type {
+	case lexer.LPAREN:
+		return p.parseTupleOrFunctionType()
+	case lexer.TABLE:
+		typeExpr = p.parseTableType()
+	case lexer.KEYOF:
+		return p.parseKeyofType()
+	case lexer.TYPEOF:
+		return p.parseTypeofExpression()
+	case lexer.STRING:
+		typeExpr = &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
+	case lexer.NUMBER:
+		value, _ := strconv.ParseFloat(p.curToken.Literal, 64)
+		typeExpr = &ast.NumberLiteral{Token: p.curToken, Value: value}
+	case lexer.TRUE:
+		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: true}
+	case lexer.FALSE:
+		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: false}
+	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
+		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	default:
+		return nil
+	}
+
+	currentType := typeExpr
+
+	// Handle high-precedence suffixes (arrays, generics, optional)
+	for {
+		switch {
+		case p.peekTokenIs(lexer.LBRACKET):
+			p.nextToken() // consume '['
+			p.nextToken() // move to content or ']'
+
+			if p.curTokenIs(lexer.RBRACKET) {
+				// Empty brackets: T[] is array type
+				currentType = &ast.ArrayType{
+					Token:       typeExpr.(*ast.Identifier).Token,
+					ElementType: currentType,
+				}
+			} else {
+				// Non-empty brackets: T[K] is indexed access type
+				indexType := p.parseType()
+				if !p.expectPeek(lexer.RBRACKET) {
+					return nil
+				}
+				currentType = &ast.IndexExpression{
+					Token: p.curToken,
+					Left:  currentType,
+					Index: indexType,
+				}
+			}
+
+		case p.peekTokenIs(lexer.LT):
+			p.nextToken() // consume '<'
+			p.nextToken() // move to first type argument
+
+			typeArgs := []ast.Expression{}
+			typeArgs = append(typeArgs, p.parseType())
+
+			for p.peekTokenIs(lexer.COMMA) {
+				p.nextToken() // consume comma
+				p.nextToken() // move to next type
+				typeArgs = append(typeArgs, p.parseType())
+			}
+
+			if !p.expectPeek(lexer.GT) {
+				return nil
+			}
+
+			currentType = &ast.GenericType{
+				Token:         typeExpr.(*ast.Identifier).Token,
+				BaseType:      typeExpr,
+				TypeArguments: typeArgs,
+			}
+
+		case p.peekTokenIs(lexer.QUESTION) && !skipOptional:
+			p.nextToken()
+			currentType = &ast.OptionalType{
+				Token: p.curToken,
+				Type:  currentType,
+			}
+
+		default:
+			goto checkIntersection
+		}
+	}
+
+checkIntersection:
+	// Handle intersection types
+	if p.peekTokenIs(lexer.AMPERSAND) {
+		types := []ast.Expression{currentType}
+		intersectionToken := p.peekToken
+		for p.peekTokenIs(lexer.AMPERSAND) {
+			p.nextToken() // consume '&'
+			p.nextToken() // move to next type
+			// Pass through skipOptional parameter
+			nextType := p.parseNonUnionIntersectionType(skipOptional)
+			if nextType != nil {
+				types = append(types, nextType)
+			}
+		}
+		currentType = &ast.IntersectionType{
+			Token: intersectionToken,
+			Types: types,
+		}
+	}
+
+	// Handle union types
+	if p.peekTokenIs(lexer.PIPE) {
+		types := []ast.Expression{currentType}
+		unionToken := p.peekToken
+		for p.peekTokenIs(lexer.PIPE) {
+			p.nextToken() // consume '|'
+			p.nextToken() // move to next type
+			// Pass through skipOptional parameter
+			nextType := p.parseNonUnionIntersectionType(skipOptional)
+			// Check for intersection in this union member
+			if p.peekTokenIs(lexer.AMPERSAND) {
+				intersectionTypes := []ast.Expression{nextType}
+				intersectionToken := p.peekToken
+				for p.peekTokenIs(lexer.AMPERSAND) {
+					p.nextToken() // consume '&'
+					p.nextToken() // move to next type
+					intersectionMember := p.parseNonUnionIntersectionType(skipOptional)
 					if intersectionMember != nil {
 						intersectionTypes = append(intersectionTypes, intersectionMember)
 					}
@@ -905,7 +1301,8 @@ checkIntersection:
 
 // parseNonUnionIntersectionType parses a type with all suffixes EXCEPT union and intersection types
 // This is used when parsing union/intersection members to avoid nested structures
-func (p *Parser) parseNonUnionIntersectionType() ast.Expression {
+// skipOptional: if true, don't parse ? as optional type (used when parsing conditional type extends clause)
+func (p *Parser) parseNonUnionIntersectionType(skipOptional bool) ast.Expression {
 	var typeExpr ast.Expression
 
 	switch p.curToken.Type {
@@ -922,7 +1319,11 @@ func (p *Parser) parseNonUnionIntersectionType() ast.Expression {
 		// Number literal in type position (for literal types)
 		value, _ := strconv.ParseFloat(p.curToken.Literal, 64)
 		typeExpr = &ast.NumberLiteral{Token: p.curToken, Value: value}
-	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL:
+	case lexer.TRUE:
+		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: true}
+	case lexer.FALSE:
+		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: false}
+	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
 		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	default:
 		return nil
@@ -968,7 +1369,7 @@ func (p *Parser) parseNonUnionIntersectionType() ast.Expression {
 				TypeArguments: typeArgs,
 			}
 
-		case p.peekTokenIs(lexer.QUESTION):
+		case p.peekTokenIs(lexer.QUESTION) && !skipOptional:
 			// Optional type: T?
 			p.nextToken() // consume '?'
 			currentType = &ast.OptionalType{
@@ -1011,6 +1412,39 @@ func (p *Parser) parseTableType() ast.Expression {
 		Token:     tableToken,
 		KeyType:   keyType,
 		ValueType: valueType,
+	}
+}
+
+func (p *Parser) parseKeyofType() ast.Expression {
+	keyofToken := p.curToken
+
+	p.nextToken() // move to the object type
+	objectType := p.parseType()
+
+	if objectType == nil {
+		return nil
+	}
+
+	return &ast.KeyofType{
+		Token:      keyofToken,
+		ObjectType: objectType,
+	}
+}
+
+func (p *Parser) parseTypeofExpression() ast.Expression {
+	typeofToken := p.curToken
+
+	p.nextToken() // move to the expression
+	// Parse the expression (variable name, member access, etc.)
+	expr := p.parseExpression(LOWEST)
+
+	if expr == nil {
+		return nil
+	}
+
+	return &ast.TypeofExpression{
+		Token:      typeofToken,
+		Expression: expr,
 	}
 }
 
@@ -1114,7 +1548,7 @@ func (p *Parser) peekTokenIs(t lexer.TokenType) bool {
 // Context-aware keyword helpers
 // These keywords can be used as type names OR as identifiers depending on context
 func (p *Parser) isContextualKeyword(t lexer.TokenType) bool {
-	return t == lexer.STRING_TYPE || t == lexer.TABLE || t == lexer.TYPE
+	return t == lexer.STRING_TYPE || t == lexer.TABLE || t == lexer.TYPE || t == lexer.GET || t == lexer.SET
 }
 
 func (p *Parser) curTokenIsIdentOrContextual() bool {
@@ -1254,6 +1688,51 @@ func (p *Parser) parseFunctionDeclaration() *ast.FunctionDeclaration {
 	return fd
 }
 
+// parseAsyncFunctionDeclaration parses async function declarations
+func (p *Parser) parseAsyncFunctionDeclaration() *ast.FunctionDeclaration {
+	// Current token is 'async'
+	asyncToken := p.curToken
+
+	// Expect 'function' keyword
+	if !p.expectPeek(lexer.FUNCTION) {
+		return nil
+	}
+
+	fd := &ast.FunctionDeclaration{
+		Token:   asyncToken,
+		IsAsync: true,
+	}
+
+	// Parse function name - allows context-aware keywords
+	if !p.expectPeekIdentOrContextual() {
+		return nil
+	}
+	fd.Name = p.parseIdentifierOrContextual()
+
+	// Parse generic parameters if present: <T, U>
+	if p.peekTokenIs(lexer.LT) {
+		p.nextToken() // consume <
+		fd.GenericParams = p.parseGenericParameters()
+	}
+
+	// Parse the parameters
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+	fd.Parameters = p.parseFunctionParameters()
+
+	// Parse optional return type
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // consume :
+		p.nextToken() // move onto return type
+		fd.ReturnType = p.parseType()
+	}
+
+	fd.Body = p.parseBlockStatement()
+
+	return fd
+}
+
 // parseFunctionExpression parses anonymous function expressions like: function(x: number): number return x end
 func (p *Parser) parseFunctionExpression() ast.Expression {
 	fe := &ast.FunctionExpression{
@@ -1358,6 +1837,8 @@ func (p *Parser) parseStatement() ast.Statement {
 	switch p.curToken.Type {
 	case lexer.FUNCTION:
 		return p.parseFunctionDeclaration()
+	case lexer.ASYNC:
+		return p.parseAsyncFunctionDeclaration()
 	case lexer.RETURN:
 		return p.parseReturnStatement()
 	case lexer.LOCAL, lexer.CONST:
@@ -1383,12 +1864,16 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseEnumDeclaration()
 	case lexer.TYPE:
 		return p.parseTypeDeclaration()
+	case lexer.NAMESPACE:
+		return p.parseNamespaceDeclaration()
 	case lexer.EXPORT:
 		return p.parseExportStatement()
 	case lexer.IMPORT:
 		return p.parseImportStatement()
 	case lexer.DECLARE:
 		return p.parseDeclareStatement()
+	case lexer.AT:
+		return p.parseDecoratedStatement()
 	default:
 		return p.parseExpressionStatement()
 	}
@@ -1690,6 +2175,17 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 
 	// Parse class body
 	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+		// Check for index signature first (before modifiers)
+		if p.curTokenIs(lexer.LBRACKET) {
+			// Index signature: [key: KeyType]: ValueType
+			indexSig := p.parseIndexSignature()
+			if indexSig != nil {
+				class.IndexSignature = indexSig
+			}
+			p.nextToken() // move past index signature
+			continue
+		}
+
 		// Track modifiers for current member
 		isStatic := false
 		isAbstract := false
@@ -1717,6 +2213,50 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 		case lexer.CONSTRUCTOR:
 			class.Constructor = p.parseConstructorDeclaration()
 			p.nextToken()
+
+		case lexer.GET:
+			// Check if it's a getter declaration (get name()) or a method named "get"
+			if p.peekTokenIs(lexer.LPAREN) {
+				// It's a method named "get"
+				method := p.parseMethodDeclaration(isAbstract)
+				method.IsStatic = isStatic
+				method.IsAbstract = isAbstract
+				method.Visibility = visibility
+				class.Methods = append(class.Methods, method)
+				if method.Body != nil && len(method.Body.Statements) > 0 {
+					p.nextToken()
+				}
+			} else {
+				// It's a getter declaration
+				getter := p.parseGetterDeclaration()
+				if getter != nil {
+					getter.Visibility = visibility
+					class.Getters = append(class.Getters, getter)
+					p.nextToken() // Advance past 'end'
+				}
+			}
+
+		case lexer.SET:
+			// Check if it's a setter declaration (set name(param)) or a method named "set"
+			if p.peekTokenIs(lexer.LPAREN) {
+				// It's a method named "set"
+				method := p.parseMethodDeclaration(isAbstract)
+				method.IsStatic = isStatic
+				method.IsAbstract = isAbstract
+				method.Visibility = visibility
+				class.Methods = append(class.Methods, method)
+				if method.Body != nil && len(method.Body.Statements) > 0 {
+					p.nextToken()
+				}
+			} else {
+				// It's a setter declaration
+				setter := p.parseSetterDeclaration()
+				if setter != nil {
+					setter.Visibility = visibility
+					class.Setters = append(class.Setters, setter)
+					p.nextToken() // Advance past 'end'
+				}
+			}
 
 		case lexer.IDENT, lexer.STRING_TYPE, lexer.TABLE, lexer.TYPE:
 			// Could be property or method
@@ -1810,6 +2350,83 @@ func (p *Parser) parseConstructorDeclaration() *ast.ConstructorDeclaration {
 	return constructor
 }
 
+func (p *Parser) parseGetterDeclaration() *ast.GetterDeclaration {
+	getter := &ast.GetterDeclaration{
+		Token: p.curToken, // 'get' token
+	}
+
+	// Parse property name
+	if !p.expectPeekIdentOrContextual() {
+		return nil
+	}
+	getter.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Expect empty parentheses
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+	if !p.expectPeek(lexer.RPAREN) {
+		return nil
+	}
+
+	// Parse return type
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+	p.nextToken() // move to return type
+	getter.ReturnType = p.parseType()
+
+	// Parse body
+	getter.Body = p.parseBlockStatement()
+
+	return getter
+}
+
+func (p *Parser) parseSetterDeclaration() *ast.SetterDeclaration {
+	setter := &ast.SetterDeclaration{
+		Token: p.curToken, // 'set' token
+	}
+
+	// Parse property name
+	if !p.expectPeekIdentOrContextual() {
+		return nil
+	}
+	setter.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Parse parameter
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+	if !p.expectPeekIdentOrContextual() {
+		return nil
+	}
+
+	paramName := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	var paramType ast.Expression
+
+	// Parse parameter type if present
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // consume ':'
+		p.nextToken() // move to type
+		paramType = p.parseType()
+	}
+
+	setter.Parameter = &ast.Parameter{
+		Token: paramName.Token,
+		Name:  paramName,
+		Type:  paramType,
+	}
+
+	if !p.expectPeek(lexer.RPAREN) {
+		return nil
+	}
+
+	// Parse body
+	setter.Body = p.parseBlockStatement()
+
+	return setter
+}
+
 func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 	iface := &ast.InterfaceDeclaration{
 		Token:      p.curToken,
@@ -1848,7 +2465,14 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 
 	// Parse interface body - allows context-aware keywords
 	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
-		if p.curTokenIsIdentOrContextual() {
+		if p.curTokenIs(lexer.LBRACKET) {
+			// Index signature: [key: KeyType]: ValueType
+			indexSig := p.parseIndexSignature()
+			if indexSig != nil {
+				iface.IndexSignature = indexSig
+			}
+			p.nextToken() // move past index signature
+		} else if p.curTokenIsIdentOrContextual() {
 			if p.peekTokenIs(lexer.COLON) {
 				// Property
 				prop := p.parsePropertyDeclaration()
@@ -1889,6 +2513,47 @@ func (p *Parser) parseInterfaceMethod() *ast.InterfaceMethod {
 
 	p.nextToken() // move past method signature
 	return method
+}
+
+func (p *Parser) parseIndexSignature() *ast.IndexSignatureDeclaration {
+	indexSig := &ast.IndexSignatureDeclaration{
+		Token: p.curToken, // '['
+	}
+
+	p.nextToken() // move to key name
+
+	if !p.curTokenIsIdentOrContextual() {
+		msg := fmt.Sprintf("expected identifier for index signature key name, got %s instead", p.curToken.Type)
+		p.errors = append(p.errors, msg)
+		return nil
+	}
+
+	indexSig.KeyName = &ast.Identifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
+
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	p.nextToken() // move to key type
+	indexSig.KeyType = p.parseType()
+
+	if !p.expectPeek(lexer.RBRACKET) {
+		return nil
+	}
+
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	p.nextToken() // move to value type
+	indexSig.ValueType = p.parseType()
+
+	// Don't call nextToken() here - let the caller decide when to advance
+	// p.nextToken() // move past index signature
+	return indexSig
 }
 
 func (p *Parser) parseEnumDeclaration() *ast.EnumDeclaration {
@@ -2051,6 +2716,32 @@ func (p *Parser) parseImportStatement() *ast.ImportStatement {
 	return importStmt
 }
 
+// parseNamespaceDeclaration parses a namespace declaration
+func (p *Parser) parseNamespaceDeclaration() *ast.NamespaceDeclaration {
+	ns := &ast.NamespaceDeclaration{
+		Token: p.curToken, // 'namespace' token
+	}
+
+	// Parse namespace name
+	if !p.expectPeekIdentOrContextual() {
+		return nil
+	}
+	ns.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	p.nextToken() // move past name
+
+	// Parse namespace body until 'end'
+	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+		stmt := p.parseStatement()
+		if stmt != nil {
+			ns.Statements = append(ns.Statements, stmt)
+		}
+		p.nextToken()
+	}
+
+	return ns
+}
+
 // parseDeclareStatement parses ambient declarations like: declare const name: Type
 func (p *Parser) parseDeclareStatement() *ast.DeclareStatement {
 	declareStmt := &ast.DeclareStatement{
@@ -2108,4 +2799,71 @@ func (p *Parser) parseGenericParameters() []*ast.Identifier {
 	}
 
 	return params
+}
+
+// parseDecorator parses a single decorator like @name or @name(args)
+func (p *Parser) parseDecorator() *ast.Decorator {
+	decorator := &ast.Decorator{
+		Token: p.curToken, // '@' token
+	}
+
+	// Expect identifier after @
+	if !p.expectPeek(lexer.IDENT) {
+		return nil
+	}
+
+	decorator.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Check for arguments
+	if p.peekTokenIs(lexer.LPAREN) {
+		p.nextToken() // move to '('
+		decorator.Arguments = p.parseExpressionList(lexer.RPAREN)
+	}
+
+	return decorator
+}
+
+// parseDecoratedStatement parses decorators followed by a class or function
+func (p *Parser) parseDecoratedStatement() ast.Statement {
+	var decorators []*ast.Decorator
+
+	// Parse all decorators
+	for p.curTokenIs(lexer.AT) {
+		decorator := p.parseDecorator()
+		if decorator != nil {
+			decorators = append(decorators, decorator)
+		}
+		p.nextToken()
+	}
+
+	// Now parse the decorated statement
+	switch p.curToken.Type {
+	case lexer.CLASS:
+		class := p.parseClassDeclaration()
+		if class != nil {
+			class.Decorators = decorators
+		}
+		return class
+	case lexer.ABSTRACT:
+		class := p.parseAbstractClassDeclaration()
+		if class != nil {
+			class.Decorators = decorators
+		}
+		return class
+	case lexer.FUNCTION:
+		fn := p.parseFunctionDeclaration()
+		if fn != nil {
+			fn.Decorators = decorators
+		}
+		return fn
+	case lexer.ASYNC:
+		fn := p.parseAsyncFunctionDeclaration()
+		if fn != nil {
+			fn.Decorators = decorators
+		}
+		return fn
+	default:
+		p.errors = append(p.errors, fmt.Sprintf("decorators can only be applied to classes and functions, got %s", p.curToken.Type))
+		return nil
+	}
 }

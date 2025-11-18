@@ -203,11 +203,22 @@ type Checker struct {
 	typeAliases        map[string]Type
 	genericTypeAliases map[string]*GenericTypeAlias
 
+	// Module system
+	exports        map[string]Type // Tracks exported names and their types
+	modules        map[string]*ModuleInfo // Tracks loaded modules
+	currentModule  string // Current module being checked
+
 	// Current function return type (for checking return statements)
 	currentFunctionReturnType Type
 
 	// Current class context (for visibility checking)
 	currentClass *ClassType
+}
+
+// ModuleInfo represents information about a module
+type ModuleInfo struct {
+	Path    string
+	Exports map[string]Type
 }
 
 // NewChecker creates a new type checker
@@ -221,6 +232,8 @@ func NewChecker() *Checker {
 	env.Set("nil", Nil)
 	env.Set("void", Void)
 	env.Set("any", Any)
+	env.Set("never", Never)
+	env.Set("unknown", Unknown)
 
 	checker := &Checker{
 		env:                env,
@@ -230,12 +243,34 @@ func NewChecker() *Checker {
 		enums:              make(map[string]*EnumType),
 		typeAliases:        make(map[string]Type),
 		genericTypeAliases: make(map[string]*GenericTypeAlias),
+		exports:            make(map[string]Type),
+		modules:            make(map[string]*ModuleInfo),
+		currentModule:      "",
 	}
+
+	// Register built-in utility types
+	checker.registerUtilityTypes()
 
 	// Load standard library declarations
 	checker.loadStdlib()
 
 	return checker
+}
+
+// registerUtilityTypes registers built-in utility types like Exclude, Extract, etc.
+func (c *Checker) registerUtilityTypes() {
+	// These will be handled specially in resolveTypeExpression when instantiated
+	// We just mark them as existing so they can be referenced
+	c.env.Set("Exclude", Any)       // Exclude<T, U>
+	c.env.Set("Extract", Any)       // Extract<T, U>
+	c.env.Set("NonNullable", Any)   // NonNullable<T>
+	c.env.Set("Pick", Any)          // Pick<T, K>
+	c.env.Set("Omit", Any)          // Omit<T, K>
+	c.env.Set("Record", Any)        // Record<K, V>
+	c.env.Set("Partial", Any)       // Partial<T>
+	c.env.Set("Required", Any)      // Required<T>
+	c.env.Set("ReturnType", Any)    // ReturnType<F>
+	c.env.Set("Parameters", Any)    // Parameters<F>
 }
 
 // loadStdlib loads the Lua standard library type definitions
@@ -320,11 +355,16 @@ func (c *Checker) registerTypeDefinition(stmt ast.Statement) {
 		c.registerEnum(node)
 	case *ast.TypeDeclaration:
 		c.registerTypeAlias(node)
+	case *ast.NamespaceDeclaration:
+		c.registerNamespace(node)
 	case *ast.DeclareStatement:
 		// Ambient declarations - register the underlying declaration
 		if node.Declaration != nil {
 			c.registerTypeDefinition(node.Declaration)
 		}
+	case *ast.ExportStatement:
+		// Handle exported type definitions
+		c.registerTypeDefinition(node.Statement)
 	}
 }
 
@@ -349,6 +389,10 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		Implements:          []*InterfaceType{},
 		IsAbstract:          node.IsAbstract,
 		GenericParams:       genericParams,
+		Getters:             make(map[string]*FunctionType),
+		Setters:             make(map[string]*FunctionType),
+		GetterVisibility:    make(map[string]string),
+		SetterVisibility:    make(map[string]string),
 	}
 
 	// Add generic type parameters to scope temporarily
@@ -440,6 +484,60 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		classType.MethodVisibility[methodName] = visibility
 	}
 
+	// Register getters
+	for _, getter := range node.Getters {
+		var returnType Type = Any
+		if getter.ReturnType != nil {
+			returnType = c.resolveTypeExpression(getter.ReturnType)
+		}
+		funcType := &FunctionType{
+			Parameters:    []Type{}, // Getters have no parameters
+			ReturnType:    returnType,
+			GenericParams: []string{},
+		}
+		getterName := getter.Name.Value
+		classType.Getters[getterName] = funcType
+
+		// Track getter visibility (default to public if not specified)
+		visibility := getter.Visibility
+		if visibility == "" {
+			visibility = "public"
+		}
+		classType.GetterVisibility[getterName] = visibility
+	}
+
+	// Register setters
+	for _, setter := range node.Setters {
+		var paramType Type = Any
+		if setter.Parameter != nil && setter.Parameter.Type != nil {
+			paramType = c.resolveTypeExpression(setter.Parameter.Type)
+		}
+		funcType := &FunctionType{
+			Parameters:    []Type{paramType},
+			ReturnType:    Void, // Setters return void
+			GenericParams: []string{},
+		}
+		setterName := setter.Name.Value
+		classType.Setters[setterName] = funcType
+
+		// Track setter visibility (default to public if not specified)
+		visibility := setter.Visibility
+		if visibility == "" {
+			visibility = "public"
+		}
+		classType.SetterVisibility[setterName] = visibility
+	}
+
+	// Register index signature if present
+	if node.IndexSignature != nil {
+		keyType := c.resolveTypeExpression(node.IndexSignature.KeyType)
+		valueType := c.resolveTypeExpression(node.IndexSignature.ValueType)
+		classType.IndexSignature = &IndexSignature{
+			KeyType:   keyType,
+			ValueType: valueType,
+		}
+	}
+
 	// Resolve extends clause (parent class)
 	if node.Extends != nil {
 		if ident, ok := node.Extends.(*ast.Identifier); ok {
@@ -500,6 +598,16 @@ func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
 			Parameters:    params,
 			ReturnType:    returnType,
 			GenericParams: []string{}, // Interface methods are not separately generic
+		}
+	}
+
+	// Register index signature if present
+	if node.IndexSignature != nil {
+		keyType := c.resolveTypeExpression(node.IndexSignature.KeyType)
+		valueType := c.resolveTypeExpression(node.IndexSignature.ValueType)
+		interfaceType.IndexSignature = &IndexSignature{
+			KeyType:   keyType,
+			ValueType: valueType,
 		}
 	}
 
@@ -613,6 +721,10 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 			return Any
 		case "void":
 			return Void
+		case "never":
+			return Never
+		case "unknown":
+			return Unknown
 		}
 
 		// Check for user-defined types
@@ -719,12 +831,85 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 			}
 		}
 
-		// Not a generic type alias, check for generic classes/functions
+		// Check for built-in utility types
 		if baseIdent, ok := node.BaseType.(*ast.Identifier); ok {
 			// Resolve type arguments
 			typeArgs := make([]Type, len(node.TypeArguments))
 			for i, arg := range node.TypeArguments {
 				typeArgs[i] = c.resolveTypeExpression(arg)
+			}
+
+			// Handle utility types
+			switch baseIdent.Value {
+			case "Exclude":
+				if len(typeArgs) != 2 {
+					c.addError("Exclude<T, U> expects 2 type arguments", lexer.Token{})
+					return Any
+				}
+				return c.excludeTypes(typeArgs[0], typeArgs[1])
+
+			case "Extract":
+				if len(typeArgs) != 2 {
+					c.addError("Extract<T, U> expects 2 type arguments", lexer.Token{})
+					return Any
+				}
+				return c.extractTypes(typeArgs[0], typeArgs[1])
+
+			case "NonNullable":
+				if len(typeArgs) != 1 {
+					c.addError("NonNullable<T> expects 1 type argument", lexer.Token{})
+					return Any
+				}
+				return c.nonNullable(typeArgs[0])
+
+			case "Pick":
+				if len(typeArgs) != 2 {
+					c.addError("Pick<T, K> expects 2 type arguments", lexer.Token{})
+					return Any
+				}
+				return c.pickType(typeArgs[0], typeArgs[1])
+
+			case "Omit":
+				if len(typeArgs) != 2 {
+					c.addError("Omit<T, K> expects 2 type arguments", lexer.Token{})
+					return Any
+				}
+				return c.omitType(typeArgs[0], typeArgs[1])
+
+			case "Record":
+				if len(typeArgs) != 2 {
+					c.addError("Record<K, V> expects 2 type arguments", lexer.Token{})
+					return Any
+				}
+				return c.recordType(typeArgs[0], typeArgs[1])
+
+			case "Partial":
+				if len(typeArgs) != 1 {
+					c.addError("Partial<T> expects 1 type argument", lexer.Token{})
+					return Any
+				}
+				return c.partialType(typeArgs[0])
+
+			case "Required":
+				if len(typeArgs) != 1 {
+					c.addError("Required<T> expects 1 type argument", lexer.Token{})
+					return Any
+				}
+				return c.requiredType(typeArgs[0])
+
+			case "ReturnType":
+				if len(typeArgs) != 1 {
+					c.addError("ReturnType<F> expects 1 type argument", lexer.Token{})
+					return Any
+				}
+				return c.returnType(typeArgs[0])
+
+			case "Parameters":
+				if len(typeArgs) != 1 {
+					c.addError("Parameters<F> expects 1 type argument", lexer.Token{})
+					return Any
+				}
+				return c.parametersType(typeArgs[0])
 			}
 
 			// Check if it's a generic class
@@ -755,6 +940,10 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		// Number literal in type position becomes a literal type
 		return &NumberLiteralType{Value: node.Value}
 
+	case *ast.BooleanLiteral:
+		// Boolean literal in type position becomes a literal type
+		return &BooleanLiteralType{Value: node.Value}
+
 	case *ast.TypeGuardType:
 		// Type guard like "value is string"
 		// Returns a special TypeGuardType that acts like boolean but carries guard info
@@ -766,10 +955,529 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		baseType := c.resolveTypeExpression(node.Type)
 		return &UnionType{Types: []Type{baseType, Nil}}
 
+	case *ast.KeyofType:
+		// keyof T returns a union of string literal types of T's keys
+		objectType := c.resolveTypeExpression(node.ObjectType)
+		return c.resolveKeyof(objectType)
+
+	case *ast.TypeofExpression:
+		// typeof value returns the type of the value
+		return c.resolveTypeof(node.Expression)
+
+	case *ast.ConditionalType:
+		// T extends U ? X : Y
+		checkType := c.resolveTypeExpression(node.CheckType)
+		extendsType := c.resolveTypeExpression(node.ExtendsType)
+		trueType := c.resolveTypeExpression(node.TrueType)
+		falseType := c.resolveTypeExpression(node.FalseType)
+		return c.resolveConditionalType(checkType, extendsType, trueType, falseType)
+
+	case *ast.IndexExpression:
+		// Indexed access type T[K]
+		objectType := c.resolveTypeExpression(node.Left)
+		indexType := c.resolveTypeExpression(node.Index)
+		return c.resolveIndexedAccess(objectType, indexType)
+
+	case *ast.MappedType:
+		// Mapped type { [K in T]: U }
+		// Resolve the constraint type (what K iterates over)
+		constraintType := c.resolveTypeExpression(node.Constraint)
+
+		// For now, create a generic mapped type that will be instantiated later
+		return c.resolveMappedType(node, constraintType)
+
+	case *ast.TemplateLiteralType:
+		// Template literal type `Hello ${string}` or `${T}_${U}`
+		return c.resolveTemplateLiteralType(node)
+
 	default:
 		c.addError(fmt.Sprintf("Cannot resolve type expression: %T", expr), lexer.Token{})
 		return Any
 	}
+}
+
+// resolveIndexedAccess resolves indexed access types like T[K]
+func (c *Checker) resolveIndexedAccess(objectType Type, indexType Type) Type {
+	switch obj := objectType.(type) {
+	case *ClassType:
+		// Handle class property access
+		return c.resolveClassIndexedAccess(obj, indexType)
+
+	case *InterfaceType:
+		// Handle interface property access
+		return c.resolveInterfaceIndexedAccess(obj, indexType)
+
+	case *ArrayType:
+		// Array[number] or Array[0] returns element type
+		return obj.ElementType
+
+	case *TupleType:
+		// Tuple[number literal] returns type at that index
+		if numLiteral, ok := indexType.(*NumberLiteralType); ok {
+			index := int(numLiteral.Value)
+			if index >= 0 && index < len(obj.Elements) {
+				return obj.Elements[index]
+			}
+			return Any
+		}
+		// Tuple[number] returns union of all element types
+		if _, ok := indexType.(*NumberType); ok {
+			return &UnionType{Types: obj.Elements}
+		}
+		return Any
+
+	case *TableType:
+		// Table<K, V>[K] returns V
+		return obj.ValueType
+
+	default:
+		// For other types, indexed access returns any
+		return Any
+	}
+}
+
+// resolveClassIndexedAccess resolves T[K] where T is a class type
+func (c *Checker) resolveClassIndexedAccess(classType *ClassType, indexType Type) Type {
+	// Handle string literal index
+	if strLiteral, ok := indexType.(*StringLiteralType); ok {
+		// Check properties
+		if propType, ok := classType.Properties[strLiteral.Value]; ok {
+			return propType
+		}
+		// Check methods
+		if methodType, ok := classType.Methods[strLiteral.Value]; ok {
+			return methodType
+		}
+		return Any
+	}
+
+	// Handle union of string literals
+	if unionType, ok := indexType.(*UnionType); ok {
+		var types []Type
+		for _, t := range unionType.Types {
+			propType := c.resolveClassIndexedAccess(classType, t)
+			if propType != Any {
+				types = append(types, propType)
+			}
+		}
+		if len(types) == 0 {
+			return Any
+		}
+		if len(types) == 1 {
+			return types[0]
+		}
+		return &UnionType{Types: types}
+	}
+
+	// For string type, return union of all property types
+	if _, ok := indexType.(*StringType); ok {
+		var types []Type
+		for _, propType := range classType.Properties {
+			types = append(types, propType)
+		}
+		for _, methodType := range classType.Methods {
+			types = append(types, methodType)
+		}
+		if len(types) == 0 {
+			return Never
+		}
+		if len(types) == 1 {
+			return types[0]
+		}
+		return &UnionType{Types: types}
+	}
+
+	return Any
+}
+
+// resolveInterfaceIndexedAccess resolves T[K] where T is an interface type
+func (c *Checker) resolveInterfaceIndexedAccess(interfaceType *InterfaceType, indexType Type) Type {
+	// Handle string literal index
+	if strLiteral, ok := indexType.(*StringLiteralType); ok {
+		// Check properties
+		if propType, ok := interfaceType.Properties[strLiteral.Value]; ok {
+			return propType
+		}
+		// Check methods
+		if methodType, ok := interfaceType.Methods[strLiteral.Value]; ok {
+			return methodType
+		}
+		return Any
+	}
+
+	// Handle union of string literals
+	if unionType, ok := indexType.(*UnionType); ok {
+		var types []Type
+		for _, t := range unionType.Types {
+			propType := c.resolveInterfaceIndexedAccess(interfaceType, t)
+			if propType != Any {
+				types = append(types, propType)
+			}
+		}
+		if len(types) == 0 {
+			return Any
+		}
+		if len(types) == 1 {
+			return types[0]
+		}
+		return &UnionType{Types: types}
+	}
+
+	// For string type, return union of all property types
+	if _, ok := indexType.(*StringType); ok {
+		var types []Type
+		for _, propType := range interfaceType.Properties {
+			types = append(types, propType)
+		}
+		for _, methodType := range interfaceType.Methods {
+			types = append(types, methodType)
+		}
+		if len(types) == 0 {
+			return Never
+		}
+		if len(types) == 1 {
+			return types[0]
+		}
+		return &UnionType{Types: types}
+	}
+
+	return Any
+}
+
+// excludeTypes implements Exclude<T, U> utility type
+// Removes all types from T that are assignable to U
+func (c *Checker) excludeTypes(t Type, u Type) Type {
+	// If T is a union, filter out types assignable to U
+	if unionType, ok := t.(*UnionType); ok {
+		var remaining []Type
+		for _, member := range unionType.Types {
+			if !member.IsAssignableTo(u) {
+				remaining = append(remaining, member)
+			}
+		}
+		if len(remaining) == 0 {
+			return Never
+		}
+		if len(remaining) == 1 {
+			return remaining[0]
+		}
+		return &UnionType{Types: remaining}
+	}
+
+	// If T is not a union, check if it's assignable to U
+	if t.IsAssignableTo(u) {
+		return Never
+	}
+	return t
+}
+
+// extractTypes implements Extract<T, U> utility type
+// Keeps only types from T that are assignable to U
+func (c *Checker) extractTypes(t Type, u Type) Type {
+	// If T is a union, keep only types assignable to U
+	if unionType, ok := t.(*UnionType); ok {
+		var extracted []Type
+		for _, member := range unionType.Types {
+			if member.IsAssignableTo(u) {
+				extracted = append(extracted, member)
+			}
+		}
+		if len(extracted) == 0 {
+			return Never
+		}
+		if len(extracted) == 1 {
+			return extracted[0]
+		}
+		return &UnionType{Types: extracted}
+	}
+
+	// If T is not a union, check if it's assignable to U
+	if t.IsAssignableTo(u) {
+		return t
+	}
+	return Never
+}
+
+// nonNullable implements NonNullable<T> utility type
+// Removes nil and undefined from T
+func (c *Checker) nonNullable(t Type) Type {
+	// If T is a union, remove nil
+	if unionType, ok := t.(*UnionType); ok {
+		var nonNull []Type
+		for _, member := range unionType.Types {
+			if _, isNil := member.(*NilType); !isNil {
+				nonNull = append(nonNull, member)
+			}
+		}
+		if len(nonNull) == 0 {
+			return Never
+		}
+		if len(nonNull) == 1 {
+			return nonNull[0]
+		}
+		return &UnionType{Types: nonNull}
+	}
+
+	// If T is nil, return never
+	if _, isNil := t.(*NilType); isNil {
+		return Never
+	}
+
+	// Otherwise return T as is
+	return t
+}
+
+// pickType implements Pick<T, K> utility type
+// Constructs a type by picking a set of properties K from T
+func (c *Checker) pickType(t Type, keys Type) Type {
+	switch objType := t.(type) {
+	case *InterfaceType:
+		picked := &InterfaceType{
+			Name:       objType.Name + "_Picked",
+			Properties: make(map[string]Type),
+			Methods:    make(map[string]*FunctionType),
+		}
+
+		// Extract keys from the keys type
+		keyList := c.extractKeyNames(keys)
+		for _, key := range keyList {
+			if propType, ok := objType.Properties[key]; ok {
+				picked.Properties[key] = propType
+			}
+			if methodType, ok := objType.Methods[key]; ok {
+				picked.Methods[key] = methodType
+			}
+		}
+		return picked
+
+	case *ClassType:
+		picked := &ClassType{
+			Name:       objType.Name + "_Picked",
+			Properties: make(map[string]Type),
+			Methods:    make(map[string]*FunctionType),
+		}
+
+		keyList := c.extractKeyNames(keys)
+		for _, key := range keyList {
+			if propType, ok := objType.Properties[key]; ok {
+				picked.Properties[key] = propType
+			}
+			if methodType, ok := objType.Methods[key]; ok {
+				picked.Methods[key] = methodType
+			}
+		}
+		return picked
+
+	default:
+		return Any
+	}
+}
+
+// omitType implements Omit<T, K> utility type
+// Constructs a type by omitting a set of properties K from T
+func (c *Checker) omitType(t Type, keys Type) Type {
+	// Omit<T, K> = Pick<T, Exclude<keyof T, K>>
+	allKeys := c.resolveKeyof(t)
+	remainingKeys := c.excludeTypes(allKeys, keys)
+	return c.pickType(t, remainingKeys)
+}
+
+// recordType implements Record<K, V> utility type
+// Constructs a type with a set of properties K of type V
+func (c *Checker) recordType(keys Type, valueType Type) Type {
+	record := &InterfaceType{
+		Name:       "Record",
+		Properties: make(map[string]Type),
+		Methods:    make(map[string]*FunctionType),
+	}
+
+	keyList := c.extractKeyNames(keys)
+	for _, key := range keyList {
+		record.Properties[key] = valueType
+	}
+
+	return record
+}
+
+// partialType implements Partial<T> utility type
+// Makes all properties in T optional
+func (c *Checker) partialType(t Type) Type {
+	switch objType := t.(type) {
+	case *InterfaceType:
+		partial := &InterfaceType{
+			Name:       objType.Name + "_Partial",
+			Properties: make(map[string]Type),
+			Methods:    make(map[string]*FunctionType),
+		}
+
+		// Make all properties optional (T | nil)
+		for name, propType := range objType.Properties {
+			partial.Properties[name] = &UnionType{Types: []Type{propType, Nil}}
+		}
+		for name, methodType := range objType.Methods {
+			partial.Methods[name] = methodType
+		}
+		return partial
+
+	case *ClassType:
+		partial := &ClassType{
+			Name:       objType.Name + "_Partial",
+			Properties: make(map[string]Type),
+			Methods:    make(map[string]*FunctionType),
+		}
+
+		for name, propType := range objType.Properties {
+			partial.Properties[name] = &UnionType{Types: []Type{propType, Nil}}
+		}
+		for name, methodType := range objType.Methods {
+			partial.Methods[name] = methodType
+		}
+		return partial
+
+	default:
+		return t
+	}
+}
+
+// requiredType implements Required<T> utility type
+// Makes all properties in T required (removes optionality)
+func (c *Checker) requiredType(t Type) Type {
+	switch objType := t.(type) {
+	case *InterfaceType:
+		required := &InterfaceType{
+			Name:       objType.Name + "_Required",
+			Properties: make(map[string]Type),
+			Methods:    make(map[string]*FunctionType),
+		}
+
+		// Remove optionality from properties
+		for name, propType := range objType.Properties {
+			required.Properties[name] = c.nonNullable(propType)
+		}
+		for name, methodType := range objType.Methods {
+			required.Methods[name] = methodType
+		}
+		return required
+
+	case *ClassType:
+		required := &ClassType{
+			Name:       objType.Name + "_Required",
+			Properties: make(map[string]Type),
+			Methods:    make(map[string]*FunctionType),
+		}
+
+		for name, propType := range objType.Properties {
+			required.Properties[name] = c.nonNullable(propType)
+		}
+		for name, methodType := range objType.Methods {
+			required.Methods[name] = methodType
+		}
+		return required
+
+	default:
+		return t
+	}
+}
+
+// returnType implements ReturnType<F> utility type
+// Extracts the return type from a function type
+func (c *Checker) returnType(f Type) Type {
+	if funcType, ok := f.(*FunctionType); ok {
+		return funcType.ReturnType
+	}
+	return Any
+}
+
+// parametersType implements Parameters<F> utility type
+// Extracts parameter types from a function type as a tuple
+func (c *Checker) parametersType(f Type) Type {
+	if funcType, ok := f.(*FunctionType); ok {
+		return &TupleType{Elements: funcType.Parameters}
+	}
+	return Never
+}
+
+// extractKeyNames extracts string literal names from a key type
+func (c *Checker) extractKeyNames(keys Type) []string {
+	var names []string
+
+	switch k := keys.(type) {
+	case *StringLiteralType:
+		names = append(names, k.Value)
+	case *UnionType:
+		for _, member := range k.Types {
+			if strLit, ok := member.(*StringLiteralType); ok {
+				names = append(names, strLit.Value)
+			}
+		}
+	}
+
+	return names
+}
+
+// resolveKeyof extracts keys from an object type and returns a union of string literals
+func (c *Checker) resolveKeyof(objectType Type) Type {
+	var keys []Type
+
+	switch t := objectType.(type) {
+	case *ClassType:
+		// Extract property names from class
+		for propName := range t.Properties {
+			keys = append(keys, &StringLiteralType{Value: propName})
+		}
+		for methodName := range t.Methods {
+			keys = append(keys, &StringLiteralType{Value: methodName})
+		}
+
+	case *InterfaceType:
+		// Extract property names from interface
+		for propName := range t.Properties {
+			keys = append(keys, &StringLiteralType{Value: propName})
+		}
+		for methodName := range t.Methods {
+			keys = append(keys, &StringLiteralType{Value: methodName})
+		}
+
+	case *TableType:
+		// For table types, keyof returns the key type
+		return t.KeyType
+
+	case *TupleType:
+		// For tuples, return numeric literal types for indices
+		for i := range t.Elements {
+			keys = append(keys, &NumberLiteralType{Value: float64(i)})
+		}
+
+	default:
+		// For other types, keyof returns never (no keys)
+		return Never
+	}
+
+	if len(keys) == 0 {
+		return Never
+	}
+
+	if len(keys) == 1 {
+		return keys[0]
+	}
+
+	return &UnionType{Types: keys}
+}
+
+// resolveTypeof resolves the typeof operator, returning the type of an expression
+func (c *Checker) resolveTypeof(expr ast.Expression) Type {
+	// Check the type of the expression
+	exprType := c.checkExpression(expr)
+	return exprType
+}
+
+// resolveConditionalType resolves conditional types: T extends U ? X : Y
+func (c *Checker) resolveConditionalType(checkType, extendsType, trueType, falseType Type) Type {
+	// Check if checkType extends (is assignable to) extendsType
+	if checkType.IsAssignableTo(extendsType) {
+		return trueType
+	}
+	return falseType
 }
 
 // substituteTypeParams substitutes type parameters in a type expression
@@ -970,6 +1678,8 @@ func (c *Checker) checkStatement(stmt ast.Statement) {
 		// Enum declarations don't need runtime checking
 	case *ast.TypeDeclaration:
 		// Type declarations don't need runtime checking
+	case *ast.NamespaceDeclaration:
+		c.checkNamespaceDeclaration(node)
 	case *ast.DeclareStatement:
 		// Ambient declarations - register without checking implementation
 		c.checkDeclareStatement(node)
@@ -1089,6 +1799,11 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 
 // checkFunctionDeclaration checks a function declaration
 func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
+	// Check decorators
+	for _, decorator := range node.Decorators {
+		c.checkDecorator(decorator)
+	}
+
 	// Add generic type parameters to current scope first (for type resolution)
 	prevEnv := c.env
 	if len(node.GenericParams) > 0 {
@@ -1492,6 +2207,11 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		return
 	}
 
+	// Check decorators
+	for _, decorator := range node.Decorators {
+		c.checkDecorator(decorator)
+	}
+
 	// Check abstract methods: they should not have a body in abstract classes
 	// For now, we'll allow abstract methods to have no body
 	for _, method := range node.Methods {
@@ -1591,6 +2311,73 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 
 		// Check method body
 		c.checkBlockStatement(method.Body)
+
+		c.env = prevEnv
+		c.currentFunctionReturnType = prevReturnType
+		c.currentClass = prevClass
+	}
+
+	// Check getters
+	for _, getter := range node.Getters {
+		prevEnv := c.env
+		prevReturnType := c.currentFunctionReturnType
+		prevClass := c.currentClass
+		c.env = NewEnclosedEnvironment(prevEnv)
+		c.currentClass = classType
+
+		// Add generic type parameters to scope
+		for _, genericParam := range node.GenericParams {
+			c.env.Set(genericParam.Value, Any)
+		}
+
+		// Get getter's return type
+		var returnType Type = Any
+		if getter.ReturnType != nil {
+			returnType = c.resolveTypeExpression(getter.ReturnType)
+		}
+		c.currentFunctionReturnType = returnType
+
+		// Add self to scope
+		c.env.Set("self", classType)
+
+		// Check getter body
+		c.checkBlockStatement(getter.Body)
+
+		c.env = prevEnv
+		c.currentFunctionReturnType = prevReturnType
+		c.currentClass = prevClass
+	}
+
+	// Check setters
+	for _, setter := range node.Setters {
+		prevEnv := c.env
+		prevReturnType := c.currentFunctionReturnType
+		prevClass := c.currentClass
+		c.env = NewEnclosedEnvironment(prevEnv)
+		c.currentClass = classType
+
+		// Add generic type parameters to scope
+		for _, genericParam := range node.GenericParams {
+			c.env.Set(genericParam.Value, Any)
+		}
+
+		// Setters return void
+		c.currentFunctionReturnType = Void
+
+		// Add self to scope
+		c.env.Set("self", classType)
+
+		// Add setter parameter to scope
+		if setter.Parameter != nil {
+			var paramType Type = Any
+			if setter.Parameter.Type != nil {
+				paramType = c.resolveTypeExpression(setter.Parameter.Type)
+			}
+			c.env.Set(setter.Parameter.Name.Value, paramType)
+		}
+
+		// Check setter body
+		c.checkBlockStatement(setter.Body)
 
 		c.env = prevEnv
 		c.currentFunctionReturnType = prevReturnType
@@ -1823,6 +2610,8 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 		return c.checkSpreadExpression(node)
 	case *ast.TypeAssertion:
 		return c.checkTypeAssertion(node)
+	case *ast.AwaitExpression:
+		return c.checkAwaitExpression(node)
 	default:
 		return Any
 	}
@@ -2576,6 +3365,33 @@ func (c *Checker) checkTypeAssertion(node *ast.TypeAssertion) Type {
 	return targetType
 }
 
+// checkAwaitExpression checks an await expression
+func (c *Checker) checkAwaitExpression(node *ast.AwaitExpression) Type {
+	// Check the expression being awaited
+	exprType := c.checkExpression(node.Expression)
+
+	// If it's a PromiseType, unwrap it
+	if promiseType, ok := exprType.(*PromiseType); ok {
+		return promiseType.ResolveType
+	}
+
+	// If it's a function that returns a Promise, unwrap the return type
+	if funcType, ok := exprType.(*FunctionType); ok {
+		if promiseType, ok := funcType.ReturnType.(*PromiseType); ok {
+			return promiseType.ResolveType
+		}
+	}
+
+	// Allow awaiting Any type
+	if exprType.Equals(Any) {
+		return Any
+	}
+
+	// Warn if awaiting a non-promise type (but still allow it)
+	// In Lua, you can coroutine.yield anything
+	return exprType
+}
+
 func (c *Checker) checkTemplateLiteral(node *ast.TemplateLiteral) Type {
 	// Type check all expressions inside ${...}
 	for _, expr := range node.Expressions {
@@ -2621,23 +3437,168 @@ func (c *Checker) addError(message string, token lexer.Token) {
 	})
 }
 
+// registerNamespace registers all declarations in a namespace
+func (c *Checker) registerNamespace(node *ast.NamespaceDeclaration) {
+	nsName := node.Name.Value
+
+	// Create a namespace type to track its contents
+	nsType := &NamespaceType{
+		Name:    nsName,
+		Members: make(map[string]Type),
+	}
+
+	// Register all declarations in the namespace with prefixed names
+	for _, stmt := range node.Statements {
+		switch s := stmt.(type) {
+		case *ast.ClassDeclaration:
+			c.registerClass(s)
+			// Store reference in namespace
+			if classType, ok := c.classes[s.Name.Value]; ok {
+				nsType.Members[s.Name.Value] = classType
+			}
+		case *ast.InterfaceDeclaration:
+			c.registerInterface(s)
+			if ifaceType, ok := c.interfaces[s.Name.Value]; ok {
+				nsType.Members[s.Name.Value] = ifaceType
+			}
+		case *ast.EnumDeclaration:
+			c.registerEnum(s)
+			if enumType, ok := c.enums[s.Name.Value]; ok {
+				nsType.Members[s.Name.Value] = enumType
+			}
+		case *ast.TypeDeclaration:
+			c.registerTypeAlias(s)
+			if aliasType, ok := c.typeAliases[s.Name.Value]; ok {
+				nsType.Members[s.Name.Value] = aliasType
+			}
+		case *ast.FunctionDeclaration:
+			// Register function in namespace
+			params := make([]Type, len(s.Parameters))
+			for i, param := range s.Parameters {
+				if param.Type != nil {
+					params[i] = c.resolveTypeExpression(param.Type)
+				} else {
+					params[i] = Any
+				}
+			}
+			var returnType Type = Void
+			if s.ReturnType != nil {
+				returnType = c.resolveTypeExpression(s.ReturnType)
+			}
+			funcType := &FunctionType{
+				Parameters: params,
+				ReturnType: returnType,
+			}
+			nsType.Members[s.Name.Value] = funcType
+			c.env.Set(s.Name.Value, funcType)
+		}
+	}
+
+	// Register the namespace itself
+	c.env.Set(nsName, nsType)
+}
+
+// checkNamespaceDeclaration checks all statements in a namespace
+func (c *Checker) checkNamespaceDeclaration(node *ast.NamespaceDeclaration) {
+	// Check all statements in the namespace
+	for _, stmt := range node.Statements {
+		c.checkStatement(stmt)
+	}
+}
+
 // checkExportStatement checks an export statement
 func (c *Checker) checkExportStatement(node *ast.ExportStatement) {
 	// Type check the underlying statement
 	c.checkStatement(node.Statement)
+
+	// Track what's being exported
+	switch stmt := node.Statement.(type) {
+	case *ast.VariableDeclaration:
+		// Export variables
+		for i, name := range stmt.Names {
+			var varType Type
+			if i < len(stmt.Types) && stmt.Types[i] != nil {
+				varType = c.resolveTypeExpression(stmt.Types[i])
+			} else if i < len(stmt.Values) && stmt.Values[i] != nil {
+				varType = c.checkExpression(stmt.Values[i])
+			} else {
+				varType = Any
+			}
+			c.exports[name.Value] = varType
+		}
+
+	case *ast.FunctionDeclaration:
+		// Export functions
+		funcType := c.getFunctionType(stmt)
+		c.exports[stmt.Name.Value] = funcType
+
+	case *ast.ClassDeclaration:
+		// Export classes
+		if classType, ok := c.classes[stmt.Name.Value]; ok {
+			c.exports[stmt.Name.Value] = classType
+		}
+
+	case *ast.InterfaceDeclaration:
+		// Export interfaces
+		if interfaceType, ok := c.interfaces[stmt.Name.Value]; ok {
+			c.exports[stmt.Name.Value] = interfaceType
+		}
+
+	case *ast.EnumDeclaration:
+		// Export enums
+		if enumType, ok := c.enums[stmt.Name.Value]; ok {
+			c.exports[stmt.Name.Value] = enumType
+		}
+
+	case *ast.TypeDeclaration:
+		// Export type aliases
+		if aliasType, ok := c.typeAliases[stmt.Name.Value]; ok {
+			c.exports[stmt.Name.Value] = aliasType
+		}
+		if genericAlias, ok := c.genericTypeAliases[stmt.Name.Value]; ok {
+			// Export generic type aliases as a special marker
+			c.exports[stmt.Name.Value] = &GenericType{
+				Name: genericAlias.Name,
+			}
+		}
+	}
 }
 
 // checkImportStatement checks an import statement
 func (c *Checker) checkImportStatement(node *ast.ImportStatement) {
-	// For now, we skip type checking imports since we don't have module resolution
-	// In a full implementation, we would:
-	// 1. Resolve the module path
-	// 2. Load the module's type information
-	// 3. Add the imported names to the environment with their types
+	// Try to load the module
+	moduleInfo, err := c.loadModule(node.Module)
+	if err != nil {
+		// Module not found - for now, just add names as 'any' type
+		// This allows for gradual typing and external modules
+		if node.IsWildcard {
+			// For wildcard imports, we can't add anything without knowing module exports
+			c.addError(fmt.Sprintf("Cannot resolve module '%s'", node.Module), node.Token)
+			return
+		}
 
-	// For now, just add imported names as 'any' type so they don't cause undefined variable errors
-	for _, name := range node.Names {
-		c.env.Set(name.Value, Any)
+		for _, name := range node.Names {
+			c.env.Set(name.Value, Any)
+		}
+		return
+	}
+
+	// Module loaded successfully - import the requested names
+	if node.IsWildcard {
+		// Import all exports
+		for name, typ := range moduleInfo.Exports {
+			c.env.Set(name, typ)
+		}
+	} else {
+		// Import specific names
+		for _, name := range node.Names {
+			if typ, ok := moduleInfo.Exports[name.Value]; ok {
+				c.env.Set(name.Value, typ)
+			} else {
+				c.addError(fmt.Sprintf("Module '%s' does not export '%s'", node.Module, name.Value), name.Token)
+				c.env.Set(name.Value, Any) // Add as 'any' to prevent cascading errors
+			}
+		}
 	}
 }
 
@@ -2698,4 +3659,329 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 func Check(statements []ast.Statement) []*TypeError {
 	checker := NewChecker()
 	return checker.Check(statements)
+}
+
+// loadModule loads a module and returns its type information
+func (c *Checker) loadModule(modulePath string) (*ModuleInfo, error) {
+	// Check if module is already loaded
+	if mod, ok := c.modules[modulePath]; ok {
+		return mod, nil
+	}
+
+	// Try to find and parse the module file
+	// Support both relative and absolute paths
+	possiblePaths := []string{
+		modulePath,
+		modulePath + ".lunar",
+		"./" + modulePath + ".lunar",
+		"./" + modulePath,
+	}
+
+	var moduleFile string
+	var found bool
+	for _, path := range possiblePaths {
+		if _, err := os.Stat(path); err == nil {
+			moduleFile = path
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return nil, fmt.Errorf("module not found: %s", modulePath)
+	}
+
+	// Parse the module file
+	source, err := os.ReadFile(moduleFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read module: %w", err)
+	}
+
+	l := lexer.New(string(source))
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		return nil, fmt.Errorf("parse errors in module %s", modulePath)
+	}
+
+	// Create a new checker for the module
+	moduleChecker := NewChecker()
+	moduleChecker.currentModule = modulePath
+
+	// Check the module and collect exports
+	for _, stmt := range statements {
+		moduleChecker.checkStatement(stmt)
+	}
+
+	// Store module info
+	moduleInfo := &ModuleInfo{
+		Path:    modulePath,
+		Exports: moduleChecker.exports,
+	}
+	c.modules[modulePath] = moduleInfo
+
+	return moduleInfo, nil
+}
+
+// getFunctionType extracts the function type from a function declaration
+func (c *Checker) getFunctionType(stmt *ast.FunctionDeclaration) Type {
+	paramTypes := make([]Type, 0, len(stmt.Parameters))
+	for _, param := range stmt.Parameters {
+		if param.Type != nil {
+			paramTypes = append(paramTypes, c.resolveTypeExpression(param.Type))
+		} else {
+			paramTypes = append(paramTypes, Any)
+		}
+	}
+
+	var returnType Type
+	if stmt.ReturnType != nil {
+		returnType = c.resolveTypeExpression(stmt.ReturnType)
+	} else {
+		returnType = Void
+	}
+
+	genericParams := make([]string, 0, len(stmt.GenericParams))
+	for _, gp := range stmt.GenericParams {
+		genericParams = append(genericParams, gp.Value)
+	}
+
+	return &FunctionType{
+		Parameters:    paramTypes,
+		ReturnType:    returnType,
+		GenericParams: genericParams,
+	}
+}
+
+// resolveMappedType resolves mapped types like { [K in T]: U }
+func (c *Checker) resolveMappedType(node *ast.MappedType, constraintType Type) Type {
+	// The constraint type should be a union of string literals (from keyof)
+	// For each key in the constraint, we create a property with the value type
+
+	var keys []string
+
+	// Extract keys from the constraint type
+	switch constraint := constraintType.(type) {
+	case *UnionType:
+		// Union of string literals
+		for _, t := range constraint.Types {
+			if strLiteral, ok := t.(*StringLiteralType); ok {
+				keys = append(keys, strLiteral.Value)
+			}
+		}
+	case *StringLiteralType:
+		// Single string literal
+		keys = append(keys, constraint.Value)
+	default:
+		// For other types, we can't iterate yet
+		// Return Any for now
+		return Any
+	}
+
+	// Now we need to create a new object type with properties for each key
+	// We need to resolve the value type for each key
+	// The value type can reference K (the type parameter)
+
+	properties := make(map[string]Type)
+
+	// Create a temporary environment for the type parameter K
+	// We'll substitute K with each key when resolving the value type
+	for _, key := range keys {
+		// Create a type substitution for K -> key
+		// For now, we'll resolve the value type with K substituted
+		valueType := c.resolveMappedValueType(node.ValueType, node.TypeParam.Value, &StringLiteralType{Value: key})
+		properties[key] = valueType
+	}
+
+	// Create an interface type with these properties
+	interfaceType := &InterfaceType{
+		Name:       "",  // Anonymous mapped type
+		Properties: properties,
+	}
+
+	return interfaceType
+}
+
+// resolveMappedValueType resolves the value type of a mapped type with a substitution for the type parameter
+func (c *Checker) resolveMappedValueType(valueTypeExpr ast.Expression, typeParamName string, keyType Type) Type {
+	// We need to resolve the value type expression with K substituted
+	// For example, if the value type is T[K], we need to substitute K with the current key
+
+	// Create a temporary environment with K bound to the key type
+	prevEnv := c.env
+	c.env = NewEnclosedEnvironment(prevEnv)
+	c.env.Set(typeParamName, keyType)
+
+	// Resolve the value type expression with K in the environment
+	result := c.resolveTypeExpression(valueTypeExpr)
+
+	// Restore environment
+	c.env = prevEnv
+
+	return result
+}
+
+// resolveTemplateLiteralType resolves template literal types like `Hello ${string}` or `${T}_${U}`
+func (c *Checker) resolveTemplateLiteralType(node *ast.TemplateLiteralType) Type {
+	// Resolve all type expressions in the template
+	resolvedTypes := make([]Type, len(node.Types))
+	for i, typeExpr := range node.Types {
+		resolvedTypes[i] = c.resolveTypeExpression(typeExpr)
+	}
+
+	// Generate all possible string combinations
+	// Start with the first part
+	combinations := []string{node.Parts[0]}
+
+	// For each type expression, generate new combinations
+	for i, typ := range resolvedTypes {
+		var newCombinations []string
+
+		// Extract possible string values from the type
+		stringValues := c.extractStringValues(typ)
+
+		// For each existing combination and each string value, create new combinations
+		for _, combo := range combinations {
+			for _, value := range stringValues {
+				newCombo := combo + value + node.Parts[i+1]
+				newCombinations = append(newCombinations, newCombo)
+			}
+		}
+
+		combinations = newCombinations
+	}
+
+	// If we couldn't generate any combinations, or if any type is `string` (unbounded),
+	// return a general string type
+	if len(combinations) == 0 {
+		return String
+	}
+
+	// Check if we have an unbounded string type
+	for _, typ := range resolvedTypes {
+		if _, isString := typ.(*StringType); isString {
+			// Unbounded - return string type
+			return String
+		}
+	}
+
+	// Create a union of string literal types
+	if len(combinations) == 1 {
+		return &StringLiteralType{Value: combinations[0]}
+	}
+
+	literalTypes := make([]Type, len(combinations))
+	for i, combo := range combinations {
+		literalTypes[i] = &StringLiteralType{Value: combo}
+	}
+
+	return &UnionType{Types: literalTypes}
+}
+
+// extractStringValues extracts possible string values from a type
+func (c *Checker) extractStringValues(typ Type) []string {
+	switch t := typ.(type) {
+	case *StringLiteralType:
+		return []string{t.Value}
+	case *UnionType:
+		var values []string
+		for _, memberType := range t.Types {
+			values = append(values, c.extractStringValues(memberType)...)
+		}
+		return values
+	case *StringType:
+		// Unbounded string - return empty to signal this
+		return []string{"<string>"}
+	default:
+		// For non-string types, convert to string representation
+		return []string{t.String()}
+	}
+}
+
+// checkDecorator checks a decorator usage
+func (c *Checker) checkDecorator(decorator *ast.Decorator) {
+	// Look up the decorator function
+	decoratorName := decorator.Name.Value
+	decoratorType, ok := c.env.Get(decoratorName)
+
+	if !ok {
+		c.addError(
+			fmt.Sprintf("Undefined decorator '%s'", decoratorName),
+			decorator.Token,
+		)
+		return
+	}
+
+	// Check that it's a function
+	funcType, ok := decoratorType.(*FunctionType)
+	if !ok {
+		c.addError(
+			fmt.Sprintf("Decorator '%s' is not a function", decoratorName),
+			decorator.Token,
+		)
+		return
+	}
+
+	// For decorators, the semantics are:
+	// - @decorator - simple decorator, the target is passed as first arg implicitly
+	// - @decorator(args) - decorator factory, args are passed first, returns a function that takes the target
+
+	// If no arguments in decorator syntax, it's a simple decorator
+	// The function should take at least 1 parameter (the target)
+	if len(decorator.Arguments) == 0 {
+		if len(funcType.Parameters) == 0 {
+			c.addError(
+				fmt.Sprintf("Decorator '%s' must accept at least one parameter (the target)", decoratorName),
+				decorator.Token,
+			)
+		}
+		return
+	}
+
+	// For decorator factories, check the argument types
+	// The decorator factory receives the decorator arguments
+	expectedArgs := len(funcType.Parameters)
+	actualArgs := len(decorator.Arguments)
+
+	// Count required parameters (non-optional)
+	requiredParams := 0
+	for _, param := range funcType.Parameters {
+		if _, isOptional := param.(*OptionalType); !isOptional {
+			requiredParams++
+		}
+	}
+
+	if actualArgs < requiredParams || actualArgs > expectedArgs {
+		if requiredParams == expectedArgs {
+			c.addError(
+				fmt.Sprintf("Decorator '%s' expects %d arguments, got %d", decoratorName, expectedArgs, actualArgs),
+				decorator.Token,
+			)
+		} else {
+			c.addError(
+				fmt.Sprintf("Decorator '%s' expects %d-%d arguments, got %d", decoratorName, requiredParams, expectedArgs, actualArgs),
+				decorator.Token,
+			)
+		}
+		return
+	}
+
+	// Check argument types
+	for i, arg := range decorator.Arguments {
+		argType := c.checkExpression(arg)
+		if i < len(funcType.Parameters) {
+			paramType := funcType.Parameters[i]
+			// Unwrap optional type for comparison
+			if optType, ok := paramType.(*OptionalType); ok {
+				paramType = optType.BaseType
+			}
+			if !argType.IsAssignableTo(paramType) {
+				c.addError(
+					fmt.Sprintf("Decorator argument type mismatch: expected %s, got %s", paramType.String(), argType.String()),
+					decorator.Token,
+				)
+			}
+		}
+	}
 }

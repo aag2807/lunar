@@ -40,15 +40,19 @@ func (o *Optimizer) optimizeStatement(stmt ast.Statement) ast.Statement {
 
 	switch node := stmt.(type) {
 	case *ast.VariableDeclaration:
-		// Optimize the value expression
-		if node.Value != nil {
-			node.Value = o.optimizeExpression(node.Value)
+		// Optimize the value expressions
+		for i, val := range node.Values {
+			if val != nil {
+				node.Values[i] = o.optimizeExpression(val)
+			}
 		}
 		return node
 
 	case *ast.ReturnStatement:
-		if node.ReturnValue != nil {
-			node.ReturnValue = o.optimizeExpression(node.ReturnValue)
+		for i, val := range node.ReturnValues {
+			if val != nil {
+				node.ReturnValues[i] = o.optimizeExpression(val)
+			}
 		}
 		return node
 

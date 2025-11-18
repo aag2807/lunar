@@ -30,6 +30,9 @@ func (t *NumberType) IsAssignableTo(other Type) bool {
 	if _, isAny := other.(*AnyType); isAny {
 		return true
 	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
 	// Check if other is a union type that contains number
 	if unionType, isUnion := other.(*UnionType); isUnion {
 		return unionType.Contains(t)
@@ -52,6 +55,9 @@ func (t *StringType) IsAssignableTo(other Type) bool {
 	if _, isAny := other.(*AnyType); isAny {
 		return true
 	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
 	// Check if other is a union type that contains string
 	if unionType, isUnion := other.(*UnionType); isUnion {
 		return unionType.Contains(t)
@@ -72,6 +78,9 @@ func (t *BooleanType) IsAssignableTo(other Type) bool {
 		return true
 	}
 	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
 		return true
 	}
 	// Boolean can be assigned to TypeGuardType (any boolean expression can be a type guard body)
@@ -112,6 +121,9 @@ func (t *TypeGuardType) IsAssignableTo(other Type) bool {
 	if _, isAny := other.(*AnyType); isAny {
 		return true
 	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
 	if otherGuard, ok := other.(*TypeGuardType); ok {
 		return t.GuardedType.IsAssignableTo(otherGuard.GuardedType)
 	}
@@ -137,6 +149,9 @@ func (t *NilType) IsAssignableTo(other Type) bool {
 	if _, isAny := other.(*AnyType); isAny {
 		return true
 	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
 	// Check if other is a union type that contains nil
 	if unionType, isUnion := other.(*UnionType); isUnion {
 		return unionType.Contains(t)
@@ -156,8 +171,13 @@ func (t *VoidType) IsAssignableTo(other Type) bool {
 	if t.Equals(other) {
 		return true
 	}
-	_, isAny := other.(*AnyType)
-	return isAny
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
+	return false
 }
 
 // GenericParamType represents a generic type parameter (e.g., T in class Box<T>)
@@ -178,8 +198,13 @@ func (t *GenericParamType) IsAssignableTo(other Type) bool {
 	if t.Equals(other) {
 		return true
 	}
-	_, isAny := other.(*AnyType)
-	return isAny
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
+	return false
 }
 
 // StringLiteralType represents a specific string value as a type
@@ -200,6 +225,9 @@ func (t *StringLiteralType) IsAssignableTo(other Type) bool {
 		return true
 	}
 	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
 		return true
 	}
 	// String literal is assignable to string type
@@ -242,6 +270,9 @@ func (t *NumberLiteralType) IsAssignableTo(other Type) bool {
 	if _, isAny := other.(*AnyType); isAny {
 		return true
 	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
 	// Number literal is assignable to number type
 	if _, isNumber := other.(*NumberType); isNumber {
 		return true
@@ -255,6 +286,54 @@ func (t *NumberLiteralType) IsAssignableTo(other Type) bool {
 		// Then check if the base number type is in the union
 		for _, ut := range unionType.Types {
 			if _, isNumber := ut.(*NumberType); isNumber {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// BooleanLiteralType represents a specific boolean value as a type (true or false)
+type BooleanLiteralType struct {
+	Value bool
+}
+
+func (t *BooleanLiteralType) String() string {
+	if t.Value {
+		return "true"
+	}
+	return "false"
+}
+func (t *BooleanLiteralType) Equals(other Type) bool {
+	otherLiteral, ok := other.(*BooleanLiteralType)
+	if !ok {
+		return false
+	}
+	return t.Value == otherLiteral.Value
+}
+func (t *BooleanLiteralType) IsAssignableTo(other Type) bool {
+	if t.Equals(other) {
+		return true
+	}
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
+	// Boolean literal is assignable to boolean type
+	if _, isBoolean := other.(*BooleanType); isBoolean {
+		return true
+	}
+	// Check if other is a union type that contains this literal OR the base boolean type
+	if unionType, isUnion := other.(*UnionType); isUnion {
+		// First check if the literal itself is in the union
+		if unionType.Contains(t) {
+			return true
+		}
+		// Then check if the base boolean type is in the union
+		for _, ut := range unionType.Types {
+			if _, isBoolean := ut.(*BooleanType); isBoolean {
 				return true
 			}
 		}
@@ -298,6 +377,9 @@ func (t *ArrayType) IsAssignableTo(other Type) bool {
 	if _, isAny := other.(*AnyType); isAny {
 		return true
 	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
 	// Array is covariant in its element type
 	if otherArray, ok := other.(*ArrayType); ok {
 		return t.ElementType.IsAssignableTo(otherArray.ElementType)
@@ -335,6 +417,9 @@ func (t *TableType) IsAssignableTo(other Type) bool {
 	if _, isAny := other.(*AnyType); isAny {
 		return true
 	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
 	// Table is covariant in both key and value types
 	if otherTable, ok := other.(*TableType); ok {
 		return t.KeyType.IsAssignableTo(otherTable.KeyType) &&
@@ -347,8 +432,9 @@ func (t *TableType) IsAssignableTo(other Type) bool {
 type FunctionType struct {
 	Parameters       []Type
 	ReturnType       Type
-	GenericParams    []string // Generic type parameter names (e.g., ["T", "U"])
-	HasRestParameter bool     // True if the last parameter is a rest parameter
+	GenericParams    []string        // Generic type parameter names (e.g., ["T", "U"])
+	HasRestParameter bool            // True if the last parameter is a rest parameter
+	Overloads        []*FunctionType // Additional overload signatures (for method overloading)
 }
 
 func (t *FunctionType) String() string {
@@ -378,6 +464,9 @@ func (t *FunctionType) IsAssignableTo(other Type) bool {
 		return true
 	}
 	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
 		return true
 	}
 	// Functions are contravariant in parameters and covariant in return type
@@ -439,6 +528,9 @@ func (t *UnionType) IsAssignableTo(other Type) bool {
 		return true
 	}
 	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
 		return true
 	}
 	// A union type is assignable to another type if all its members are assignable
@@ -506,6 +598,9 @@ func (t *IntersectionType) IsAssignableTo(other Type) bool {
 	if _, isAny := other.(*AnyType); isAny {
 		return true
 	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
 	// An intersection type is assignable to a type if ANY of its members is assignable
 	// Because the intersection has ALL the properties/capabilities of each member
 	for _, typ := range t.Types {
@@ -536,6 +631,9 @@ func (t *OptionalType) IsAssignableTo(other Type) bool {
 		return true
 	}
 	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
 		return true
 	}
 	// Optional type is assignable to another optional with compatible base
@@ -600,6 +698,9 @@ func (t *GenericTypeAlias) IsAssignableTo(other Type) bool {
 	if _, isAny := other.(*AnyType); isAny {
 		return true
 	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
 	return false
 }
 
@@ -637,6 +738,9 @@ func (t *TupleType) IsAssignableTo(other Type) bool {
 	if _, isAny := other.(*AnyType); isAny {
 		return true
 	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
 	if otherTuple, ok := other.(*TupleType); ok {
 		if len(t.Elements) != len(otherTuple.Elements) {
 			return false
@@ -669,6 +773,11 @@ type ClassType struct {
 	Implements          []*InterfaceType
 	IsAbstract          bool                      // Whether class is abstract
 	GenericParams       []string                  // Generic type parameter names (e.g., ["T", "U"])
+	IndexSignature      *IndexSignature           // [key: KeyType]: ValueType
+	Getters             map[string]*FunctionType  // Property getters
+	Setters             map[string]*FunctionType  // Property setters
+	GetterVisibility    map[string]string         // Getter visibility
+	SetterVisibility    map[string]string         // Setter visibility
 }
 
 func (t *ClassType) String() string {
@@ -686,6 +795,9 @@ func (t *ClassType) IsAssignableTo(other Type) bool {
 		return true
 	}
 	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
 		return true
 	}
 	// Class is assignable to its parent class (inheritance)
@@ -806,10 +918,17 @@ func (t *ClassType) IsChildOf(other *ClassType) bool {
 
 // InterfaceType represents an interface type
 type InterfaceType struct {
-	Name       string
-	Methods    map[string]*FunctionType
-	Properties map[string]Type
-	Extends    []*InterfaceType
+	Name           string
+	Methods        map[string]*FunctionType
+	Properties     map[string]Type
+	Extends        []*InterfaceType
+	IndexSignature *IndexSignature // [key: KeyType]: ValueType
+}
+
+// IndexSignature represents an index signature like [key: string]: number
+type IndexSignature struct {
+	KeyType   Type // Usually string or number
+	ValueType Type
 }
 
 func (t *InterfaceType) String() string {
@@ -827,6 +946,9 @@ func (t *InterfaceType) IsAssignableTo(other Type) bool {
 		return true
 	}
 	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
 		return true
 	}
 	// Interface is assignable to interfaces it extends
@@ -913,6 +1035,62 @@ func (t *InterfaceType) GetProperty(name string) (Type, bool) {
 	return nil, false
 }
 
+// NamespaceType represents a namespace that contains other types and functions
+type NamespaceType struct {
+	Name    string
+	Members map[string]Type // Types, functions, classes, etc. in the namespace
+}
+
+func (t *NamespaceType) String() string {
+	return t.Name
+}
+func (t *NamespaceType) Equals(other Type) bool {
+	otherNs, ok := other.(*NamespaceType)
+	if !ok {
+		return false
+	}
+	return t.Name == otherNs.Name
+}
+func (t *NamespaceType) IsAssignableTo(other Type) bool {
+	return t.Equals(other)
+}
+
+// GetMember returns a member of the namespace by name
+func (t *NamespaceType) GetMember(name string) (Type, bool) {
+	if member, ok := t.Members[name]; ok {
+		return member, true
+	}
+	return nil, false
+}
+
+// PromiseType represents the return type of an async function (like Lua coroutine)
+type PromiseType struct {
+	ResolveType Type // The type that the promise resolves to
+}
+
+func (t *PromiseType) String() string {
+	return fmt.Sprintf("Promise<%s>", t.ResolveType.String())
+}
+func (t *PromiseType) Equals(other Type) bool {
+	otherPromise, ok := other.(*PromiseType)
+	if !ok {
+		return false
+	}
+	return t.ResolveType.Equals(otherPromise.ResolveType)
+}
+func (t *PromiseType) IsAssignableTo(other Type) bool {
+	if t.Equals(other) {
+		return true
+	}
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
+	return false
+}
+
 // EnumType represents an enum type
 type EnumType struct {
 	Name    string
@@ -934,6 +1112,9 @@ func (t *EnumType) IsAssignableTo(other Type) bool {
 		return true
 	}
 	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
 		return true
 	}
 	return false
@@ -975,6 +1156,9 @@ func (t *GenericType) IsAssignableTo(other Type) bool {
 		return true
 	}
 	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
 		return true
 	}
 	// If there's a constraint, check if it's assignable
@@ -1036,4 +1220,74 @@ var (
 	Nil     = &NilType{}
 	Void    = &VoidType{}
 	Any     = &AnyType{}
+	Never   = &NeverType{}
+	Unknown = &UnknownType{}
 )
+
+// NeverType represents a type that never occurs (bottom type)
+// Used for functions that never return (throw/infinite loop) or impossible branches
+type NeverType struct{}
+
+func (t *NeverType) String() string { return "never" }
+func (t *NeverType) Equals(other Type) bool {
+	_, ok := other.(*NeverType)
+	return ok
+}
+func (t *NeverType) IsAssignableTo(other Type) bool {
+	// never is assignable to everything (it's the bottom type)
+	return true
+}
+
+// UnknownType represents an unknown type (top type, safer than any)
+// Values must be narrowed before use
+type UnknownType struct{}
+
+func (t *UnknownType) String() string { return "unknown" }
+func (t *UnknownType) Equals(other Type) bool {
+	_, ok := other.(*UnknownType)
+	return ok
+}
+func (t *UnknownType) IsAssignableTo(other Type) bool {
+	// unknown can only be assigned to unknown or any
+	if t.Equals(other) {
+		return true
+	}
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
+	return false
+}
+
+// KeyofType represents the keyof operator result
+// keyof T returns a union of string literal types representing the keys of T
+type KeyofType struct {
+	ObjectType Type
+}
+
+func (t *KeyofType) String() string {
+	return fmt.Sprintf("keyof %s", t.ObjectType.String())
+}
+func (t *KeyofType) Equals(other Type) bool {
+	otherKeyof, ok := other.(*KeyofType)
+	if !ok {
+		return false
+	}
+	return t.ObjectType.Equals(otherKeyof.ObjectType)
+}
+func (t *KeyofType) IsAssignableTo(other Type) bool {
+	if t.Equals(other) {
+		return true
+	}
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
+	// keyof resolves to a union of string literals, check if that's assignable
+	// This would require resolving the keyof first, which happens during type checking
+	return false
+}

@@ -18,6 +18,7 @@ type Generator struct {
 	classes          map[string]bool   // Track defined classes for constructor calls
 	classParents     map[string]string // Track parent class names for super
 	currentClassName string            // Current class being generated
+	exports          []string          // Track exported names for module generation
 }
 
 // New creates a new code generator
@@ -26,6 +27,7 @@ func New() *Generator {
 		indent:       0,
 		classes:      make(map[string]bool),
 		classParents: make(map[string]string),
+		exports:      make([]string, 0),
 	}
 }
 
@@ -39,6 +41,7 @@ func NewWithSourceMap(sourceFile, generatedFile string) *Generator {
 		sourceFile:       sourceFile,
 		classes:          make(map[string]bool),
 		classParents:     make(map[string]string),
+		exports:          make([]string, 0),
 	}
 }
 
@@ -104,6 +107,36 @@ func (g *Generator) Generate(statements []ast.Statement) string {
 		}
 	}
 
+	// If there are exports, generate a return statement
+	if len(g.exports) > 0 {
+		g.write("\n\n")
+		output.WriteString("\n\n")
+		returnStmt := g.generateModuleReturn()
+		g.write(returnStmt)
+		output.WriteString(returnStmt)
+	}
+
+	return output.String()
+}
+
+// generateModuleReturn generates the module return statement for exports
+func (g *Generator) generateModuleReturn() string {
+	if len(g.exports) == 0 {
+		return ""
+	}
+
+	var output strings.Builder
+	output.WriteString("return {\n")
+
+	for i, name := range g.exports {
+		output.WriteString(fmt.Sprintf("    %s = %s", name, name))
+		if i < len(g.exports)-1 {
+			output.WriteString(",")
+		}
+		output.WriteString("\n")
+	}
+
+	output.WriteString("}\n")
 	return output.String()
 }
 
@@ -222,6 +255,8 @@ func (g *Generator) generateStatement(stmt ast.Statement) string {
 	case *ast.TypeDeclaration:
 		// Type aliases are type-only, don't generate code
 		return ""
+	case *ast.NamespaceDeclaration:
+		return g.generateNamespaceDeclaration(node)
 	case *ast.ExportStatement:
 		return g.generateExportStatement(node)
 	case *ast.ImportStatement:
@@ -293,6 +328,13 @@ func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) s
 	// Body
 	g.indent++
 
+	// For async functions, wrap body in coroutine.create
+	if node.IsAsync {
+		output.WriteString(g.generateIndent())
+		output.WriteString("return coroutine.create(function()\n")
+		g.indent++
+	}
+
 	// If there's a rest parameter, pack the varargs into a table
 	if restParam != nil {
 		output.WriteString(g.generateIndent())
@@ -302,10 +344,40 @@ func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) s
 	for _, stmt := range node.Body.Statements {
 		output.WriteString(g.generateStatement(stmt))
 	}
+
+	// Close coroutine wrapper for async functions
+	if node.IsAsync {
+		g.indent--
+		output.WriteString(g.generateIndent())
+		output.WriteString("end)\n")
+	}
+
 	g.indent--
 
 	output.WriteString(g.generateIndent())
 	output.WriteString("end\n")
+
+	// Apply decorators in reverse order (first decorator is outermost)
+	if len(node.Decorators) > 0 {
+		funcName := node.Name.Value
+		for i := len(node.Decorators) - 1; i >= 0; i-- {
+			decorator := node.Decorators[i]
+			output.WriteString(g.generateIndent())
+			if len(decorator.Arguments) > 0 {
+				// Decorator with arguments: funcName = decoratorName(args)(funcName)
+				output.WriteString(fmt.Sprintf("%s = %s(", funcName, decorator.Name.Value))
+				args := make([]string, len(decorator.Arguments))
+				for j, arg := range decorator.Arguments {
+					args[j] = g.generateExpression(arg)
+				}
+				output.WriteString(strings.Join(args, ", "))
+				output.WriteString(fmt.Sprintf(")(%s)\n", funcName))
+			} else {
+				// Simple decorator: funcName = decoratorName(funcName)
+				output.WriteString(fmt.Sprintf("%s = %s(%s)\n", funcName, decorator.Name.Value, funcName))
+			}
+		}
+	}
 
 	return output.String()
 }
@@ -600,6 +672,131 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 		output.WriteString("\n")
 	}
 
+	// Generate getters
+	for _, getter := range node.Getters {
+		output.WriteString(g.generateIndent())
+		output.WriteString(fmt.Sprintf("function %s:_get_%s()\n", className, getter.Name.Value))
+
+		g.indent++
+		if getter.Body != nil {
+			for _, stmt := range getter.Body.Statements {
+				output.WriteString(g.generateStatement(stmt))
+			}
+		}
+		g.indent--
+
+		output.WriteString(g.generateIndent())
+		output.WriteString("end\n")
+		output.WriteString("\n")
+	}
+
+	// Generate setters
+	for _, setter := range node.Setters {
+		output.WriteString(g.generateIndent())
+		paramName := "value"
+		if setter.Parameter != nil {
+			paramName = setter.Parameter.Name.Value
+		}
+		output.WriteString(fmt.Sprintf("function %s:_set_%s(%s)\n", className, setter.Name.Value, paramName))
+
+		g.indent++
+		if setter.Body != nil {
+			for _, stmt := range setter.Body.Statements {
+				output.WriteString(g.generateStatement(stmt))
+			}
+		}
+		g.indent--
+
+		output.WriteString(g.generateIndent())
+		output.WriteString("end\n")
+		output.WriteString("\n")
+	}
+
+	// Generate metamethod dispatching for getters/setters if any exist
+	if len(node.Getters) > 0 || len(node.Setters) > 0 {
+		// Generate __index metamethod for getters
+		if len(node.Getters) > 0 {
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("local %s_mt = getmetatable(%s) or {}\n", className, className))
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("%s_mt.__index = function(self, key)\n", className))
+			g.indent++
+
+			for _, getter := range node.Getters {
+				output.WriteString(g.generateIndent())
+				output.WriteString(fmt.Sprintf("if key == \"%s\" then\n", getter.Name.Value))
+				g.indent++
+				output.WriteString(g.generateIndent())
+				output.WriteString(fmt.Sprintf("return %s._get_%s(self)\n", className, getter.Name.Value))
+				g.indent--
+				output.WriteString(g.generateIndent())
+				output.WriteString("end\n")
+			}
+
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("return %s[key]\n", className))
+			g.indent--
+			output.WriteString(g.generateIndent())
+			output.WriteString("end\n")
+		}
+
+		// Generate __newindex metamethod for setters
+		if len(node.Setters) > 0 {
+			if len(node.Getters) == 0 {
+				output.WriteString(g.generateIndent())
+				output.WriteString(fmt.Sprintf("local %s_mt = getmetatable(%s) or {}\n", className, className))
+			}
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("%s_mt.__newindex = function(self, key, value)\n", className))
+			g.indent++
+
+			for _, setter := range node.Setters {
+				output.WriteString(g.generateIndent())
+				output.WriteString(fmt.Sprintf("if key == \"%s\" then\n", setter.Name.Value))
+				g.indent++
+				output.WriteString(g.generateIndent())
+				output.WriteString(fmt.Sprintf("%s._set_%s(self, value)\n", className, setter.Name.Value))
+				output.WriteString(g.generateIndent())
+				output.WriteString("return\n")
+				g.indent--
+				output.WriteString(g.generateIndent())
+				output.WriteString("end\n")
+			}
+
+			output.WriteString(g.generateIndent())
+			output.WriteString("rawset(self, key, value)\n")
+			g.indent--
+			output.WriteString(g.generateIndent())
+			output.WriteString("end\n")
+		}
+
+		output.WriteString(g.generateIndent())
+		output.WriteString(fmt.Sprintf("setmetatable(%s, %s_mt)\n", className, className))
+		output.WriteString("\n")
+	}
+
+	// Apply decorators in reverse order (first decorator is outermost)
+	if len(node.Decorators) > 0 {
+		for i := len(node.Decorators) - 1; i >= 0; i-- {
+			decorator := node.Decorators[i]
+			output.WriteString(g.generateIndent())
+			if len(decorator.Arguments) > 0 {
+				// Decorator with arguments: ClassName = decoratorName(args)(ClassName)
+				output.WriteString(fmt.Sprintf("%s = %s(", className, decorator.Name.Value))
+				args := make([]string, len(decorator.Arguments))
+				for j, arg := range decorator.Arguments {
+					args[j] = g.generateExpression(arg)
+				}
+				output.WriteString(strings.Join(args, ", "))
+				output.WriteString(fmt.Sprintf(")(%s)\n", className))
+			} else {
+				// Simple decorator: ClassName = decoratorName(ClassName)
+				output.WriteString(fmt.Sprintf("%s = %s(%s)\n", className, decorator.Name.Value, className))
+			}
+		}
+		output.WriteString("\n")
+	}
+
 	return output.String()
 }
 
@@ -630,6 +827,62 @@ func (g *Generator) generateEnumDeclaration(node *ast.EnumDeclaration) string {
 
 	output.WriteString(g.generateIndent())
 	output.WriteString("}\n")
+
+	return output.String()
+}
+
+// generateNamespaceDeclaration generates code for a namespace (transpiled to Lua table)
+func (g *Generator) generateNamespaceDeclaration(node *ast.NamespaceDeclaration) string {
+	var output strings.Builder
+	nsName := node.Name.Value
+
+	// Create namespace table
+	output.WriteString(g.generateIndent())
+	output.WriteString(fmt.Sprintf("local %s = {}\n\n", nsName))
+
+	// Generate all statements in the namespace
+	for _, stmt := range node.Statements {
+		switch s := stmt.(type) {
+		case *ast.ClassDeclaration:
+			// Generate class and assign to namespace
+			classCode := g.generateClassDeclaration(s)
+			output.WriteString(classCode)
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("%s.%s = %s\n\n", nsName, s.Name.Value, s.Name.Value))
+		case *ast.FunctionDeclaration:
+			// Generate function and assign to namespace
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("function %s.%s(", nsName, s.Name.Value))
+			params := make([]string, len(s.Parameters))
+			for i, param := range s.Parameters {
+				params[i] = param.Name.Value
+			}
+			output.WriteString(strings.Join(params, ", "))
+			output.WriteString(")\n")
+
+			g.indent++
+			if s.Body != nil {
+				for _, bodyStmt := range s.Body.Statements {
+					output.WriteString(g.generateStatement(bodyStmt))
+				}
+			}
+			g.indent--
+
+			output.WriteString(g.generateIndent())
+			output.WriteString("end\n\n")
+		case *ast.EnumDeclaration:
+			// Generate enum and assign to namespace
+			enumCode := g.generateEnumDeclaration(s)
+			output.WriteString(enumCode)
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("%s.%s = %s\n\n", nsName, s.Name.Value, s.Name.Value))
+		case *ast.InterfaceDeclaration, *ast.TypeDeclaration:
+			// Type-only declarations don't generate code
+		default:
+			// Generate other statements normally
+			output.WriteString(g.generateStatement(stmt))
+		}
+	}
 
 	return output.String()
 }
@@ -682,6 +935,9 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 	case *ast.TypeAssertion:
 		// Type assertions are compile-time only, just return the expression
 		return g.generateExpression(node.Expression)
+	case *ast.AwaitExpression:
+		// Await translates to coroutine.resume for the coroutine
+		return fmt.Sprintf("coroutine.yield(%s)", g.generateExpression(node.Expression))
 	default:
 		return ""
 	}
@@ -964,9 +1220,32 @@ func (g *Generator) generateIndent() string {
 // generateExportStatement generates code for an export statement
 func (g *Generator) generateExportStatement(node *ast.ExportStatement) string {
 	// In Lua, exports are handled via return tables at the end of modules
-	// For now, just generate the underlying statement without special export handling
-	// The exported names should be collected and returned at module end
-	return g.generateStatement(node.Statement)
+	// Generate the underlying statement and track exported names
+	code := g.generateStatement(node.Statement)
+
+	// Track what's being exported
+	switch stmt := node.Statement.(type) {
+	case *ast.VariableDeclaration:
+		// Export variables
+		for _, name := range stmt.Names {
+			g.exports = append(g.exports, name.Value)
+		}
+	case *ast.FunctionDeclaration:
+		// Export functions
+		g.exports = append(g.exports, stmt.Name.Value)
+	case *ast.ClassDeclaration:
+		// Export classes
+		g.exports = append(g.exports, stmt.Name.Value)
+	case *ast.EnumDeclaration:
+		// Export enums
+		g.exports = append(g.exports, stmt.Name.Value)
+	case *ast.TypeDeclaration:
+		// Type declarations don't generate runtime code, skip tracking
+	case *ast.InterfaceDeclaration:
+		// Interface declarations don't generate runtime code, skip tracking
+	}
+
+	return code
 }
 
 // generateImportStatement generates code for an import statement

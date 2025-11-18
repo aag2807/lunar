@@ -319,6 +319,100 @@ func (tt *TableType) String() string {
 	return fmt.Sprintf("table<%s, %s>", tt.KeyType.String(), tt.ValueType.String())
 }
 
+type KeyofType struct {
+	Token      lexer.Token // 'keyof' token
+	ObjectType Expression  // The type to extract keys from
+}
+
+func (kt *KeyofType) expressionNode()      {}
+func (kt *KeyofType) TokenLiteral() string { return kt.Token.Literal }
+func (kt *KeyofType) String() string {
+	return fmt.Sprintf("keyof %s", kt.ObjectType.String())
+}
+
+// TypeofExpression represents a typeof type expression: typeof value
+type TypeofExpression struct {
+	Token      lexer.Token // 'typeof' token
+	Expression Expression  // The expression to extract type from
+}
+
+func (te *TypeofExpression) expressionNode()      {}
+func (te *TypeofExpression) TokenLiteral() string { return te.Token.Literal }
+func (te *TypeofExpression) String() string {
+	return fmt.Sprintf("typeof %s", te.Expression.String())
+}
+
+// ConditionalType represents a conditional type: T extends U ? X : Y
+type ConditionalType struct {
+	Token       lexer.Token // The check type token
+	CheckType   Expression  // T
+	ExtendsType Expression  // U
+	TrueType    Expression  // X
+	FalseType   Expression  // Y
+}
+
+func (ct *ConditionalType) expressionNode()      {}
+func (ct *ConditionalType) TokenLiteral() string { return ct.Token.Literal }
+func (ct *ConditionalType) String() string {
+	return fmt.Sprintf("%s extends %s ? %s : %s",
+		ct.CheckType.String(),
+		ct.ExtendsType.String(),
+		ct.TrueType.String(),
+		ct.FalseType.String())
+}
+
+// MappedType represents a mapped type: { [K in keyof T]: U }
+// or with optional/readonly modifiers: { readonly [K in keyof T]?: U }
+type MappedType struct {
+	Token        lexer.Token // The '{' token
+	TypeParam    *Identifier // K - the type parameter
+	Constraint   Expression  // keyof T - what K iterates over
+	ValueType    Expression  // U - the mapped value type
+	IsOptional   bool        // true if has ? modifier
+	IsReadonly   bool        // true if has readonly modifier
+}
+
+func (mt *MappedType) expressionNode()      {}
+func (mt *MappedType) TokenLiteral() string { return mt.Token.Literal }
+func (mt *MappedType) String() string {
+	var result string
+	result = "{ "
+	if mt.IsReadonly {
+		result += "readonly "
+	}
+	result += fmt.Sprintf("[%s in %s]", mt.TypeParam.String(), mt.Constraint.String())
+	if mt.IsOptional {
+		result += "?"
+	}
+	result += ": " + mt.ValueType.String() + " }"
+	return result
+}
+
+// TemplateLiteralType represents a template literal type: `Hello ${string}` or `${T}_${U}`
+type TemplateLiteralType struct {
+	Token      lexer.Token  // The backtick token
+	Parts      []string     // String literal parts (always has one more element than Types)
+	Types      []Expression // Type expressions between the string parts
+	RawLiteral string       // The original template string for reference
+}
+
+func (tlt *TemplateLiteralType) expressionNode()      {}
+func (tlt *TemplateLiteralType) TokenLiteral() string { return tlt.Token.Literal }
+func (tlt *TemplateLiteralType) String() string {
+	var result strings.Builder
+	result.WriteString("`")
+	for i, part := range tlt.Parts {
+		result.WriteString(part)
+		if i < len(tlt.Types) {
+			result.WriteString("${")
+			result.WriteString(tlt.Types[i].String())
+			result.WriteString("}")
+		}
+	}
+	result.WriteString("`")
+	return result.String()
+}
+
 type UnionType struct {
 	Token lexer.Token // '|' token
 	Types []Expression
@@ -463,9 +557,48 @@ type FunctionDeclaration struct {
 	Parameters    []*Parameter
 	ReturnType    Expression
 	Body          *BlockStatement
-	IsStatic      bool   // static method (when used in class)
-	IsAbstract    bool   // abstract method (when used in class)
-	Visibility    string // visibility modifier: public, private, protected (when used in class)
+	IsStatic      bool         // static method (when used in class)
+	IsAbstract    bool         // abstract method (when used in class)
+	IsAsync       bool         // async function (returns Promise/coroutine)
+	Visibility    string       // visibility modifier: public, private, protected (when used in class)
+	Decorators    []*Decorator // decorators applied to the function
+}
+
+// AwaitExpression represents an await expression for async operations
+type AwaitExpression struct {
+	Token      lexer.Token // 'await' token
+	Expression Expression  // the expression being awaited
+}
+
+func (ae *AwaitExpression) expressionNode()      {}
+func (ae *AwaitExpression) TokenLiteral() string { return ae.Token.Literal }
+
+// Decorator represents a decorator like @decoratorName or @decoratorName(args)
+type Decorator struct {
+	Token     lexer.Token  // '@' token
+	Name      *Identifier  // decorator name
+	Arguments []Expression // optional arguments
+}
+
+func (d *Decorator) expressionNode()      {}
+func (d *Decorator) TokenLiteral() string { return d.Token.Literal }
+func (d *Decorator) String() string {
+	var out strings.Builder
+	out.WriteString("@")
+	out.WriteString(d.Name.Value)
+	if len(d.Arguments) > 0 {
+		out.WriteString("(")
+		args := make([]string, len(d.Arguments))
+		for i, arg := range d.Arguments {
+			args[i] = arg.String()
+		}
+		out.WriteString(strings.Join(args, ", "))
+		out.WriteString(")")
+	}
+	return out.String()
+}
+func (ae *AwaitExpression) String() string {
+	return fmt.Sprintf("await %s", ae.Expression.String())
 }
 
 func (fd *FunctionDeclaration) statementNode()       {}
@@ -503,6 +636,7 @@ type FunctionExpression struct {
 	Parameters    []*Parameter
 	ReturnType    Expression
 	Body          *BlockStatement
+	IsAsync       bool              // async function expression
 }
 
 func (fe *FunctionExpression) expressionNode()      {}
@@ -701,15 +835,73 @@ func (as *AssignmentStatement) String() string {
 }
 
 type ClassDeclaration struct {
-	Token         lexer.Token // 'class' token
-	Name          *Identifier
-	GenericParams []*Identifier           // generic type parameters like <T, U>
-	Extends       Expression              // parent class name (single inheritance)
-	Properties    []*PropertyDeclaration
-	Methods       []*FunctionDeclaration
-	Constructor   *ConstructorDeclaration
-	Implements    []Expression // interface names
-	IsAbstract    bool         // abstract class
+	Token          lexer.Token // 'class' token
+	Name           *Identifier
+	GenericParams  []*Identifier              // generic type parameters like <T, U>
+	Extends        Expression                 // parent class name (single inheritance)
+	Properties     []*PropertyDeclaration
+	Methods        []*FunctionDeclaration
+	Constructor    *ConstructorDeclaration
+	Implements     []Expression               // interface names
+	IndexSignature *IndexSignatureDeclaration // [key: KeyType]: ValueType
+	IsAbstract     bool                       // abstract class
+	Getters        []*GetterDeclaration       // property getters
+	Setters        []*SetterDeclaration       // property setters
+	Decorators     []*Decorator               // decorators applied to the class
+}
+
+// GetterDeclaration represents a property getter
+type GetterDeclaration struct {
+	Token      lexer.Token // 'get' token
+	Visibility string      // "public", "private", "protected"
+	Name       *Identifier // property name
+	ReturnType Expression  // return type
+	Body       *BlockStatement
+}
+
+func (gd *GetterDeclaration) statementNode()       {}
+func (gd *GetterDeclaration) TokenLiteral() string { return gd.Token.Literal }
+func (gd *GetterDeclaration) String() string {
+	var out strings.Builder
+	if gd.Visibility != "" {
+		out.WriteString(gd.Visibility)
+		out.WriteString(" ")
+	}
+	out.WriteString("get ")
+	out.WriteString(gd.Name.String())
+	out.WriteString("(): ")
+	out.WriteString(gd.ReturnType.String())
+	out.WriteString("\n")
+	out.WriteString(gd.Body.String())
+	out.WriteString("\nend")
+	return out.String()
+}
+
+// SetterDeclaration represents a property setter
+type SetterDeclaration struct {
+	Token      lexer.Token // 'set' token
+	Visibility string      // "public", "private", "protected"
+	Name       *Identifier // property name
+	Parameter  *Parameter  // the setter parameter
+	Body       *BlockStatement
+}
+
+func (sd *SetterDeclaration) statementNode()       {}
+func (sd *SetterDeclaration) TokenLiteral() string { return sd.Token.Literal }
+func (sd *SetterDeclaration) String() string {
+	var out strings.Builder
+	if sd.Visibility != "" {
+		out.WriteString(sd.Visibility)
+		out.WriteString(" ")
+	}
+	out.WriteString("set ")
+	out.WriteString(sd.Name.String())
+	out.WriteString("(")
+	out.WriteString(sd.Parameter.String())
+	out.WriteString(")\n")
+	out.WriteString(sd.Body.String())
+	out.WriteString("\nend")
+	return out.String()
 }
 
 func (cd *ClassDeclaration) statementNode()       {}
@@ -786,6 +978,26 @@ func (pd *PropertyDeclaration) String() string {
 	return out.String()
 }
 
+type IndexSignatureDeclaration struct {
+	Token     lexer.Token // '[' token
+	KeyName   *Identifier // The parameter name (e.g., "key")
+	KeyType   Expression  // The key type (e.g., string or number)
+	ValueType Expression  // The value type
+}
+
+func (isd *IndexSignatureDeclaration) statementNode()       {}
+func (isd *IndexSignatureDeclaration) TokenLiteral() string { return isd.Token.Literal }
+func (isd *IndexSignatureDeclaration) String() string {
+	var out strings.Builder
+	out.WriteString("[")
+	out.WriteString(isd.KeyName.String())
+	out.WriteString(": ")
+	out.WriteString(isd.KeyType.String())
+	out.WriteString("]: ")
+	out.WriteString(isd.ValueType.String())
+	return out.String()
+}
+
 type ConstructorDeclaration struct {
 	Token      lexer.Token // 'constructor' token
 	Parameters []*Parameter
@@ -812,11 +1024,12 @@ func (cd *ConstructorDeclaration) String() string {
 }
 
 type InterfaceDeclaration struct {
-	Token      lexer.Token // 'interface' token
-	Name       *Identifier
-	Methods    []*InterfaceMethod
-	Properties []*PropertyDeclaration
-	Extends    []Expression // parent interface names
+	Token          lexer.Token // 'interface' token
+	Name           *Identifier
+	Methods        []*InterfaceMethod
+	Properties     []*PropertyDeclaration
+	IndexSignature *IndexSignatureDeclaration // [key: KeyType]: ValueType
+	Extends        []Expression               // parent interface names
 }
 
 func (id *InterfaceDeclaration) statementNode()       {}
@@ -965,6 +1178,29 @@ func (es *ExportStatement) statementNode()       {}
 func (es *ExportStatement) TokenLiteral() string { return es.Token.Literal }
 func (es *ExportStatement) String() string {
 	return fmt.Sprintf("export %s", es.Statement.String())
+}
+
+// NamespaceDeclaration represents a namespace for organizing code
+type NamespaceDeclaration struct {
+	Token      lexer.Token // 'namespace' token
+	Name       *Identifier
+	Statements []Statement // declarations inside the namespace
+}
+
+func (ns *NamespaceDeclaration) statementNode()       {}
+func (ns *NamespaceDeclaration) TokenLiteral() string { return ns.Token.Literal }
+func (ns *NamespaceDeclaration) String() string {
+	var out strings.Builder
+	out.WriteString("namespace ")
+	out.WriteString(ns.Name.String())
+	out.WriteString("\n")
+	for _, stmt := range ns.Statements {
+		out.WriteString("  ")
+		out.WriteString(stmt.String())
+		out.WriteString("\n")
+	}
+	out.WriteString("end")
+	return out.String()
 }
 
 // ImportStatement represents an import declaration

@@ -361,6 +361,33 @@ func (ct *ConditionalType) String() string {
 		ct.FalseType.String())
 }
 
+// MappedType represents a mapped type: { [K in keyof T]: U }
+// or with optional/readonly modifiers: { readonly [K in keyof T]?: U }
+type MappedType struct {
+	Token        lexer.Token // The '{' token
+	TypeParam    *Identifier // K - the type parameter
+	Constraint   Expression  // keyof T - what K iterates over
+	ValueType    Expression  // U - the mapped value type
+	IsOptional   bool        // true if has ? modifier
+	IsReadonly   bool        // true if has readonly modifier
+}
+
+func (mt *MappedType) expressionNode()      {}
+func (mt *MappedType) TokenLiteral() string { return mt.Token.Literal }
+func (mt *MappedType) String() string {
+	var result string
+	result = "{ "
+	if mt.IsReadonly {
+		result += "readonly "
+	}
+	result += fmt.Sprintf("[%s in %s]", mt.TypeParam.String(), mt.Constraint.String())
+	if mt.IsOptional {
+		result += "?"
+	}
+	result += ": " + mt.ValueType.String() + " }"
+	return result
+}
+
 type UnionType struct {
 	Token lexer.Token // '|' token
 	Types []Expression

@@ -754,6 +754,9 @@ func (p *Parser) parseType() ast.Expression {
 	case lexer.LPAREN:
 		// Could be tuple type or function type
 		return p.parseTupleOrFunctionType()
+	case lexer.LBRACE:
+		// Mapped type: { [K in T]: U }
+		return p.parseMappedType()
 	case lexer.TABLE:
 		// table<K, V>
 		typeExpr = p.parseTableType()
@@ -784,6 +787,76 @@ func (p *Parser) parseType() ast.Expression {
 
 	// Check for suffixes and modifiers
 	return p.parseTypeSuffix(typeExpr)
+}
+
+// parseMappedType parses mapped types: { [K in T]: U }
+// Also supports: { readonly [K in T]: U }, { [K in T]?: U }, { readonly [K in T]?: U }
+func (p *Parser) parseMappedType() ast.Expression {
+	mappedType := &ast.MappedType{
+		Token: p.curToken, // '{'
+	}
+
+	// Check for 'readonly' modifier
+	if p.peekTokenIs(lexer.READONLY) {
+		p.nextToken() // consume 'readonly'
+		mappedType.IsReadonly = true
+	}
+
+	if !p.expectPeek(lexer.LBRACKET) {
+		return nil
+	}
+	p.nextToken() // move past '['
+
+	// Parse the type parameter (K)
+	if !p.curTokenIs(lexer.IDENT) {
+		return nil
+	}
+	mappedType.TypeParam = &ast.Identifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
+
+	// Expect 'in' keyword
+	if !p.expectPeek(lexer.IN) {
+		return nil
+	}
+
+	// Parse the constraint (what K iterates over)
+	p.nextToken() // move to constraint type
+	mappedType.Constraint = p.parseType()
+	if mappedType.Constraint == nil {
+		return nil
+	}
+
+	// Expect ']'
+	if !p.expectPeek(lexer.RBRACKET) {
+		return nil
+	}
+
+	// Check for optional '?' modifier
+	if p.peekTokenIs(lexer.QUESTION) {
+		p.nextToken() // consume '?'
+		mappedType.IsOptional = true
+	}
+
+	// Expect ':'
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	// Parse the value type
+	p.nextToken() // move to value type
+	mappedType.ValueType = p.parseType()
+	if mappedType.ValueType == nil {
+		return nil
+	}
+
+	// Expect '}'
+	if !p.expectPeek(lexer.RBRACE) {
+		return nil
+	}
+
+	return mappedType
 }
 
 func (p *Parser) parseSimpleType() ast.Expression {

@@ -928,6 +928,14 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		indexType := c.resolveTypeExpression(node.Index)
 		return c.resolveIndexedAccess(objectType, indexType)
 
+	case *ast.MappedType:
+		// Mapped type { [K in T]: U }
+		// Resolve the constraint type (what K iterates over)
+		constraintType := c.resolveTypeExpression(node.Constraint)
+
+		// For now, create a generic mapped type that will be instantiated later
+		return c.resolveMappedType(node, constraintType)
+
 	default:
 		c.addError(fmt.Sprintf("Cannot resolve type expression: %T", expr), lexer.Token{})
 		return Any
@@ -3513,4 +3521,72 @@ func (c *Checker) getFunctionType(stmt *ast.FunctionDeclaration) Type {
 		ReturnType:    returnType,
 		GenericParams: genericParams,
 	}
+}
+
+// resolveMappedType resolves mapped types like { [K in T]: U }
+func (c *Checker) resolveMappedType(node *ast.MappedType, constraintType Type) Type {
+	// The constraint type should be a union of string literals (from keyof)
+	// For each key in the constraint, we create a property with the value type
+
+	var keys []string
+
+	// Extract keys from the constraint type
+	switch constraint := constraintType.(type) {
+	case *UnionType:
+		// Union of string literals
+		for _, t := range constraint.Types {
+			if strLiteral, ok := t.(*StringLiteralType); ok {
+				keys = append(keys, strLiteral.Value)
+			}
+		}
+	case *StringLiteralType:
+		// Single string literal
+		keys = append(keys, constraint.Value)
+	default:
+		// For other types, we can't iterate yet
+		// Return Any for now
+		return Any
+	}
+
+	// Now we need to create a new object type with properties for each key
+	// We need to resolve the value type for each key
+	// The value type can reference K (the type parameter)
+
+	properties := make(map[string]Type)
+
+	// Create a temporary environment for the type parameter K
+	// We'll substitute K with each key when resolving the value type
+	for _, key := range keys {
+		// Create a type substitution for K -> key
+		// For now, we'll resolve the value type with K substituted
+		valueType := c.resolveMappedValueType(node.ValueType, node.TypeParam.Value, &StringLiteralType{Value: key})
+		properties[key] = valueType
+	}
+
+	// Create an interface type with these properties
+	interfaceType := &InterfaceType{
+		Name:       "",  // Anonymous mapped type
+		Properties: properties,
+	}
+
+	return interfaceType
+}
+
+// resolveMappedValueType resolves the value type of a mapped type with a substitution for the type parameter
+func (c *Checker) resolveMappedValueType(valueTypeExpr ast.Expression, typeParamName string, keyType Type) Type {
+	// We need to resolve the value type expression with K substituted
+	// For example, if the value type is T[K], we need to substitute K with the current key
+
+	// Create a temporary environment with K bound to the key type
+	prevEnv := c.env
+	c.env = NewEnclosedEnvironment(prevEnv)
+	c.env.Set(typeParamName, keyType)
+
+	// Resolve the value type expression with K in the environment
+	result := c.resolveTypeExpression(valueTypeExpr)
+
+	// Restore environment
+	c.env = prevEnv
+
+	return result
 }

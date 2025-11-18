@@ -18,6 +18,7 @@ type Generator struct {
 	classes          map[string]bool   // Track defined classes for constructor calls
 	classParents     map[string]string // Track parent class names for super
 	currentClassName string            // Current class being generated
+	exports          []string          // Track exported names for module generation
 }
 
 // New creates a new code generator
@@ -26,6 +27,7 @@ func New() *Generator {
 		indent:       0,
 		classes:      make(map[string]bool),
 		classParents: make(map[string]string),
+		exports:      make([]string, 0),
 	}
 }
 
@@ -39,6 +41,7 @@ func NewWithSourceMap(sourceFile, generatedFile string) *Generator {
 		sourceFile:       sourceFile,
 		classes:          make(map[string]bool),
 		classParents:     make(map[string]string),
+		exports:          make([]string, 0),
 	}
 }
 
@@ -104,6 +107,36 @@ func (g *Generator) Generate(statements []ast.Statement) string {
 		}
 	}
 
+	// If there are exports, generate a return statement
+	if len(g.exports) > 0 {
+		g.write("\n\n")
+		output.WriteString("\n\n")
+		returnStmt := g.generateModuleReturn()
+		g.write(returnStmt)
+		output.WriteString(returnStmt)
+	}
+
+	return output.String()
+}
+
+// generateModuleReturn generates the module return statement for exports
+func (g *Generator) generateModuleReturn() string {
+	if len(g.exports) == 0 {
+		return ""
+	}
+
+	var output strings.Builder
+	output.WriteString("return {\n")
+
+	for i, name := range g.exports {
+		output.WriteString(fmt.Sprintf("    %s = %s", name, name))
+		if i < len(g.exports)-1 {
+			output.WriteString(",")
+		}
+		output.WriteString("\n")
+	}
+
+	output.WriteString("}\n")
 	return output.String()
 }
 
@@ -964,9 +997,32 @@ func (g *Generator) generateIndent() string {
 // generateExportStatement generates code for an export statement
 func (g *Generator) generateExportStatement(node *ast.ExportStatement) string {
 	// In Lua, exports are handled via return tables at the end of modules
-	// For now, just generate the underlying statement without special export handling
-	// The exported names should be collected and returned at module end
-	return g.generateStatement(node.Statement)
+	// Generate the underlying statement and track exported names
+	code := g.generateStatement(node.Statement)
+
+	// Track what's being exported
+	switch stmt := node.Statement.(type) {
+	case *ast.VariableDeclaration:
+		// Export variables
+		for _, name := range stmt.Names {
+			g.exports = append(g.exports, name.Value)
+		}
+	case *ast.FunctionDeclaration:
+		// Export functions
+		g.exports = append(g.exports, stmt.Name.Value)
+	case *ast.ClassDeclaration:
+		// Export classes
+		g.exports = append(g.exports, stmt.Name.Value)
+	case *ast.EnumDeclaration:
+		// Export enums
+		g.exports = append(g.exports, stmt.Name.Value)
+	case *ast.TypeDeclaration:
+		// Type declarations don't generate runtime code, skip tracking
+	case *ast.InterfaceDeclaration:
+		// Interface declarations don't generate runtime code, skip tracking
+	}
+
+	return code
 }
 
 // generateImportStatement generates code for an import statement

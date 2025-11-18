@@ -98,6 +98,8 @@ const (
 	NIL         = "nil"
 	TRUE        = "true"
 	FALSE       = "false"
+	NEVER       = "never"
+	UNKNOWN     = "unknown"
 
 	ARROW    = "=>"
 	QUESTION = "?"
@@ -158,6 +160,8 @@ var keywords = map[string]TokenType{
 	"nil":         NIL,
 	"true":        TRUE,
 	"false":       FALSE,
+	"never":       NEVER,
+	"unknown":     UNKNOWN,
 }
 
 type Token struct {

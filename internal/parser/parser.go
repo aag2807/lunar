@@ -635,7 +635,7 @@ func (p *Parser) tryParseGenericType(baseExpr ast.Expression) ast.Expression {
 func (p *Parser) isTypeToken(tokenType lexer.TokenType) bool {
 	switch tokenType {
 	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN,
-		lexer.ANY, lexer.VOID, lexer.NIL, lexer.TABLE, lexer.LPAREN:
+		lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN, lexer.TABLE, lexer.LPAREN:
 		return true
 	default:
 		return false
@@ -764,7 +764,7 @@ func (p *Parser) parseType() ast.Expression {
 		// Number literal in type position (for literal types)
 		value, _ := strconv.ParseFloat(p.curToken.Literal, 64)
 		typeExpr = &ast.NumberLiteral{Token: p.curToken, Value: value}
-	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL:
+	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
 		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	default:
 		return nil
@@ -780,7 +780,7 @@ func (p *Parser) parseSimpleType() ast.Expression {
 		return p.parseTupleOrFunctionType()
 	case lexer.TABLE:
 		return p.parseTableType()
-	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL:
+	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
 		return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	default:
 		return nil
@@ -922,7 +922,7 @@ func (p *Parser) parseNonUnionIntersectionType() ast.Expression {
 		// Number literal in type position (for literal types)
 		value, _ := strconv.ParseFloat(p.curToken.Literal, 64)
 		typeExpr = &ast.NumberLiteral{Token: p.curToken, Value: value}
-	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL:
+	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
 		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	default:
 		return nil

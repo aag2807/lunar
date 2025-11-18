@@ -232,6 +232,8 @@ func NewChecker() *Checker {
 	env.Set("nil", Nil)
 	env.Set("void", Void)
 	env.Set("any", Any)
+	env.Set("never", Never)
+	env.Set("unknown", Unknown)
 
 	checker := &Checker{
 		env:                env,

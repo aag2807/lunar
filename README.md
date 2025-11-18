@@ -33,17 +33,29 @@ end
 
 ## Features
 
+### Type System
 ✅ **Type Safety** - Catch errors at compile time, not runtime
 ✅ **Classes & OOP** - Modern object-oriented programming with inheritance
 ✅ **Interfaces** - Define contracts and ensure implementation
 ✅ **Enums** - Type-safe enumeration values
 ✅ **Generics** - Write reusable, type-safe code
 ✅ **Union Types** - Flexible type combinations (`string | number`)
+✅ **Method Overloading** - Multiple function signatures with automatic resolution
+✅ **Constructor Parameter Properties** - TypeScript-style shorthand for class properties
+✅ **Readonly Properties** - Immutable properties that can only be set in constructors
+
+### Developer Experience
+✅ **Language Server Protocol (LSP)** - Full IDE integration with diagnostics, hover, completions
+✅ **Neovim Plugin** - Ready-to-use editor integration
+✅ **Code Formatter** - Automatic code formatting with `--format`
+✅ **Linter** - Best practices checking with `--lint`
+✅ **Source Maps** - Debug with original Lunar source line numbers (Source Map v3)
+✅ **Excellent Error Messages** - Clear, helpful errors with "Did you mean?" suggestions
+
+### Lua Compatibility
 ✅ **Context-Aware Keywords** - `string`, `table`, `type` work as both types and identifiers
 ✅ **Declaration Files** - Type definitions for existing Lua libraries (`.d.lunar`)
 ✅ **Complete Standard Library Types** - Full type coverage including `string.*` and `table.*`
-✅ **Source Maps** - Debug with original Lunar source line numbers (Source Map v3)
-✅ **Excellent Error Messages** - Clear, helpful errors with source context
 ✅ **Clean Lua Output** - Generates readable, efficient Lua code
 ✅ **100% Lua Compatible** - Use any Lua library seamlessly
 
@@ -62,12 +74,14 @@ cd lunar
 # Build the compiler
 go build -o lunar ./cmd/lunar
 
+# Build the LSP server (for IDE integration)
+go build -o lunar-lsp ./cmd/lunar-lsp
+
 # Build the declaration generator (optional)
 go build -o lunar2decl ./cmd/lunar2decl
 
 # Add to your PATH (optional)
-sudo cp lunar /usr/local/bin/
-sudo cp lunar2decl /usr/local/bin/
+sudo cp lunar lunar-lsp lunar2decl /usr/local/bin/
 ```
 
 ### Using Make (recommended)
@@ -137,6 +151,15 @@ lunar -source-map input.lunar
 
 # Specify output file
 lunar -o output.lua input.lunar
+
+# Format code (print to stdout)
+lunar --format input.lunar
+
+# Format code (write back to file)
+lunar --format-write input.lunar
+
+# Lint code for best practices
+lunar --lint input.lunar
 
 # Combine options (note: flags must come before filename)
 lunar -source-map -o output.lua input.lunar
@@ -223,6 +246,45 @@ local numberBox: Box<number> = Box<number>(42)
 local stringBox: Box<string> = Box<string>("hello")
 ```
 
+### Method Overloading
+
+```lunar
+-- Multiple signatures for the same function
+function add(a: number, b: number): number
+    return a + b
+end
+
+function add(a: string, b: string): string
+    return a .. b
+end
+
+local sum: number = add(1, 2)      -- Returns 3
+local concat: string = add("a", "b")  -- Returns "ab"
+```
+
+### Constructor Parameter Properties
+
+```lunar
+-- TypeScript-style shorthand for declaring class properties
+class Person
+    function constructor(
+        public name: string,
+        private readonly id: number,
+        protected age: number
+    )
+        -- Properties are automatically created and assigned
+    end
+
+    function getId(): number
+        return self.id
+    end
+end
+
+local person = Person("Alice", 123, 30)
+print(person.name)  -- "Alice" (public)
+-- person.id = 456  -- Error: cannot assign to readonly property
+```
+
 ### Using Lua Libraries with Type Safety
 
 ```lunar
@@ -301,13 +363,19 @@ Simply copy the declarations to your project directory for automatic type checki
 lunar/
 ├── cmd/
 │   ├── lunar/          # Main compiler
+│   ├── lunar-lsp/      # Language Server Protocol server
 │   └── lunar2decl/     # Declaration generator tool
 ├── internal/
 │   ├── lexer/          # Tokenization
 │   ├── parser/         # AST construction
 │   ├── types/          # Type checking
 │   ├── codegen/        # Lua code generation
-│   └── ast/            # AST definitions
+│   ├── ast/            # AST definitions
+│   ├── lsp/            # LSP implementation
+│   ├── formatter/      # Code formatter
+│   └── linter/         # Code linter
+├── editors/
+│   └── nvim/           # Neovim plugin
 ├── stdlib/             # Standard library declarations
 ├── examples/           # Example code
 └── README.md           # This file
@@ -329,36 +397,69 @@ lunar/
 - [x] Context-aware keywords (full string/table stdlib support)
 - [x] Source maps for debugging
 
-### v1.2 (Current) ✅
+### v1.2 ✅
 - [x] Enhanced error suggestions ("Did you mean...?")
 - [x] Comprehensive stdlib coverage (coroutine, debug, package)
 - [x] Integration tests
-- [ ] Performance optimizations
+
+### v1.3 (Current) ✅
+- [x] Method overloading with automatic resolution
+- [x] Constructor parameter properties (TypeScript-style)
+- [x] Enhanced readonly property enforcement
+- [x] Code formatter (`--format`, `--format-write`)
+- [x] Linter (`--lint`)
+- [x] Language Server Protocol (LSP) implementation
+- [x] Neovim plugin
 
 ### v2.0 (Future)
-- [ ] Language Server Protocol (LSP) for IDE integration
-  - **Design complete** - See [LSP Design](docs/LSP_DESIGN.md), [Neovim Setup](docs/NEOVIM_SETUP.md), and [Quick Start](docs/LSP_QUICKSTART.md)
-  - Implementation in progress
 - [ ] Package manager integration
-- [ ] Code formatter
+- [ ] Watch mode for continuous compilation
+- [ ] Incremental compilation
+- [ ] More LSP features (find references, rename, code actions)
+- [ ] VS Code extension
+- [ ] Performance optimizations
 
-## LSP Development
+## IDE Integration
 
-Lunar will have full Language Server Protocol support for IDE features. Documentation:
+Lunar includes a full Language Server Protocol (LSP) implementation for IDE integration.
 
-- **[LSP Design Document](docs/LSP_DESIGN.md)** - Complete architecture and implementation plan
-- **[Neovim Setup Guide](docs/NEOVIM_SETUP.md)** - How to configure Neovim with Lunar LSP
-- **[LSP Quick Start](docs/LSP_QUICKSTART.md)** - Quick reference for implementers and users
-
-Features planned:
-- Real-time diagnostics (errors/warnings)
+### Current Features
+- Real-time diagnostics (type errors, parse errors)
 - Go to definition
 - Hover type information
-- Autocompletion
-- Find references
-- Rename symbol
-- Document symbols
-- Workspace symbols
+- Auto-completion (variables, functions, classes, keywords)
+
+### Neovim
+
+A ready-to-use Neovim plugin is included:
+
+```lua
+-- Using lazy.nvim
+{
+  dir = "/path/to/lunar/editors/nvim",
+  ft = "lunar",
+  config = function()
+    require("lunar").setup()
+  end,
+}
+```
+
+See [editors/nvim/README.md](editors/nvim/README.md) for full installation instructions.
+
+### Other Editors
+
+The `lunar-lsp` binary can be used with any editor that supports LSP:
+
+```bash
+# Build the LSP server
+go build -o lunar-lsp ./cmd/lunar-lsp
+
+# Configure your editor to use it for .lunar files
+```
+
+### Documentation
+- **[LSP Design Document](docs/LSP_DESIGN.md)** - Architecture and implementation details
+- **[Neovim Plugin](editors/nvim/README.md)** - Installation and configuration
 
 ## Contributing
 

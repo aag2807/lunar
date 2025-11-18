@@ -1799,6 +1799,11 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 
 // checkFunctionDeclaration checks a function declaration
 func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
+	// Check decorators
+	for _, decorator := range node.Decorators {
+		c.checkDecorator(decorator)
+	}
+
 	// Add generic type parameters to current scope first (for type resolution)
 	prevEnv := c.env
 	if len(node.GenericParams) > 0 {
@@ -2200,6 +2205,11 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 	classType, ok := c.classes[node.Name.Value]
 	if !ok {
 		return
+	}
+
+	// Check decorators
+	for _, decorator := range node.Decorators {
+		c.checkDecorator(decorator)
 	}
 
 	// Check abstract methods: they should not have a body in abstract classes
@@ -3886,5 +3896,92 @@ func (c *Checker) extractStringValues(typ Type) []string {
 	default:
 		// For non-string types, convert to string representation
 		return []string{t.String()}
+	}
+}
+
+// checkDecorator checks a decorator usage
+func (c *Checker) checkDecorator(decorator *ast.Decorator) {
+	// Look up the decorator function
+	decoratorName := decorator.Name.Value
+	decoratorType, ok := c.env.Get(decoratorName)
+
+	if !ok {
+		c.addError(
+			fmt.Sprintf("Undefined decorator '%s'", decoratorName),
+			decorator.Token,
+		)
+		return
+	}
+
+	// Check that it's a function
+	funcType, ok := decoratorType.(*FunctionType)
+	if !ok {
+		c.addError(
+			fmt.Sprintf("Decorator '%s' is not a function", decoratorName),
+			decorator.Token,
+		)
+		return
+	}
+
+	// For decorators, the semantics are:
+	// - @decorator - simple decorator, the target is passed as first arg implicitly
+	// - @decorator(args) - decorator factory, args are passed first, returns a function that takes the target
+
+	// If no arguments in decorator syntax, it's a simple decorator
+	// The function should take at least 1 parameter (the target)
+	if len(decorator.Arguments) == 0 {
+		if len(funcType.Parameters) == 0 {
+			c.addError(
+				fmt.Sprintf("Decorator '%s' must accept at least one parameter (the target)", decoratorName),
+				decorator.Token,
+			)
+		}
+		return
+	}
+
+	// For decorator factories, check the argument types
+	// The decorator factory receives the decorator arguments
+	expectedArgs := len(funcType.Parameters)
+	actualArgs := len(decorator.Arguments)
+
+	// Count required parameters (non-optional)
+	requiredParams := 0
+	for _, param := range funcType.Parameters {
+		if _, isOptional := param.(*OptionalType); !isOptional {
+			requiredParams++
+		}
+	}
+
+	if actualArgs < requiredParams || actualArgs > expectedArgs {
+		if requiredParams == expectedArgs {
+			c.addError(
+				fmt.Sprintf("Decorator '%s' expects %d arguments, got %d", decoratorName, expectedArgs, actualArgs),
+				decorator.Token,
+			)
+		} else {
+			c.addError(
+				fmt.Sprintf("Decorator '%s' expects %d-%d arguments, got %d", decoratorName, requiredParams, expectedArgs, actualArgs),
+				decorator.Token,
+			)
+		}
+		return
+	}
+
+	// Check argument types
+	for i, arg := range decorator.Arguments {
+		argType := c.checkExpression(arg)
+		if i < len(funcType.Parameters) {
+			paramType := funcType.Parameters[i]
+			// Unwrap optional type for comparison
+			if optType, ok := paramType.(*OptionalType); ok {
+				paramType = optType.BaseType
+			}
+			if !argType.IsAssignableTo(paramType) {
+				c.addError(
+					fmt.Sprintf("Decorator argument type mismatch: expected %s, got %s", paramType.String(), argType.String()),
+					decorator.Token,
+				)
+			}
+		}
 	}
 }

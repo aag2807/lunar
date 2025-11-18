@@ -1872,6 +1872,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseImportStatement()
 	case lexer.DECLARE:
 		return p.parseDeclareStatement()
+	case lexer.AT:
+		return p.parseDecoratedStatement()
 	default:
 		return p.parseExpressionStatement()
 	}
@@ -2797,4 +2799,71 @@ func (p *Parser) parseGenericParameters() []*ast.Identifier {
 	}
 
 	return params
+}
+
+// parseDecorator parses a single decorator like @name or @name(args)
+func (p *Parser) parseDecorator() *ast.Decorator {
+	decorator := &ast.Decorator{
+		Token: p.curToken, // '@' token
+	}
+
+	// Expect identifier after @
+	if !p.expectPeek(lexer.IDENT) {
+		return nil
+	}
+
+	decorator.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Check for arguments
+	if p.peekTokenIs(lexer.LPAREN) {
+		p.nextToken() // move to '('
+		decorator.Arguments = p.parseExpressionList(lexer.RPAREN)
+	}
+
+	return decorator
+}
+
+// parseDecoratedStatement parses decorators followed by a class or function
+func (p *Parser) parseDecoratedStatement() ast.Statement {
+	var decorators []*ast.Decorator
+
+	// Parse all decorators
+	for p.curTokenIs(lexer.AT) {
+		decorator := p.parseDecorator()
+		if decorator != nil {
+			decorators = append(decorators, decorator)
+		}
+		p.nextToken()
+	}
+
+	// Now parse the decorated statement
+	switch p.curToken.Type {
+	case lexer.CLASS:
+		class := p.parseClassDeclaration()
+		if class != nil {
+			class.Decorators = decorators
+		}
+		return class
+	case lexer.ABSTRACT:
+		class := p.parseAbstractClassDeclaration()
+		if class != nil {
+			class.Decorators = decorators
+		}
+		return class
+	case lexer.FUNCTION:
+		fn := p.parseFunctionDeclaration()
+		if fn != nil {
+			fn.Decorators = decorators
+		}
+		return fn
+	case lexer.ASYNC:
+		fn := p.parseAsyncFunctionDeclaration()
+		if fn != nil {
+			fn.Decorators = decorators
+		}
+		return fn
+	default:
+		p.errors = append(p.errors, fmt.Sprintf("decorators can only be applied to classes and functions, got %s", p.curToken.Type))
+		return nil
+	}
 }

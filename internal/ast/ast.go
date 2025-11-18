@@ -557,10 +557,11 @@ type FunctionDeclaration struct {
 	Parameters    []*Parameter
 	ReturnType    Expression
 	Body          *BlockStatement
-	IsStatic      bool   // static method (when used in class)
-	IsAbstract    bool   // abstract method (when used in class)
-	IsAsync       bool   // async function (returns Promise/coroutine)
-	Visibility    string // visibility modifier: public, private, protected (when used in class)
+	IsStatic      bool         // static method (when used in class)
+	IsAbstract    bool         // abstract method (when used in class)
+	IsAsync       bool         // async function (returns Promise/coroutine)
+	Visibility    string       // visibility modifier: public, private, protected (when used in class)
+	Decorators    []*Decorator // decorators applied to the function
 }
 
 // AwaitExpression represents an await expression for async operations
@@ -571,6 +572,31 @@ type AwaitExpression struct {
 
 func (ae *AwaitExpression) expressionNode()      {}
 func (ae *AwaitExpression) TokenLiteral() string { return ae.Token.Literal }
+
+// Decorator represents a decorator like @decoratorName or @decoratorName(args)
+type Decorator struct {
+	Token     lexer.Token  // '@' token
+	Name      *Identifier  // decorator name
+	Arguments []Expression // optional arguments
+}
+
+func (d *Decorator) expressionNode()      {}
+func (d *Decorator) TokenLiteral() string { return d.Token.Literal }
+func (d *Decorator) String() string {
+	var out strings.Builder
+	out.WriteString("@")
+	out.WriteString(d.Name.Value)
+	if len(d.Arguments) > 0 {
+		out.WriteString("(")
+		args := make([]string, len(d.Arguments))
+		for i, arg := range d.Arguments {
+			args[i] = arg.String()
+		}
+		out.WriteString(strings.Join(args, ", "))
+		out.WriteString(")")
+	}
+	return out.String()
+}
 func (ae *AwaitExpression) String() string {
 	return fmt.Sprintf("await %s", ae.Expression.String())
 }
@@ -821,6 +847,7 @@ type ClassDeclaration struct {
 	IsAbstract     bool                       // abstract class
 	Getters        []*GetterDeclaration       // property getters
 	Setters        []*SetterDeclaration       // property setters
+	Decorators     []*Decorator               // decorators applied to the class
 }
 
 // GetterDeclaration represents a property getter

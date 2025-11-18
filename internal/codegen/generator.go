@@ -357,6 +357,28 @@ func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) s
 	output.WriteString(g.generateIndent())
 	output.WriteString("end\n")
 
+	// Apply decorators in reverse order (first decorator is outermost)
+	if len(node.Decorators) > 0 {
+		funcName := node.Name.Value
+		for i := len(node.Decorators) - 1; i >= 0; i-- {
+			decorator := node.Decorators[i]
+			output.WriteString(g.generateIndent())
+			if len(decorator.Arguments) > 0 {
+				// Decorator with arguments: funcName = decoratorName(args)(funcName)
+				output.WriteString(fmt.Sprintf("%s = %s(", funcName, decorator.Name.Value))
+				args := make([]string, len(decorator.Arguments))
+				for j, arg := range decorator.Arguments {
+					args[j] = g.generateExpression(arg)
+				}
+				output.WriteString(strings.Join(args, ", "))
+				output.WriteString(fmt.Sprintf(")(%s)\n", funcName))
+			} else {
+				// Simple decorator: funcName = decoratorName(funcName)
+				output.WriteString(fmt.Sprintf("%s = %s(%s)\n", funcName, decorator.Name.Value, funcName))
+			}
+		}
+	}
+
 	return output.String()
 }
 
@@ -750,6 +772,28 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 
 		output.WriteString(g.generateIndent())
 		output.WriteString(fmt.Sprintf("setmetatable(%s, %s_mt)\n", className, className))
+		output.WriteString("\n")
+	}
+
+	// Apply decorators in reverse order (first decorator is outermost)
+	if len(node.Decorators) > 0 {
+		for i := len(node.Decorators) - 1; i >= 0; i-- {
+			decorator := node.Decorators[i]
+			output.WriteString(g.generateIndent())
+			if len(decorator.Arguments) > 0 {
+				// Decorator with arguments: ClassName = decoratorName(args)(ClassName)
+				output.WriteString(fmt.Sprintf("%s = %s(", className, decorator.Name.Value))
+				args := make([]string, len(decorator.Arguments))
+				for j, arg := range decorator.Arguments {
+					args[j] = g.generateExpression(arg)
+				}
+				output.WriteString(strings.Join(args, ", "))
+				output.WriteString(fmt.Sprintf(")(%s)\n", className))
+			} else {
+				// Simple decorator: ClassName = decoratorName(ClassName)
+				output.WriteString(fmt.Sprintf("%s = %s(%s)\n", className, decorator.Name.Value, className))
+			}
+		}
 		output.WriteString("\n")
 	}
 

@@ -109,6 +109,8 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(HASH, l.ch, l.line, l.column)
 	case '&':
 		tok = newToken(AMPERSAND, l.ch, l.line, l.column)
+	case '@':
+		tok = newToken(AT, l.ch, l.line, l.column)
 	case '.':
 		if l.peekChar() == '.' {
 			// Check if it's ... or ..

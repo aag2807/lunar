@@ -22,6 +22,7 @@ const (
 	MODULO    = "%"
 	HASH      = "#"
 	AMPERSAND = "&" // for intersection types Type1 & Type2
+	AT        = "@" // for decorators @decoratorName
 
 	//comparison
 	EQ         = "=="

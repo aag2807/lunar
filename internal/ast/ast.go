@@ -330,6 +330,18 @@ func (kt *KeyofType) String() string {
 	return fmt.Sprintf("keyof %s", kt.ObjectType.String())
 }
 
+// TypeofExpression represents a typeof type expression: typeof value
+type TypeofExpression struct {
+	Token      lexer.Token // 'typeof' token
+	Expression Expression  // The expression to extract type from
+}
+
+func (te *TypeofExpression) expressionNode()      {}
+func (te *TypeofExpression) TokenLiteral() string { return te.Token.Literal }
+func (te *TypeofExpression) String() string {
+	return fmt.Sprintf("typeof %s", te.Expression.String())
+}
+
 type UnionType struct {
 	Token lexer.Token // '|' token
 	Types []Expression

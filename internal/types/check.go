@@ -906,6 +906,10 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		objectType := c.resolveTypeExpression(node.ObjectType)
 		return c.resolveKeyof(objectType)
 
+	case *ast.TypeofExpression:
+		// typeof value returns the type of the value
+		return c.resolveTypeof(node.Expression)
+
 	case *ast.IndexExpression:
 		// Indexed access type T[K]
 		objectType := c.resolveTypeExpression(node.Left)
@@ -1384,6 +1388,13 @@ func (c *Checker) resolveKeyof(objectType Type) Type {
 	}
 
 	return &UnionType{Types: keys}
+}
+
+// resolveTypeof resolves the typeof operator, returning the type of an expression
+func (c *Checker) resolveTypeof(expr ast.Expression) Type {
+	// Check the type of the expression
+	exprType := c.checkExpression(expr)
+	return exprType
 }
 
 // substituteTypeParams substitutes type parameters in a type expression

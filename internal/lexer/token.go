@@ -90,6 +90,7 @@ const (
 	IS          = "is" // for type guards: value is Type
 	AS          = "as" // for type assertions: value as Type
 	KEYOF       = "keyof" // for keyof operator: keyof T
+	TYPEOF      = "typeof" // for typeof operator: typeof value
 
 	//types
 	ANY         = "any"
@@ -154,6 +155,7 @@ var keywords = map[string]TokenType{
 	"is":          IS,
 	"as":          AS,
 	"keyof":       KEYOF,
+	"typeof":      TYPEOF,
 	"table":       TABLE,
 	"any":         ANY,
 	"string":      STRING_TYPE,

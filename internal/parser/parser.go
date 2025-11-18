@@ -760,6 +760,9 @@ func (p *Parser) parseType() ast.Expression {
 	case lexer.KEYOF:
 		// keyof T
 		return p.parseKeyofType()
+	case lexer.TYPEOF:
+		// typeof value
+		return p.parseTypeofExpression()
 	case lexer.STRING:
 		// String literal in type position (for literal types)
 		typeExpr = &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
@@ -1043,6 +1046,23 @@ func (p *Parser) parseKeyofType() ast.Expression {
 	return &ast.KeyofType{
 		Token:      keyofToken,
 		ObjectType: objectType,
+	}
+}
+
+func (p *Parser) parseTypeofExpression() ast.Expression {
+	typeofToken := p.curToken
+
+	p.nextToken() // move to the expression
+	// Parse the expression (variable name, member access, etc.)
+	expr := p.parseExpression(LOWEST)
+
+	if expr == nil {
+		return nil
+	}
+
+	return &ast.TypeofExpression{
+		Token:      typeofToken,
+		Expression: expr,
 	}
 }
 

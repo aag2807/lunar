@@ -919,6 +919,202 @@ checkIntersection:
 		}
 	}
 
+	// Fourth pass: handle conditional types (lowest precedence)
+	// T extends U ? X : Y
+	if p.peekTokenIs(lexer.EXTENDS) {
+		checkType := currentType
+		p.nextToken() // consume 'extends'
+		p.nextToken() // move to extends type
+
+		// Parse the extends type (without allowing nested conditionals)
+		extendsType := p.parseSimpleTypeWithSuffixes()
+
+		// Advance to the next token after the extends type
+		p.nextToken()
+
+		if !p.curTokenIs(lexer.QUESTION) {
+			return nil
+		}
+
+		p.nextToken() // move to true type
+		trueType := p.parseSimpleTypeWithSuffixes()
+		p.nextToken() // advance after true type
+
+		if !p.curTokenIs(lexer.COLON) {
+			return nil
+		}
+
+		p.nextToken() // move to false type
+		falseType := p.parseSimpleTypeWithSuffixes()
+		// Don't advance after false type - leave parser positioned correctly
+
+		// Get the token from checkType
+		var condToken lexer.Token
+		switch ct := checkType.(type) {
+		case *ast.Identifier:
+			condToken = ct.Token
+		case *ast.UnionType:
+			condToken = ct.Token
+		case *ast.IntersectionType:
+			condToken = ct.Token
+		default:
+			condToken = p.curToken
+		}
+
+		currentType = &ast.ConditionalType{
+			Token:       condToken,
+			CheckType:   checkType,
+			ExtendsType: extendsType,
+			TrueType:    trueType,
+			FalseType:   falseType,
+		}
+	}
+
+	return currentType
+}
+
+// parseSimpleTypeWithSuffixes parses a type with all suffixes including union and intersection,
+// but NOT conditional types (to avoid infinite recursion in conditional type parsing)
+func (p *Parser) parseSimpleTypeWithSuffixes() ast.Expression {
+	var typeExpr ast.Expression
+
+	switch p.curToken.Type {
+	case lexer.LPAREN:
+		return p.parseTupleOrFunctionType()
+	case lexer.TABLE:
+		typeExpr = p.parseTableType()
+	case lexer.KEYOF:
+		return p.parseKeyofType()
+	case lexer.TYPEOF:
+		return p.parseTypeofExpression()
+	case lexer.STRING:
+		typeExpr = &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
+	case lexer.NUMBER:
+		value, _ := strconv.ParseFloat(p.curToken.Literal, 64)
+		typeExpr = &ast.NumberLiteral{Token: p.curToken, Value: value}
+	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
+		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	default:
+		return nil
+	}
+
+	currentType := typeExpr
+
+	// Handle high-precedence suffixes (arrays, generics, optional)
+	for {
+		switch {
+		case p.peekTokenIs(lexer.LBRACKET):
+			p.nextToken() // consume '['
+			p.nextToken() // move to content or ']'
+
+			if p.curTokenIs(lexer.RBRACKET) {
+				// Empty brackets: T[] is array type
+				currentType = &ast.ArrayType{
+					Token:       typeExpr.(*ast.Identifier).Token,
+					ElementType: currentType,
+				}
+			} else {
+				// Non-empty brackets: T[K] is indexed access type
+				indexType := p.parseType()
+				if !p.expectPeek(lexer.RBRACKET) {
+					return nil
+				}
+				currentType = &ast.IndexExpression{
+					Token: p.curToken,
+					Left:  currentType,
+					Index: indexType,
+				}
+			}
+
+		case p.peekTokenIs(lexer.LT):
+			p.nextToken() // consume '<'
+			p.nextToken() // move to first type argument
+
+			typeArgs := []ast.Expression{}
+			typeArgs = append(typeArgs, p.parseType())
+
+			for p.peekTokenIs(lexer.COMMA) {
+				p.nextToken() // consume comma
+				p.nextToken() // move to next type
+				typeArgs = append(typeArgs, p.parseType())
+			}
+
+			if !p.expectPeek(lexer.GT) {
+				return nil
+			}
+
+			currentType = &ast.GenericType{
+				Token:         typeExpr.(*ast.Identifier).Token,
+				BaseType:      typeExpr,
+				TypeArguments: typeArgs,
+			}
+
+		case p.peekTokenIs(lexer.QUESTION):
+			p.nextToken()
+			currentType = &ast.OptionalType{
+				Token: p.curToken,
+				Type:  currentType,
+			}
+
+		default:
+			goto checkIntersection
+		}
+	}
+
+checkIntersection:
+	// Handle intersection types
+	if p.peekTokenIs(lexer.AMPERSAND) {
+		types := []ast.Expression{currentType}
+		intersectionToken := p.peekToken
+		for p.peekTokenIs(lexer.AMPERSAND) {
+			p.nextToken() // consume '&'
+			p.nextToken() // move to next type
+			nextType := p.parseNonUnionIntersectionType()
+			if nextType != nil {
+				types = append(types, nextType)
+			}
+		}
+		currentType = &ast.IntersectionType{
+			Token: intersectionToken,
+			Types: types,
+		}
+	}
+
+	// Handle union types
+	if p.peekTokenIs(lexer.PIPE) {
+		types := []ast.Expression{currentType}
+		unionToken := p.peekToken
+		for p.peekTokenIs(lexer.PIPE) {
+			p.nextToken() // consume '|'
+			p.nextToken() // move to next type
+			nextType := p.parseNonUnionIntersectionType()
+			// Check for intersection in this union member
+			if p.peekTokenIs(lexer.AMPERSAND) {
+				intersectionTypes := []ast.Expression{nextType}
+				intersectionToken := p.peekToken
+				for p.peekTokenIs(lexer.AMPERSAND) {
+					p.nextToken() // consume '&'
+					p.nextToken() // move to next type
+					intersectionMember := p.parseNonUnionIntersectionType()
+					if intersectionMember != nil {
+						intersectionTypes = append(intersectionTypes, intersectionMember)
+					}
+				}
+				nextType = &ast.IntersectionType{
+					Token: intersectionToken,
+					Types: intersectionTypes,
+				}
+			}
+			if nextType != nil {
+				types = append(types, nextType)
+			}
+		}
+		currentType = &ast.UnionType{
+			Token: unionToken,
+			Types: types,
+		}
+	}
+
 	return currentType
 }
 

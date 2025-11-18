@@ -910,6 +910,14 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		// typeof value returns the type of the value
 		return c.resolveTypeof(node.Expression)
 
+	case *ast.ConditionalType:
+		// T extends U ? X : Y
+		checkType := c.resolveTypeExpression(node.CheckType)
+		extendsType := c.resolveTypeExpression(node.ExtendsType)
+		trueType := c.resolveTypeExpression(node.TrueType)
+		falseType := c.resolveTypeExpression(node.FalseType)
+		return c.resolveConditionalType(checkType, extendsType, trueType, falseType)
+
 	case *ast.IndexExpression:
 		// Indexed access type T[K]
 		objectType := c.resolveTypeExpression(node.Left)
@@ -1395,6 +1403,15 @@ func (c *Checker) resolveTypeof(expr ast.Expression) Type {
 	// Check the type of the expression
 	exprType := c.checkExpression(expr)
 	return exprType
+}
+
+// resolveConditionalType resolves conditional types: T extends U ? X : Y
+func (c *Checker) resolveConditionalType(checkType, extendsType, trueType, falseType Type) Type {
+	// Check if checkType extends (is assignable to) extendsType
+	if checkType.IsAssignableTo(extendsType) {
+		return trueType
+	}
+	return falseType
 }
 
 // substituteTypeParams substitutes type parameters in a type expression

@@ -342,6 +342,25 @@ func (te *TypeofExpression) String() string {
 	return fmt.Sprintf("typeof %s", te.Expression.String())
 }
 
+// ConditionalType represents a conditional type: T extends U ? X : Y
+type ConditionalType struct {
+	Token       lexer.Token // The check type token
+	CheckType   Expression  // T
+	ExtendsType Expression  // U
+	TrueType    Expression  // X
+	FalseType   Expression  // Y
+}
+
+func (ct *ConditionalType) expressionNode()      {}
+func (ct *ConditionalType) TokenLiteral() string { return ct.Token.Literal }
+func (ct *ConditionalType) String() string {
+	return fmt.Sprintf("%s extends %s ? %s : %s",
+		ct.CheckType.String(),
+		ct.ExtendsType.String(),
+		ct.TrueType.String(),
+		ct.FalseType.String())
+}
+
 type UnionType struct {
 	Token lexer.Token // '|' token
 	Types []Expression

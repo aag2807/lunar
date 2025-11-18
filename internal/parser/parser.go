@@ -90,6 +90,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.LBRACE, p.parseTableLiteral)
 	p.registerPrefix(lexer.FUNCTION, p.parseFunctionExpression)
 	p.registerPrefix(lexer.ELLIPSIS, p.parseSpreadExpression)
+	p.registerPrefix(lexer.AWAIT, p.parseAwaitExpression)
 
 	//register infix operators
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
@@ -662,6 +663,17 @@ func (p *Parser) parseSpreadExpression() ast.Expression {
 
 	p.nextToken()
 	expression.Value = p.parseExpression(LOWEST)
+
+	return expression
+}
+
+func (p *Parser) parseAwaitExpression() ast.Expression {
+	expression := &ast.AwaitExpression{
+		Token: p.curToken, // 'await' token
+	}
+
+	p.nextToken()
+	expression.Expression = p.parseExpression(PREFIX)
 
 	return expression
 }
@@ -1676,6 +1688,51 @@ func (p *Parser) parseFunctionDeclaration() *ast.FunctionDeclaration {
 	return fd
 }
 
+// parseAsyncFunctionDeclaration parses async function declarations
+func (p *Parser) parseAsyncFunctionDeclaration() *ast.FunctionDeclaration {
+	// Current token is 'async'
+	asyncToken := p.curToken
+
+	// Expect 'function' keyword
+	if !p.expectPeek(lexer.FUNCTION) {
+		return nil
+	}
+
+	fd := &ast.FunctionDeclaration{
+		Token:   asyncToken,
+		IsAsync: true,
+	}
+
+	// Parse function name - allows context-aware keywords
+	if !p.expectPeekIdentOrContextual() {
+		return nil
+	}
+	fd.Name = p.parseIdentifierOrContextual()
+
+	// Parse generic parameters if present: <T, U>
+	if p.peekTokenIs(lexer.LT) {
+		p.nextToken() // consume <
+		fd.GenericParams = p.parseGenericParameters()
+	}
+
+	// Parse the parameters
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+	fd.Parameters = p.parseFunctionParameters()
+
+	// Parse optional return type
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // consume :
+		p.nextToken() // move onto return type
+		fd.ReturnType = p.parseType()
+	}
+
+	fd.Body = p.parseBlockStatement()
+
+	return fd
+}
+
 // parseFunctionExpression parses anonymous function expressions like: function(x: number): number return x end
 func (p *Parser) parseFunctionExpression() ast.Expression {
 	fe := &ast.FunctionExpression{
@@ -1780,6 +1837,8 @@ func (p *Parser) parseStatement() ast.Statement {
 	switch p.curToken.Type {
 	case lexer.FUNCTION:
 		return p.parseFunctionDeclaration()
+	case lexer.ASYNC:
+		return p.parseAsyncFunctionDeclaration()
 	case lexer.RETURN:
 		return p.parseReturnStatement()
 	case lexer.LOCAL, lexer.CONST:

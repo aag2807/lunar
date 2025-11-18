@@ -2600,6 +2600,8 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 		return c.checkSpreadExpression(node)
 	case *ast.TypeAssertion:
 		return c.checkTypeAssertion(node)
+	case *ast.AwaitExpression:
+		return c.checkAwaitExpression(node)
 	default:
 		return Any
 	}
@@ -3351,6 +3353,33 @@ func (c *Checker) checkTypeAssertion(node *ast.TypeAssertion) Type {
 
 	// Return the target type - that's what the assertion claims it is
 	return targetType
+}
+
+// checkAwaitExpression checks an await expression
+func (c *Checker) checkAwaitExpression(node *ast.AwaitExpression) Type {
+	// Check the expression being awaited
+	exprType := c.checkExpression(node.Expression)
+
+	// If it's a PromiseType, unwrap it
+	if promiseType, ok := exprType.(*PromiseType); ok {
+		return promiseType.ResolveType
+	}
+
+	// If it's a function that returns a Promise, unwrap the return type
+	if funcType, ok := exprType.(*FunctionType); ok {
+		if promiseType, ok := funcType.ReturnType.(*PromiseType); ok {
+			return promiseType.ResolveType
+		}
+	}
+
+	// Allow awaiting Any type
+	if exprType.Equals(Any) {
+		return Any
+	}
+
+	// Warn if awaiting a non-promise type (but still allow it)
+	// In Lua, you can coroutine.yield anything
+	return exprType
 }
 
 func (c *Checker) checkTemplateLiteral(node *ast.TemplateLiteral) Type {

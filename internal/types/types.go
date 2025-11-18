@@ -1063,6 +1063,34 @@ func (t *NamespaceType) GetMember(name string) (Type, bool) {
 	return nil, false
 }
 
+// PromiseType represents the return type of an async function (like Lua coroutine)
+type PromiseType struct {
+	ResolveType Type // The type that the promise resolves to
+}
+
+func (t *PromiseType) String() string {
+	return fmt.Sprintf("Promise<%s>", t.ResolveType.String())
+}
+func (t *PromiseType) Equals(other Type) bool {
+	otherPromise, ok := other.(*PromiseType)
+	if !ok {
+		return false
+	}
+	return t.ResolveType.Equals(otherPromise.ResolveType)
+}
+func (t *PromiseType) IsAssignableTo(other Type) bool {
+	if t.Equals(other) {
+		return true
+	}
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
+	return false
+}
+
 // EnumType represents an enum type
 type EnumType struct {
 	Name    string

@@ -67,6 +67,8 @@ const (
 	GET         = "get"
 	SET         = "set"
 	NAMESPACE   = "namespace"
+	ASYNC       = "async"
+	AWAIT       = "await"
 	FUNCTION    = "function"
 	LOCAL       = "local"
 	CONST       = "const"
@@ -132,6 +134,8 @@ var keywords = map[string]TokenType{
 	"get":         GET,
 	"set":         SET,
 	"namespace":   NAMESPACE,
+	"async":       ASYNC,
+	"await":       AWAIT,
 	"function":    FUNCTION,
 	"local":       LOCAL,
 	"const":       CONST,

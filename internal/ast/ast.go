@@ -559,7 +559,20 @@ type FunctionDeclaration struct {
 	Body          *BlockStatement
 	IsStatic      bool   // static method (when used in class)
 	IsAbstract    bool   // abstract method (when used in class)
+	IsAsync       bool   // async function (returns Promise/coroutine)
 	Visibility    string // visibility modifier: public, private, protected (when used in class)
+}
+
+// AwaitExpression represents an await expression for async operations
+type AwaitExpression struct {
+	Token      lexer.Token // 'await' token
+	Expression Expression  // the expression being awaited
+}
+
+func (ae *AwaitExpression) expressionNode()      {}
+func (ae *AwaitExpression) TokenLiteral() string { return ae.Token.Literal }
+func (ae *AwaitExpression) String() string {
+	return fmt.Sprintf("await %s", ae.Expression.String())
 }
 
 func (fd *FunctionDeclaration) statementNode()       {}
@@ -597,6 +610,7 @@ type FunctionExpression struct {
 	Parameters    []*Parameter
 	ReturnType    Expression
 	Body          *BlockStatement
+	IsAsync       bool              // async function expression
 }
 
 func (fe *FunctionExpression) expressionNode()      {}

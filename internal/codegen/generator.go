@@ -328,6 +328,13 @@ func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) s
 	// Body
 	g.indent++
 
+	// For async functions, wrap body in coroutine.create
+	if node.IsAsync {
+		output.WriteString(g.generateIndent())
+		output.WriteString("return coroutine.create(function()\n")
+		g.indent++
+	}
+
 	// If there's a rest parameter, pack the varargs into a table
 	if restParam != nil {
 		output.WriteString(g.generateIndent())
@@ -337,6 +344,14 @@ func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) s
 	for _, stmt := range node.Body.Statements {
 		output.WriteString(g.generateStatement(stmt))
 	}
+
+	// Close coroutine wrapper for async functions
+	if node.IsAsync {
+		g.indent--
+		output.WriteString(g.generateIndent())
+		output.WriteString("end)\n")
+	}
+
 	g.indent--
 
 	output.WriteString(g.generateIndent())
@@ -876,6 +891,9 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 	case *ast.TypeAssertion:
 		// Type assertions are compile-time only, just return the expression
 		return g.generateExpression(node.Expression)
+	case *ast.AwaitExpression:
+		// Await translates to coroutine.resume for the coroutine
+		return fmt.Sprintf("coroutine.yield(%s)", g.generateExpression(node.Expression))
 	default:
 		return ""
 	}

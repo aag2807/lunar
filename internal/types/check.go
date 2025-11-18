@@ -203,11 +203,22 @@ type Checker struct {
 	typeAliases        map[string]Type
 	genericTypeAliases map[string]*GenericTypeAlias
 
+	// Module system
+	exports        map[string]Type // Tracks exported names and their types
+	modules        map[string]*ModuleInfo // Tracks loaded modules
+	currentModule  string // Current module being checked
+
 	// Current function return type (for checking return statements)
 	currentFunctionReturnType Type
 
 	// Current class context (for visibility checking)
 	currentClass *ClassType
+}
+
+// ModuleInfo represents information about a module
+type ModuleInfo struct {
+	Path    string
+	Exports map[string]Type
 }
 
 // NewChecker creates a new type checker
@@ -230,6 +241,9 @@ func NewChecker() *Checker {
 		enums:              make(map[string]*EnumType),
 		typeAliases:        make(map[string]Type),
 		genericTypeAliases: make(map[string]*GenericTypeAlias),
+		exports:            make(map[string]Type),
+		modules:            make(map[string]*ModuleInfo),
+		currentModule:      "",
 	}
 
 	// Load standard library declarations
@@ -2625,19 +2639,95 @@ func (c *Checker) addError(message string, token lexer.Token) {
 func (c *Checker) checkExportStatement(node *ast.ExportStatement) {
 	// Type check the underlying statement
 	c.checkStatement(node.Statement)
+
+	// Track what's being exported
+	switch stmt := node.Statement.(type) {
+	case *ast.VariableDeclaration:
+		// Export variables
+		for i, name := range stmt.Names {
+			var varType Type
+			if i < len(stmt.Types) && stmt.Types[i] != nil {
+				varType = c.resolveTypeExpression(stmt.Types[i])
+			} else if i < len(stmt.Values) && stmt.Values[i] != nil {
+				varType = c.checkExpression(stmt.Values[i])
+			} else {
+				varType = Any
+			}
+			c.exports[name.Value] = varType
+		}
+
+	case *ast.FunctionDeclaration:
+		// Export functions
+		funcType := c.getFunctionType(stmt)
+		c.exports[stmt.Name.Value] = funcType
+
+	case *ast.ClassDeclaration:
+		// Export classes
+		if classType, ok := c.classes[stmt.Name.Value]; ok {
+			c.exports[stmt.Name.Value] = classType
+		}
+
+	case *ast.InterfaceDeclaration:
+		// Export interfaces
+		if interfaceType, ok := c.interfaces[stmt.Name.Value]; ok {
+			c.exports[stmt.Name.Value] = interfaceType
+		}
+
+	case *ast.EnumDeclaration:
+		// Export enums
+		if enumType, ok := c.enums[stmt.Name.Value]; ok {
+			c.exports[stmt.Name.Value] = enumType
+		}
+
+	case *ast.TypeDeclaration:
+		// Export type aliases
+		if aliasType, ok := c.typeAliases[stmt.Name.Value]; ok {
+			c.exports[stmt.Name.Value] = aliasType
+		}
+		if genericAlias, ok := c.genericTypeAliases[stmt.Name.Value]; ok {
+			// Export generic type aliases as a special marker
+			c.exports[stmt.Name.Value] = &GenericType{
+				Name: genericAlias.Name,
+			}
+		}
+	}
 }
 
 // checkImportStatement checks an import statement
 func (c *Checker) checkImportStatement(node *ast.ImportStatement) {
-	// For now, we skip type checking imports since we don't have module resolution
-	// In a full implementation, we would:
-	// 1. Resolve the module path
-	// 2. Load the module's type information
-	// 3. Add the imported names to the environment with their types
+	// Try to load the module
+	moduleInfo, err := c.loadModule(node.Module)
+	if err != nil {
+		// Module not found - for now, just add names as 'any' type
+		// This allows for gradual typing and external modules
+		if node.IsWildcard {
+			// For wildcard imports, we can't add anything without knowing module exports
+			c.addError(fmt.Sprintf("Cannot resolve module '%s'", node.Module), node.Token)
+			return
+		}
 
-	// For now, just add imported names as 'any' type so they don't cause undefined variable errors
-	for _, name := range node.Names {
-		c.env.Set(name.Value, Any)
+		for _, name := range node.Names {
+			c.env.Set(name.Value, Any)
+		}
+		return
+	}
+
+	// Module loaded successfully - import the requested names
+	if node.IsWildcard {
+		// Import all exports
+		for name, typ := range moduleInfo.Exports {
+			c.env.Set(name, typ)
+		}
+	} else {
+		// Import specific names
+		for _, name := range node.Names {
+			if typ, ok := moduleInfo.Exports[name.Value]; ok {
+				c.env.Set(name.Value, typ)
+			} else {
+				c.addError(fmt.Sprintf("Module '%s' does not export '%s'", node.Module, name.Value), name.Token)
+				c.env.Set(name.Value, Any) // Add as 'any' to prevent cascading errors
+			}
+		}
 	}
 }
 
@@ -2698,4 +2788,97 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 func Check(statements []ast.Statement) []*TypeError {
 	checker := NewChecker()
 	return checker.Check(statements)
+}
+
+// loadModule loads a module and returns its type information
+func (c *Checker) loadModule(modulePath string) (*ModuleInfo, error) {
+	// Check if module is already loaded
+	if mod, ok := c.modules[modulePath]; ok {
+		return mod, nil
+	}
+
+	// Try to find and parse the module file
+	// Support both relative and absolute paths
+	possiblePaths := []string{
+		modulePath,
+		modulePath + ".lunar",
+		"./" + modulePath + ".lunar",
+		"./" + modulePath,
+	}
+
+	var moduleFile string
+	var found bool
+	for _, path := range possiblePaths {
+		if _, err := os.Stat(path); err == nil {
+			moduleFile = path
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return nil, fmt.Errorf("module not found: %s", modulePath)
+	}
+
+	// Parse the module file
+	source, err := os.ReadFile(moduleFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read module: %w", err)
+	}
+
+	l := lexer.New(string(source))
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		return nil, fmt.Errorf("parse errors in module %s", modulePath)
+	}
+
+	// Create a new checker for the module
+	moduleChecker := NewChecker()
+	moduleChecker.currentModule = modulePath
+
+	// Check the module and collect exports
+	for _, stmt := range statements {
+		moduleChecker.checkStatement(stmt)
+	}
+
+	// Store module info
+	moduleInfo := &ModuleInfo{
+		Path:    modulePath,
+		Exports: moduleChecker.exports,
+	}
+	c.modules[modulePath] = moduleInfo
+
+	return moduleInfo, nil
+}
+
+// getFunctionType extracts the function type from a function declaration
+func (c *Checker) getFunctionType(stmt *ast.FunctionDeclaration) Type {
+	paramTypes := make([]Type, 0, len(stmt.Parameters))
+	for _, param := range stmt.Parameters {
+		if param.Type != nil {
+			paramTypes = append(paramTypes, c.resolveTypeExpression(param.Type))
+		} else {
+			paramTypes = append(paramTypes, Any)
+		}
+	}
+
+	var returnType Type
+	if stmt.ReturnType != nil {
+		returnType = c.resolveTypeExpression(stmt.ReturnType)
+	} else {
+		returnType = Void
+	}
+
+	genericParams := make([]string, 0, len(stmt.GenericParams))
+	for _, gp := range stmt.GenericParams {
+		genericParams = append(genericParams, gp.Value)
+	}
+
+	return &FunctionType{
+		Parameters:    paramTypes,
+		ReturnType:    returnType,
+		GenericParams: genericParams,
+	}
 }

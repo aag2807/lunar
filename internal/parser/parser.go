@@ -770,6 +770,12 @@ func (p *Parser) parseType() ast.Expression {
 		// Number literal in type position (for literal types)
 		value, _ := strconv.ParseFloat(p.curToken.Literal, 64)
 		typeExpr = &ast.NumberLiteral{Token: p.curToken, Value: value}
+	case lexer.TRUE:
+		// Boolean literal type: true
+		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: true}
+	case lexer.FALSE:
+		// Boolean literal type: false
+		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: false}
 	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
 		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	default:
@@ -871,7 +877,8 @@ checkIntersection:
 			p.nextToken() // consume '&'
 			p.nextToken() // move to next type
 			// Parse the next type WITHOUT processing intersections or unions
-			nextType := p.parseNonUnionIntersectionType()
+			// skipOptional=false since parseTypeSuffix is called from normal parseType context
+			nextType := p.parseNonUnionIntersectionType(false)
 			if nextType != nil {
 				types = append(types, nextType)
 			}
@@ -891,7 +898,8 @@ checkIntersection:
 			p.nextToken() // move to next type
 			// Parse the next type WITHOUT processing unions
 			// But we DO process intersections, so A | B & C parses as A | (B & C)
-			nextType := p.parseNonUnionIntersectionType()
+			// skipOptional=false since parseTypeSuffix is called from normal parseType context
+			nextType := p.parseNonUnionIntersectionType(false)
 			// Check if this type has intersection suffix
 			if p.peekTokenIs(lexer.AMPERSAND) {
 				intersectionTypes := []ast.Expression{nextType}
@@ -899,7 +907,7 @@ checkIntersection:
 				for p.peekTokenIs(lexer.AMPERSAND) {
 					p.nextToken() // consume '&'
 					p.nextToken() // move to next type
-					intersectionMember := p.parseNonUnionIntersectionType()
+					intersectionMember := p.parseNonUnionIntersectionType(false)
 					if intersectionMember != nil {
 						intersectionTypes = append(intersectionTypes, intersectionMember)
 					}
@@ -927,26 +935,31 @@ checkIntersection:
 		p.nextToken() // move to extends type
 
 		// Parse the extends type (without allowing nested conditionals)
-		extendsType := p.parseSimpleTypeWithSuffixes()
+		// skipOptional=true to prevent consuming the ? that's part of the conditional syntax
+		extendsType := p.parseSimpleTypeWithSuffixes(true)
 
-		// Advance to the next token after the extends type
-		p.nextToken()
-
-		if !p.curTokenIs(lexer.QUESTION) {
+		// After parseSimpleTypeWithSuffixes, we're positioned at the last token
+		// of the extends type. We need to check if the NEXT token is ?
+		if !p.peekTokenIs(lexer.QUESTION) {
 			return nil
 		}
+		p.nextToken() // consume ?
 
 		p.nextToken() // move to true type
-		trueType := p.parseSimpleTypeWithSuffixes()
-		p.nextToken() // advance after true type
+		// Use parseType() to allow nested conditional types in true branch
+		trueType := p.parseType()
 
-		if !p.curTokenIs(lexer.COLON) {
+		if !p.peekTokenIs(lexer.COLON) {
 			return nil
 		}
+		p.nextToken() // consume :
 
 		p.nextToken() // move to false type
-		falseType := p.parseSimpleTypeWithSuffixes()
-		// Don't advance after false type - leave parser positioned correctly
+		// Use parseType() to allow nested conditional types in false branch
+		falseType := p.parseType()
+
+		// After parsing falseType, we're positioned correctly at its last token
+		// Don't advance further - let the caller handle positioning
 
 		// Get the token from checkType
 		var condToken lexer.Token
@@ -975,7 +988,8 @@ checkIntersection:
 
 // parseSimpleTypeWithSuffixes parses a type with all suffixes including union and intersection,
 // but NOT conditional types (to avoid infinite recursion in conditional type parsing)
-func (p *Parser) parseSimpleTypeWithSuffixes() ast.Expression {
+// skipOptional: if true, don't parse ? as optional type (used when parsing conditional type extends clause)
+func (p *Parser) parseSimpleTypeWithSuffixes(skipOptional bool) ast.Expression {
 	var typeExpr ast.Expression
 
 	switch p.curToken.Type {
@@ -992,6 +1006,10 @@ func (p *Parser) parseSimpleTypeWithSuffixes() ast.Expression {
 	case lexer.NUMBER:
 		value, _ := strconv.ParseFloat(p.curToken.Literal, 64)
 		typeExpr = &ast.NumberLiteral{Token: p.curToken, Value: value}
+	case lexer.TRUE:
+		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: true}
+	case lexer.FALSE:
+		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: false}
 	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
 		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	default:
@@ -1049,7 +1067,7 @@ func (p *Parser) parseSimpleTypeWithSuffixes() ast.Expression {
 				TypeArguments: typeArgs,
 			}
 
-		case p.peekTokenIs(lexer.QUESTION):
+		case p.peekTokenIs(lexer.QUESTION) && !skipOptional:
 			p.nextToken()
 			currentType = &ast.OptionalType{
 				Token: p.curToken,
@@ -1069,7 +1087,8 @@ checkIntersection:
 		for p.peekTokenIs(lexer.AMPERSAND) {
 			p.nextToken() // consume '&'
 			p.nextToken() // move to next type
-			nextType := p.parseNonUnionIntersectionType()
+			// Pass through skipOptional parameter
+			nextType := p.parseNonUnionIntersectionType(skipOptional)
 			if nextType != nil {
 				types = append(types, nextType)
 			}
@@ -1087,7 +1106,8 @@ checkIntersection:
 		for p.peekTokenIs(lexer.PIPE) {
 			p.nextToken() // consume '|'
 			p.nextToken() // move to next type
-			nextType := p.parseNonUnionIntersectionType()
+			// Pass through skipOptional parameter
+			nextType := p.parseNonUnionIntersectionType(skipOptional)
 			// Check for intersection in this union member
 			if p.peekTokenIs(lexer.AMPERSAND) {
 				intersectionTypes := []ast.Expression{nextType}
@@ -1095,7 +1115,7 @@ checkIntersection:
 				for p.peekTokenIs(lexer.AMPERSAND) {
 					p.nextToken() // consume '&'
 					p.nextToken() // move to next type
-					intersectionMember := p.parseNonUnionIntersectionType()
+					intersectionMember := p.parseNonUnionIntersectionType(skipOptional)
 					if intersectionMember != nil {
 						intersectionTypes = append(intersectionTypes, intersectionMember)
 					}
@@ -1120,7 +1140,8 @@ checkIntersection:
 
 // parseNonUnionIntersectionType parses a type with all suffixes EXCEPT union and intersection types
 // This is used when parsing union/intersection members to avoid nested structures
-func (p *Parser) parseNonUnionIntersectionType() ast.Expression {
+// skipOptional: if true, don't parse ? as optional type (used when parsing conditional type extends clause)
+func (p *Parser) parseNonUnionIntersectionType(skipOptional bool) ast.Expression {
 	var typeExpr ast.Expression
 
 	switch p.curToken.Type {
@@ -1137,6 +1158,10 @@ func (p *Parser) parseNonUnionIntersectionType() ast.Expression {
 		// Number literal in type position (for literal types)
 		value, _ := strconv.ParseFloat(p.curToken.Literal, 64)
 		typeExpr = &ast.NumberLiteral{Token: p.curToken, Value: value}
+	case lexer.TRUE:
+		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: true}
+	case lexer.FALSE:
+		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: false}
 	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
 		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	default:
@@ -1183,7 +1208,7 @@ func (p *Parser) parseNonUnionIntersectionType() ast.Expression {
 				TypeArguments: typeArgs,
 			}
 
-		case p.peekTokenIs(lexer.QUESTION):
+		case p.peekTokenIs(lexer.QUESTION) && !skipOptional:
 			// Optional type: T?
 			p.nextToken() // consume '?'
 			currentType = &ast.OptionalType{

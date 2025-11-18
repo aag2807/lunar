@@ -293,6 +293,54 @@ func (t *NumberLiteralType) IsAssignableTo(other Type) bool {
 	return false
 }
 
+// BooleanLiteralType represents a specific boolean value as a type (true or false)
+type BooleanLiteralType struct {
+	Value bool
+}
+
+func (t *BooleanLiteralType) String() string {
+	if t.Value {
+		return "true"
+	}
+	return "false"
+}
+func (t *BooleanLiteralType) Equals(other Type) bool {
+	otherLiteral, ok := other.(*BooleanLiteralType)
+	if !ok {
+		return false
+	}
+	return t.Value == otherLiteral.Value
+}
+func (t *BooleanLiteralType) IsAssignableTo(other Type) bool {
+	if t.Equals(other) {
+		return true
+	}
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
+	// Boolean literal is assignable to boolean type
+	if _, isBoolean := other.(*BooleanType); isBoolean {
+		return true
+	}
+	// Check if other is a union type that contains this literal OR the base boolean type
+	if unionType, isUnion := other.(*UnionType); isUnion {
+		// First check if the literal itself is in the union
+		if unionType.Contains(t) {
+			return true
+		}
+		// Then check if the base boolean type is in the union
+		for _, ut := range unionType.Types {
+			if _, isBoolean := ut.(*BooleanType); isBoolean {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // AnyType represents the any type (accepts all types)
 type AnyType struct{}
 

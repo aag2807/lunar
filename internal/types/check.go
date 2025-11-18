@@ -890,6 +890,10 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		// Number literal in type position becomes a literal type
 		return &NumberLiteralType{Value: node.Value}
 
+	case *ast.BooleanLiteral:
+		// Boolean literal in type position becomes a literal type
+		return &BooleanLiteralType{Value: node.Value}
+
 	case *ast.TypeGuardType:
 		// Type guard like "value is string"
 		// Returns a special TypeGuardType that acts like boolean but carries guard info

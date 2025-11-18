@@ -757,6 +757,9 @@ func (p *Parser) parseType() ast.Expression {
 	case lexer.TABLE:
 		// table<K, V>
 		typeExpr = p.parseTableType()
+	case lexer.KEYOF:
+		// keyof T
+		return p.parseKeyofType()
 	case lexer.STRING:
 		// String literal in type position (for literal types)
 		typeExpr = &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
@@ -1011,6 +1014,22 @@ func (p *Parser) parseTableType() ast.Expression {
 		Token:     tableToken,
 		KeyType:   keyType,
 		ValueType: valueType,
+	}
+}
+
+func (p *Parser) parseKeyofType() ast.Expression {
+	keyofToken := p.curToken
+
+	p.nextToken() // move to the object type
+	objectType := p.parseType()
+
+	if objectType == nil {
+		return nil
+	}
+
+	return &ast.KeyofType{
+		Token:      keyofToken,
+		ObjectType: objectType,
 	}
 }
 

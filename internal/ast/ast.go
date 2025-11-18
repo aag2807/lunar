@@ -319,6 +319,17 @@ func (tt *TableType) String() string {
 	return fmt.Sprintf("table<%s, %s>", tt.KeyType.String(), tt.ValueType.String())
 }
 
+type KeyofType struct {
+	Token      lexer.Token // 'keyof' token
+	ObjectType Expression  // The type to extract keys from
+}
+
+func (kt *KeyofType) expressionNode()      {}
+func (kt *KeyofType) TokenLiteral() string { return kt.Token.Literal }
+func (kt *KeyofType) String() string {
+	return fmt.Sprintf("keyof %s", kt.ObjectType.String())
+}
+
 type UnionType struct {
 	Token lexer.Token // '|' token
 	Types []Expression

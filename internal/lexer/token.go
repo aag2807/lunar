@@ -89,6 +89,7 @@ const (
 	DECLARE     = "declare"
 	IS          = "is" // for type guards: value is Type
 	AS          = "as" // for type assertions: value as Type
+	KEYOF       = "keyof" // for keyof operator: keyof T
 
 	//types
 	ANY         = "any"
@@ -152,6 +153,7 @@ var keywords = map[string]TokenType{
 	"declare":     DECLARE,
 	"is":          IS,
 	"as":          AS,
+	"keyof":       KEYOF,
 	"table":       TABLE,
 	"any":         ANY,
 	"string":      STRING_TYPE,

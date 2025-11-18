@@ -794,10 +794,164 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		objectType := c.resolveTypeExpression(node.ObjectType)
 		return c.resolveKeyof(objectType)
 
+	case *ast.IndexExpression:
+		// Indexed access type T[K]
+		objectType := c.resolveTypeExpression(node.Left)
+		indexType := c.resolveTypeExpression(node.Index)
+		return c.resolveIndexedAccess(objectType, indexType)
+
 	default:
 		c.addError(fmt.Sprintf("Cannot resolve type expression: %T", expr), lexer.Token{})
 		return Any
 	}
+}
+
+// resolveIndexedAccess resolves indexed access types like T[K]
+func (c *Checker) resolveIndexedAccess(objectType Type, indexType Type) Type {
+	switch obj := objectType.(type) {
+	case *ClassType:
+		// Handle class property access
+		return c.resolveClassIndexedAccess(obj, indexType)
+
+	case *InterfaceType:
+		// Handle interface property access
+		return c.resolveInterfaceIndexedAccess(obj, indexType)
+
+	case *ArrayType:
+		// Array[number] or Array[0] returns element type
+		return obj.ElementType
+
+	case *TupleType:
+		// Tuple[number literal] returns type at that index
+		if numLiteral, ok := indexType.(*NumberLiteralType); ok {
+			index := int(numLiteral.Value)
+			if index >= 0 && index < len(obj.Elements) {
+				return obj.Elements[index]
+			}
+			return Any
+		}
+		// Tuple[number] returns union of all element types
+		if _, ok := indexType.(*NumberType); ok {
+			return &UnionType{Types: obj.Elements}
+		}
+		return Any
+
+	case *TableType:
+		// Table<K, V>[K] returns V
+		return obj.ValueType
+
+	default:
+		// For other types, indexed access returns any
+		return Any
+	}
+}
+
+// resolveClassIndexedAccess resolves T[K] where T is a class type
+func (c *Checker) resolveClassIndexedAccess(classType *ClassType, indexType Type) Type {
+	// Handle string literal index
+	if strLiteral, ok := indexType.(*StringLiteralType); ok {
+		// Check properties
+		if propType, ok := classType.Properties[strLiteral.Value]; ok {
+			return propType
+		}
+		// Check methods
+		if methodType, ok := classType.Methods[strLiteral.Value]; ok {
+			return methodType
+		}
+		return Any
+	}
+
+	// Handle union of string literals
+	if unionType, ok := indexType.(*UnionType); ok {
+		var types []Type
+		for _, t := range unionType.Types {
+			propType := c.resolveClassIndexedAccess(classType, t)
+			if propType != Any {
+				types = append(types, propType)
+			}
+		}
+		if len(types) == 0 {
+			return Any
+		}
+		if len(types) == 1 {
+			return types[0]
+		}
+		return &UnionType{Types: types}
+	}
+
+	// For string type, return union of all property types
+	if _, ok := indexType.(*StringType); ok {
+		var types []Type
+		for _, propType := range classType.Properties {
+			types = append(types, propType)
+		}
+		for _, methodType := range classType.Methods {
+			types = append(types, methodType)
+		}
+		if len(types) == 0 {
+			return Never
+		}
+		if len(types) == 1 {
+			return types[0]
+		}
+		return &UnionType{Types: types}
+	}
+
+	return Any
+}
+
+// resolveInterfaceIndexedAccess resolves T[K] where T is an interface type
+func (c *Checker) resolveInterfaceIndexedAccess(interfaceType *InterfaceType, indexType Type) Type {
+	// Handle string literal index
+	if strLiteral, ok := indexType.(*StringLiteralType); ok {
+		// Check properties
+		if propType, ok := interfaceType.Properties[strLiteral.Value]; ok {
+			return propType
+		}
+		// Check methods
+		if methodType, ok := interfaceType.Methods[strLiteral.Value]; ok {
+			return methodType
+		}
+		return Any
+	}
+
+	// Handle union of string literals
+	if unionType, ok := indexType.(*UnionType); ok {
+		var types []Type
+		for _, t := range unionType.Types {
+			propType := c.resolveInterfaceIndexedAccess(interfaceType, t)
+			if propType != Any {
+				types = append(types, propType)
+			}
+		}
+		if len(types) == 0 {
+			return Any
+		}
+		if len(types) == 1 {
+			return types[0]
+		}
+		return &UnionType{Types: types}
+	}
+
+	// For string type, return union of all property types
+	if _, ok := indexType.(*StringType); ok {
+		var types []Type
+		for _, propType := range interfaceType.Properties {
+			types = append(types, propType)
+		}
+		for _, methodType := range interfaceType.Methods {
+			types = append(types, methodType)
+		}
+		if len(types) == 0 {
+			return Never
+		}
+		if len(types) == 1 {
+			return types[0]
+		}
+		return &UnionType{Types: types}
+	}
+
+	return Any
 }
 
 // resolveKeyof extracts keys from an object type and returns a union of string literals

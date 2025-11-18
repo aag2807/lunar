@@ -798,14 +798,27 @@ func (p *Parser) parseTypeSuffix(baseType ast.Expression) ast.Expression {
 	for {
 		switch {
 		case p.peekTokenIs(lexer.LBRACKET):
-			// Array type: T[]
+			// Could be array type T[] or indexed access type T[K]
 			p.nextToken() // consume '['
-			if !p.expectPeek(lexer.RBRACKET) {
-				return nil
-			}
-			currentType = &ast.ArrayType{
-				Token:       baseType.(*ast.Identifier).Token,
-				ElementType: currentType,
+			p.nextToken() // move to content or ']'
+
+			if p.curTokenIs(lexer.RBRACKET) {
+				// Empty brackets: T[] is array type
+				currentType = &ast.ArrayType{
+					Token:       baseType.(*ast.Identifier).Token,
+					ElementType: currentType,
+				}
+			} else {
+				// Non-empty brackets: T[K] is indexed access type
+				indexType := p.parseType()
+				if !p.expectPeek(lexer.RBRACKET) {
+					return nil
+				}
+				currentType = &ast.IndexExpression{
+					Token: p.curToken,
+					Left:  currentType,
+					Index: indexType,
+				}
 			}
 
 		case p.peekTokenIs(lexer.LT):

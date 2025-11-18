@@ -632,6 +632,10 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 			return Any
 		case "void":
 			return Void
+		case "never":
+			return Never
+		case "unknown":
+			return Unknown
 		}
 
 		// Check for user-defined types
@@ -785,10 +789,64 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		baseType := c.resolveTypeExpression(node.Type)
 		return &UnionType{Types: []Type{baseType, Nil}}
 
+	case *ast.KeyofType:
+		// keyof T returns a union of string literal types of T's keys
+		objectType := c.resolveTypeExpression(node.ObjectType)
+		return c.resolveKeyof(objectType)
+
 	default:
 		c.addError(fmt.Sprintf("Cannot resolve type expression: %T", expr), lexer.Token{})
 		return Any
 	}
+}
+
+// resolveKeyof extracts keys from an object type and returns a union of string literals
+func (c *Checker) resolveKeyof(objectType Type) Type {
+	var keys []Type
+
+	switch t := objectType.(type) {
+	case *ClassType:
+		// Extract property names from class
+		for propName := range t.Properties {
+			keys = append(keys, &StringLiteralType{Value: propName})
+		}
+		for methodName := range t.Methods {
+			keys = append(keys, &StringLiteralType{Value: methodName})
+		}
+
+	case *InterfaceType:
+		// Extract property names from interface
+		for propName := range t.Properties {
+			keys = append(keys, &StringLiteralType{Value: propName})
+		}
+		for methodName := range t.Methods {
+			keys = append(keys, &StringLiteralType{Value: methodName})
+		}
+
+	case *TableType:
+		// For table types, keyof returns the key type
+		return t.KeyType
+
+	case *TupleType:
+		// For tuples, return numeric literal types for indices
+		for i := range t.Elements {
+			keys = append(keys, &NumberLiteralType{Value: float64(i)})
+		}
+
+	default:
+		// For other types, keyof returns never (no keys)
+		return Never
+	}
+
+	if len(keys) == 0 {
+		return Never
+	}
+
+	if len(keys) == 1 {
+		return keys[0]
+	}
+
+	return &UnionType{Types: keys}
 }
 
 // substituteTypeParams substitutes type parameters in a type expression

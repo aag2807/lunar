@@ -1143,3 +1143,34 @@ func (t *UnknownType) IsAssignableTo(other Type) bool {
 	}
 	return false
 }
+
+// KeyofType represents the keyof operator result
+// keyof T returns a union of string literal types representing the keys of T
+type KeyofType struct {
+	ObjectType Type
+}
+
+func (t *KeyofType) String() string {
+	return fmt.Sprintf("keyof %s", t.ObjectType.String())
+}
+func (t *KeyofType) Equals(other Type) bool {
+	otherKeyof, ok := other.(*KeyofType)
+	if !ok {
+		return false
+	}
+	return t.ObjectType.Equals(otherKeyof.ObjectType)
+}
+func (t *KeyofType) IsAssignableTo(other Type) bool {
+	if t.Equals(other) {
+		return true
+	}
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
+	// keyof resolves to a union of string literals, check if that's assignable
+	// This would require resolving the keyof first, which happens during type checking
+	return false
+}

@@ -239,6 +239,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Configurable rules and severity levels
   - Example: `lunar --lint myfile.lunar`
 
+- **Language Server Protocol (LSP)**
+  - Separate `lunar-lsp` binary for IDE/editor integration
+  - Diagnostics: Real-time type errors and parse errors
+  - Hover: Type information on hover
+  - Go to Definition: Jump to symbol definitions
+  - Auto-completion: Context-aware completions for variables, functions, classes, and keywords
+  - Document synchronization: Full text sync with open/change/close support
+  - JSON-RPC over stdio communication
+
 ### Added - Comprehensive Tests
 
 - Method overloading tests (11 test cases)
@@ -260,17 +269,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - Future (v2.0+)
 
 ### Planned
-- Language Server Protocol (LSP) implementation for IDE support
 - Package manager integration
-- Code formatter tool
 - Watch mode for continuous compilation
 - Incremental compilation
+- More LSP features (find references, rename, code actions)
 
 ---
 
 ## Version History
 
-- **1.3.0** (2025-11-18) - Method overloading, constructor parameter properties, code formatter, linter
+- **1.3.0** (2025-11-18) - Method overloading, constructor parameter properties, code formatter, linter, LSP
 - **1.2.0** (2025-11-13) - "Did you mean?" suggestions, additional stdlib (coroutine, debug, package), integration tests
 - **1.1.0** (2025-11-13) - Context-aware keywords, source maps, complete stdlib support
 - **1.0.0** (2024-11-10) - Initial release with complete type system, OOP, generics, stdlib declarations, and tooling

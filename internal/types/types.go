@@ -13,6 +13,14 @@ type Type interface {
 	IsAssignableTo(other Type) bool
 }
 
+// TypeString returns the string representation of a type
+func TypeString(t Type) string {
+	if t == nil {
+		return "unknown"
+	}
+	return t.String()
+}
+
 // Basic Types
 
 // NumberType represents the number type

@@ -98,6 +98,25 @@ func (e *Environment) GetAllNames() []string {
 	return names
 }
 
+// GetAll returns all type bindings in this environment and outer scopes
+func (e *Environment) GetAll() map[string]Type {
+	result := make(map[string]Type)
+
+	// Collect from outer scopes first (so inner scopes override)
+	if e.outer != nil {
+		for name, typ := range e.outer.GetAll() {
+			result[name] = typ
+		}
+	}
+
+	// Collect from current scope (overrides outer)
+	for name, typ := range e.store {
+		result[name] = typ
+	}
+
+	return result
+}
+
 // levenshteinDistance calculates the edit distance between two strings
 // Used for "Did you mean?" suggestions
 func levenshteinDistance(s1, s2 string) int {
@@ -345,6 +364,11 @@ func (c *Checker) Check(statements []ast.Statement) []*TypeError {
 	}
 
 	return c.errors
+}
+
+// GetEnv returns the type environment for LSP integration
+func (c *Checker) GetEnv() *Environment {
+	return c.env
 }
 
 // registerTypeDefinition registers classes, interfaces, enums, and type aliases

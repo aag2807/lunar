@@ -11,8 +11,11 @@ import (
 	"lunar/internal/parser"
 	"lunar/internal/types"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 )
 
 const version = "1.2.0"
@@ -25,6 +28,8 @@ func main() {
 	showVersion := flag.Bool("version", false, "Show version information")
 	showHelp := flag.Bool("help", false, "Show help message")
 	replMode := flag.Bool("repl", false, "Start interactive REPL mode")
+	watchMode := flag.Bool("watch", false, "Watch files for changes and recompile")
+	watchInterval := flag.Int("watch-interval", 500, "Watch interval in milliseconds")
 
 	flag.Parse()
 
@@ -74,15 +79,20 @@ func main() {
 		output = strings.TrimSuffix(inputFile, ".lunar") + ".lua"
 	}
 
-	// Compile the file
-	if err := compile(inputFile, output, !*noTypeCheck, *sourceMap); err != nil {
-		fmt.Fprintf(os.Stderr, "Compilation failed:\n%v\n", err)
-		os.Exit(1)
-	}
+	// Watch mode or single compilation
+	if *watchMode {
+		runWatchMode(inputFile, output, !*noTypeCheck, *sourceMap, *watchInterval)
+	} else {
+		// Compile the file
+		if err := compile(inputFile, output, !*noTypeCheck, *sourceMap); err != nil {
+			fmt.Fprintf(os.Stderr, "Compilation failed:\n%v\n", err)
+			os.Exit(1)
+		}
 
-	fmt.Printf("Successfully compiled %s -> %s\n", inputFile, output)
-	if *sourceMap {
-		fmt.Printf("Source map: %s.map\n", output)
+		fmt.Printf("Successfully compiled %s -> %s\n", inputFile, output)
+		if *sourceMap {
+			fmt.Printf("Source map: %s.map\n", output)
+		}
 	}
 }
 
@@ -256,6 +266,57 @@ func formatTypeErrors(filename string, source string, errors []*types.TypeError)
 	return fmt.Errorf("%s", sb.String())
 }
 
+// runWatchMode watches files for changes and recompiles automatically
+func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap bool, intervalMs int) {
+	fmt.Printf("Watching %s for changes (Ctrl+C to stop)\n", inputFile)
+
+	// Get initial modification time
+	lastModTime := getFileModTime(inputFile)
+
+	// Initial compilation
+	if err := compile(inputFile, outputFile, typeCheck, generateSourceMap); err != nil {
+		fmt.Fprintf(os.Stderr, "[%s] Compilation failed:\n%v\n", time.Now().Format("15:04:05"), err)
+	} else {
+		fmt.Printf("[%s] Successfully compiled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
+	}
+
+	// Handle interrupt signal for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Watch loop
+	ticker := time.NewTicker(time.Duration(intervalMs) * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-sigChan:
+			fmt.Println("\nStopping watch mode...")
+			return
+		case <-ticker.C:
+			currentModTime := getFileModTime(inputFile)
+			if !currentModTime.Equal(lastModTime) {
+				lastModTime = currentModTime
+				fmt.Printf("[%s] File changed, recompiling...\n", time.Now().Format("15:04:05"))
+				if err := compile(inputFile, outputFile, typeCheck, generateSourceMap); err != nil {
+					fmt.Fprintf(os.Stderr, "[%s] Compilation failed:\n%v\n", time.Now().Format("15:04:05"), err)
+				} else {
+					fmt.Printf("[%s] Successfully compiled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
+				}
+			}
+		}
+	}
+}
+
+// getFileModTime returns the modification time of a file
+func getFileModTime(filename string) time.Time {
+	info, err := os.Stat(filename)
+	if err != nil {
+		return time.Time{}
+	}
+	return info.ModTime()
+}
+
 // printHelp prints help information
 func printHelp() {
 	fmt.Println("Lunar - A statically-typed superset of Lua")
@@ -265,18 +326,21 @@ func printHelp() {
 	fmt.Println("  lunar --repl")
 	fmt.Println()
 	fmt.Println("Options:")
-	fmt.Println("  -o <file>        Output file (default: replaces .lunar with .lua)")
-	fmt.Println("  --no-typecheck   Skip type checking")
-	fmt.Println("  --source-map     Generate source map (.lua.map file)")
-	fmt.Println("  --repl           Start interactive REPL mode")
-	fmt.Println("  --version        Show version information")
-	fmt.Println("  --help           Show this help message")
+	fmt.Println("  -o <file>           Output file (default: replaces .lunar with .lua)")
+	fmt.Println("  --no-typecheck      Skip type checking")
+	fmt.Println("  --source-map        Generate source map (.lua.map file)")
+	fmt.Println("  --watch             Watch files for changes and recompile")
+	fmt.Println("  --watch-interval    Watch interval in ms (default: 500)")
+	fmt.Println("  --repl              Start interactive REPL mode")
+	fmt.Println("  --version           Show version information")
+	fmt.Println("  --help              Show this help message")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  lunar main.lunar")
 	fmt.Println("  lunar main.lunar -o output.lua")
 	fmt.Println("  lunar main.lunar --no-typecheck")
 	fmt.Println("  lunar main.lunar --source-map")
+	fmt.Println("  lunar main.lunar --watch")
 	fmt.Println("  lunar --repl")
 	fmt.Println()
 	fmt.Println("For more information about the Lunar language:")

@@ -248,10 +248,22 @@ func NewChecker() *Checker {
 		currentModule:      "",
 	}
 
+	// Register built-in utility types
+	checker.registerUtilityTypes()
+
 	// Load standard library declarations
 	checker.loadStdlib()
 
 	return checker
+}
+
+// registerUtilityTypes registers built-in utility types like Exclude, Extract, etc.
+func (c *Checker) registerUtilityTypes() {
+	// These will be handled specially in resolveTypeExpression when instantiated
+	// We just mark them as existing so they can be referenced
+	c.env.Set("Exclude", Any)  // Exclude<T, U>
+	c.env.Set("Extract", Any)  // Extract<T, U>
+	c.env.Set("NonNullable", Any) // NonNullable<T>
 }
 
 // loadStdlib loads the Lua standard library type definitions
@@ -742,12 +754,36 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 			}
 		}
 
-		// Not a generic type alias, check for generic classes/functions
+		// Check for built-in utility types
 		if baseIdent, ok := node.BaseType.(*ast.Identifier); ok {
 			// Resolve type arguments
 			typeArgs := make([]Type, len(node.TypeArguments))
 			for i, arg := range node.TypeArguments {
 				typeArgs[i] = c.resolveTypeExpression(arg)
+			}
+
+			// Handle utility types
+			switch baseIdent.Value {
+			case "Exclude":
+				if len(typeArgs) != 2 {
+					c.addError("Exclude<T, U> expects 2 type arguments", lexer.Token{})
+					return Any
+				}
+				return c.excludeTypes(typeArgs[0], typeArgs[1])
+
+			case "Extract":
+				if len(typeArgs) != 2 {
+					c.addError("Extract<T, U> expects 2 type arguments", lexer.Token{})
+					return Any
+				}
+				return c.extractTypes(typeArgs[0], typeArgs[1])
+
+			case "NonNullable":
+				if len(typeArgs) != 1 {
+					c.addError("NonNullable<T> expects 1 type argument", lexer.Token{})
+					return Any
+				}
+				return c.nonNullable(typeArgs[0])
 			}
 
 			// Check if it's a generic class
@@ -952,6 +988,89 @@ func (c *Checker) resolveInterfaceIndexedAccess(interfaceType *InterfaceType, in
 	}
 
 	return Any
+}
+
+// excludeTypes implements Exclude<T, U> utility type
+// Removes all types from T that are assignable to U
+func (c *Checker) excludeTypes(t Type, u Type) Type {
+	// If T is a union, filter out types assignable to U
+	if unionType, ok := t.(*UnionType); ok {
+		var remaining []Type
+		for _, member := range unionType.Types {
+			if !member.IsAssignableTo(u) {
+				remaining = append(remaining, member)
+			}
+		}
+		if len(remaining) == 0 {
+			return Never
+		}
+		if len(remaining) == 1 {
+			return remaining[0]
+		}
+		return &UnionType{Types: remaining}
+	}
+
+	// If T is not a union, check if it's assignable to U
+	if t.IsAssignableTo(u) {
+		return Never
+	}
+	return t
+}
+
+// extractTypes implements Extract<T, U> utility type
+// Keeps only types from T that are assignable to U
+func (c *Checker) extractTypes(t Type, u Type) Type {
+	// If T is a union, keep only types assignable to U
+	if unionType, ok := t.(*UnionType); ok {
+		var extracted []Type
+		for _, member := range unionType.Types {
+			if member.IsAssignableTo(u) {
+				extracted = append(extracted, member)
+			}
+		}
+		if len(extracted) == 0 {
+			return Never
+		}
+		if len(extracted) == 1 {
+			return extracted[0]
+		}
+		return &UnionType{Types: extracted}
+	}
+
+	// If T is not a union, check if it's assignable to U
+	if t.IsAssignableTo(u) {
+		return t
+	}
+	return Never
+}
+
+// nonNullable implements NonNullable<T> utility type
+// Removes nil and undefined from T
+func (c *Checker) nonNullable(t Type) Type {
+	// If T is a union, remove nil
+	if unionType, ok := t.(*UnionType); ok {
+		var nonNull []Type
+		for _, member := range unionType.Types {
+			if _, isNil := member.(*NilType); !isNil {
+				nonNull = append(nonNull, member)
+			}
+		}
+		if len(nonNull) == 0 {
+			return Never
+		}
+		if len(nonNull) == 1 {
+			return nonNull[0]
+		}
+		return &UnionType{Types: nonNull}
+	}
+
+	// If T is nil, return never
+	if _, isNil := t.(*NilType); isNil {
+		return Never
+	}
+
+	// Otherwise return T as is
+	return t
 }
 
 // resolveKeyof extracts keys from an object type and returns a union of string literals

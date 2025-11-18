@@ -387,6 +387,10 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		Implements:          []*InterfaceType{},
 		IsAbstract:          node.IsAbstract,
 		GenericParams:       genericParams,
+		Getters:             make(map[string]*FunctionType),
+		Setters:             make(map[string]*FunctionType),
+		GetterVisibility:    make(map[string]string),
+		SetterVisibility:    make(map[string]string),
 	}
 
 	// Add generic type parameters to scope temporarily
@@ -476,6 +480,50 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 			visibility = "public"
 		}
 		classType.MethodVisibility[methodName] = visibility
+	}
+
+	// Register getters
+	for _, getter := range node.Getters {
+		var returnType Type = Any
+		if getter.ReturnType != nil {
+			returnType = c.resolveTypeExpression(getter.ReturnType)
+		}
+		funcType := &FunctionType{
+			Parameters:    []Type{}, // Getters have no parameters
+			ReturnType:    returnType,
+			GenericParams: []string{},
+		}
+		getterName := getter.Name.Value
+		classType.Getters[getterName] = funcType
+
+		// Track getter visibility (default to public if not specified)
+		visibility := getter.Visibility
+		if visibility == "" {
+			visibility = "public"
+		}
+		classType.GetterVisibility[getterName] = visibility
+	}
+
+	// Register setters
+	for _, setter := range node.Setters {
+		var paramType Type = Any
+		if setter.Parameter != nil && setter.Parameter.Type != nil {
+			paramType = c.resolveTypeExpression(setter.Parameter.Type)
+		}
+		funcType := &FunctionType{
+			Parameters:    []Type{paramType},
+			ReturnType:    Void, // Setters return void
+			GenericParams: []string{},
+		}
+		setterName := setter.Name.Value
+		classType.Setters[setterName] = funcType
+
+		// Track setter visibility (default to public if not specified)
+		visibility := setter.Visibility
+		if visibility == "" {
+			visibility = "public"
+		}
+		classType.SetterVisibility[setterName] = visibility
 	}
 
 	// Register index signature if present
@@ -2249,6 +2297,73 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 
 		// Check method body
 		c.checkBlockStatement(method.Body)
+
+		c.env = prevEnv
+		c.currentFunctionReturnType = prevReturnType
+		c.currentClass = prevClass
+	}
+
+	// Check getters
+	for _, getter := range node.Getters {
+		prevEnv := c.env
+		prevReturnType := c.currentFunctionReturnType
+		prevClass := c.currentClass
+		c.env = NewEnclosedEnvironment(prevEnv)
+		c.currentClass = classType
+
+		// Add generic type parameters to scope
+		for _, genericParam := range node.GenericParams {
+			c.env.Set(genericParam.Value, Any)
+		}
+
+		// Get getter's return type
+		var returnType Type = Any
+		if getter.ReturnType != nil {
+			returnType = c.resolveTypeExpression(getter.ReturnType)
+		}
+		c.currentFunctionReturnType = returnType
+
+		// Add self to scope
+		c.env.Set("self", classType)
+
+		// Check getter body
+		c.checkBlockStatement(getter.Body)
+
+		c.env = prevEnv
+		c.currentFunctionReturnType = prevReturnType
+		c.currentClass = prevClass
+	}
+
+	// Check setters
+	for _, setter := range node.Setters {
+		prevEnv := c.env
+		prevReturnType := c.currentFunctionReturnType
+		prevClass := c.currentClass
+		c.env = NewEnclosedEnvironment(prevEnv)
+		c.currentClass = classType
+
+		// Add generic type parameters to scope
+		for _, genericParam := range node.GenericParams {
+			c.env.Set(genericParam.Value, Any)
+		}
+
+		// Setters return void
+		c.currentFunctionReturnType = Void
+
+		// Add self to scope
+		c.env.Set("self", classType)
+
+		// Add setter parameter to scope
+		if setter.Parameter != nil {
+			var paramType Type = Any
+			if setter.Parameter.Type != nil {
+				paramType = c.resolveTypeExpression(setter.Parameter.Type)
+			}
+			c.env.Set(setter.Parameter.Name.Value, paramType)
+		}
+
+		// Check setter body
+		c.checkBlockStatement(setter.Body)
 
 		c.env = prevEnv
 		c.currentFunctionReturnType = prevReturnType

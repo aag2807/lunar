@@ -774,6 +774,10 @@ type ClassType struct {
 	IsAbstract          bool                      // Whether class is abstract
 	GenericParams       []string                  // Generic type parameter names (e.g., ["T", "U"])
 	IndexSignature      *IndexSignature           // [key: KeyType]: ValueType
+	Getters             map[string]*FunctionType  // Property getters
+	Setters             map[string]*FunctionType  // Property setters
+	GetterVisibility    map[string]string         // Getter visibility
+	SetterVisibility    map[string]string         // Setter visibility
 }
 
 func (t *ClassType) String() string {

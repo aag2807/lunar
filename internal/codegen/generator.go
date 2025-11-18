@@ -633,6 +633,109 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 		output.WriteString("\n")
 	}
 
+	// Generate getters
+	for _, getter := range node.Getters {
+		output.WriteString(g.generateIndent())
+		output.WriteString(fmt.Sprintf("function %s:_get_%s()\n", className, getter.Name.Value))
+
+		g.indent++
+		if getter.Body != nil {
+			for _, stmt := range getter.Body.Statements {
+				output.WriteString(g.generateStatement(stmt))
+			}
+		}
+		g.indent--
+
+		output.WriteString(g.generateIndent())
+		output.WriteString("end\n")
+		output.WriteString("\n")
+	}
+
+	// Generate setters
+	for _, setter := range node.Setters {
+		output.WriteString(g.generateIndent())
+		paramName := "value"
+		if setter.Parameter != nil {
+			paramName = setter.Parameter.Name.Value
+		}
+		output.WriteString(fmt.Sprintf("function %s:_set_%s(%s)\n", className, setter.Name.Value, paramName))
+
+		g.indent++
+		if setter.Body != nil {
+			for _, stmt := range setter.Body.Statements {
+				output.WriteString(g.generateStatement(stmt))
+			}
+		}
+		g.indent--
+
+		output.WriteString(g.generateIndent())
+		output.WriteString("end\n")
+		output.WriteString("\n")
+	}
+
+	// Generate metamethod dispatching for getters/setters if any exist
+	if len(node.Getters) > 0 || len(node.Setters) > 0 {
+		// Generate __index metamethod for getters
+		if len(node.Getters) > 0 {
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("local %s_mt = getmetatable(%s) or {}\n", className, className))
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("%s_mt.__index = function(self, key)\n", className))
+			g.indent++
+
+			for _, getter := range node.Getters {
+				output.WriteString(g.generateIndent())
+				output.WriteString(fmt.Sprintf("if key == \"%s\" then\n", getter.Name.Value))
+				g.indent++
+				output.WriteString(g.generateIndent())
+				output.WriteString(fmt.Sprintf("return %s._get_%s(self)\n", className, getter.Name.Value))
+				g.indent--
+				output.WriteString(g.generateIndent())
+				output.WriteString("end\n")
+			}
+
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("return %s[key]\n", className))
+			g.indent--
+			output.WriteString(g.generateIndent())
+			output.WriteString("end\n")
+		}
+
+		// Generate __newindex metamethod for setters
+		if len(node.Setters) > 0 {
+			if len(node.Getters) == 0 {
+				output.WriteString(g.generateIndent())
+				output.WriteString(fmt.Sprintf("local %s_mt = getmetatable(%s) or {}\n", className, className))
+			}
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("%s_mt.__newindex = function(self, key, value)\n", className))
+			g.indent++
+
+			for _, setter := range node.Setters {
+				output.WriteString(g.generateIndent())
+				output.WriteString(fmt.Sprintf("if key == \"%s\" then\n", setter.Name.Value))
+				g.indent++
+				output.WriteString(g.generateIndent())
+				output.WriteString(fmt.Sprintf("%s._set_%s(self, value)\n", className, setter.Name.Value))
+				output.WriteString(g.generateIndent())
+				output.WriteString("return\n")
+				g.indent--
+				output.WriteString(g.generateIndent())
+				output.WriteString("end\n")
+			}
+
+			output.WriteString(g.generateIndent())
+			output.WriteString("rawset(self, key, value)\n")
+			g.indent--
+			output.WriteString(g.generateIndent())
+			output.WriteString("end\n")
+		}
+
+		output.WriteString(g.generateIndent())
+		output.WriteString(fmt.Sprintf("setmetatable(%s, %s_mt)\n", className, className))
+		output.WriteString("\n")
+	}
+
 	return output.String()
 }
 

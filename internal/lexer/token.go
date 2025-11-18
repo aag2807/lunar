@@ -64,6 +64,8 @@ const (
 	STATIC      = "static"
 	ABSTRACT    = "abstract"
 	READONLY    = "readonly"
+	GET         = "get"
+	SET         = "set"
 	FUNCTION    = "function"
 	LOCAL       = "local"
 	CONST       = "const"
@@ -126,6 +128,8 @@ var keywords = map[string]TokenType{
 	"static":      STATIC,
 	"abstract":    ABSTRACT,
 	"readonly":    READONLY,
+	"get":         GET,
+	"set":         SET,
 	"function":    FUNCTION,
 	"local":       LOCAL,
 	"const":       CONST,

@@ -1536,7 +1536,7 @@ func (p *Parser) peekTokenIs(t lexer.TokenType) bool {
 // Context-aware keyword helpers
 // These keywords can be used as type names OR as identifiers depending on context
 func (p *Parser) isContextualKeyword(t lexer.TokenType) bool {
-	return t == lexer.STRING_TYPE || t == lexer.TABLE || t == lexer.TYPE
+	return t == lexer.STRING_TYPE || t == lexer.TABLE || t == lexer.TYPE || t == lexer.GET || t == lexer.SET
 }
 
 func (p *Parser) curTokenIsIdentOrContextual() bool {
@@ -2151,6 +2151,50 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 			class.Constructor = p.parseConstructorDeclaration()
 			p.nextToken()
 
+		case lexer.GET:
+			// Check if it's a getter declaration (get name()) or a method named "get"
+			if p.peekTokenIs(lexer.LPAREN) {
+				// It's a method named "get"
+				method := p.parseMethodDeclaration(isAbstract)
+				method.IsStatic = isStatic
+				method.IsAbstract = isAbstract
+				method.Visibility = visibility
+				class.Methods = append(class.Methods, method)
+				if method.Body != nil && len(method.Body.Statements) > 0 {
+					p.nextToken()
+				}
+			} else {
+				// It's a getter declaration
+				getter := p.parseGetterDeclaration()
+				if getter != nil {
+					getter.Visibility = visibility
+					class.Getters = append(class.Getters, getter)
+					p.nextToken() // Advance past 'end'
+				}
+			}
+
+		case lexer.SET:
+			// Check if it's a setter declaration (set name(param)) or a method named "set"
+			if p.peekTokenIs(lexer.LPAREN) {
+				// It's a method named "set"
+				method := p.parseMethodDeclaration(isAbstract)
+				method.IsStatic = isStatic
+				method.IsAbstract = isAbstract
+				method.Visibility = visibility
+				class.Methods = append(class.Methods, method)
+				if method.Body != nil && len(method.Body.Statements) > 0 {
+					p.nextToken()
+				}
+			} else {
+				// It's a setter declaration
+				setter := p.parseSetterDeclaration()
+				if setter != nil {
+					setter.Visibility = visibility
+					class.Setters = append(class.Setters, setter)
+					p.nextToken() // Advance past 'end'
+				}
+			}
+
 		case lexer.IDENT, lexer.STRING_TYPE, lexer.TABLE, lexer.TYPE:
 			// Could be property or method
 			if p.peekTokenIs(lexer.COLON) {
@@ -2241,6 +2285,83 @@ func (p *Parser) parseConstructorDeclaration() *ast.ConstructorDeclaration {
 	constructor.Body = p.parseBlockStatement()
 
 	return constructor
+}
+
+func (p *Parser) parseGetterDeclaration() *ast.GetterDeclaration {
+	getter := &ast.GetterDeclaration{
+		Token: p.curToken, // 'get' token
+	}
+
+	// Parse property name
+	if !p.expectPeekIdentOrContextual() {
+		return nil
+	}
+	getter.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Expect empty parentheses
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+	if !p.expectPeek(lexer.RPAREN) {
+		return nil
+	}
+
+	// Parse return type
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+	p.nextToken() // move to return type
+	getter.ReturnType = p.parseType()
+
+	// Parse body
+	getter.Body = p.parseBlockStatement()
+
+	return getter
+}
+
+func (p *Parser) parseSetterDeclaration() *ast.SetterDeclaration {
+	setter := &ast.SetterDeclaration{
+		Token: p.curToken, // 'set' token
+	}
+
+	// Parse property name
+	if !p.expectPeekIdentOrContextual() {
+		return nil
+	}
+	setter.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Parse parameter
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+	if !p.expectPeekIdentOrContextual() {
+		return nil
+	}
+
+	paramName := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	var paramType ast.Expression
+
+	// Parse parameter type if present
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // consume ':'
+		p.nextToken() // move to type
+		paramType = p.parseType()
+	}
+
+	setter.Parameter = &ast.Parameter{
+		Token: paramName.Token,
+		Name:  paramName,
+		Type:  paramType,
+	}
+
+	if !p.expectPeek(lexer.RPAREN) {
+		return nil
+	}
+
+	// Parse body
+	setter.Body = p.parseBlockStatement()
+
+	return setter
 }
 
 func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {

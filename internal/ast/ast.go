@@ -805,6 +805,62 @@ type ClassDeclaration struct {
 	Implements     []Expression               // interface names
 	IndexSignature *IndexSignatureDeclaration // [key: KeyType]: ValueType
 	IsAbstract     bool                       // abstract class
+	Getters        []*GetterDeclaration       // property getters
+	Setters        []*SetterDeclaration       // property setters
+}
+
+// GetterDeclaration represents a property getter
+type GetterDeclaration struct {
+	Token      lexer.Token // 'get' token
+	Visibility string      // "public", "private", "protected"
+	Name       *Identifier // property name
+	ReturnType Expression  // return type
+	Body       *BlockStatement
+}
+
+func (gd *GetterDeclaration) statementNode()       {}
+func (gd *GetterDeclaration) TokenLiteral() string { return gd.Token.Literal }
+func (gd *GetterDeclaration) String() string {
+	var out strings.Builder
+	if gd.Visibility != "" {
+		out.WriteString(gd.Visibility)
+		out.WriteString(" ")
+	}
+	out.WriteString("get ")
+	out.WriteString(gd.Name.String())
+	out.WriteString("(): ")
+	out.WriteString(gd.ReturnType.String())
+	out.WriteString("\n")
+	out.WriteString(gd.Body.String())
+	out.WriteString("\nend")
+	return out.String()
+}
+
+// SetterDeclaration represents a property setter
+type SetterDeclaration struct {
+	Token      lexer.Token // 'set' token
+	Visibility string      // "public", "private", "protected"
+	Name       *Identifier // property name
+	Parameter  *Parameter  // the setter parameter
+	Body       *BlockStatement
+}
+
+func (sd *SetterDeclaration) statementNode()       {}
+func (sd *SetterDeclaration) TokenLiteral() string { return sd.Token.Literal }
+func (sd *SetterDeclaration) String() string {
+	var out strings.Builder
+	if sd.Visibility != "" {
+		out.WriteString(sd.Visibility)
+		out.WriteString(" ")
+	}
+	out.WriteString("set ")
+	out.WriteString(sd.Name.String())
+	out.WriteString("(")
+	out.WriteString(sd.Parameter.String())
+	out.WriteString(")\n")
+	out.WriteString(sd.Body.String())
+	out.WriteString("\nend")
+	return out.String()
 }
 
 func (cd *ClassDeclaration) statementNode()       {}

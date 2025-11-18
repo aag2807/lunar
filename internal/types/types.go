@@ -74,9 +74,46 @@ func (t *BooleanType) IsAssignableTo(other Type) bool {
 	if _, isAny := other.(*AnyType); isAny {
 		return true
 	}
+	// Boolean can be assigned to TypeGuardType (any boolean expression can be a type guard body)
+	if _, isTypeGuard := other.(*TypeGuardType); isTypeGuard {
+		return true
+	}
 	// Check if other is a union type that contains boolean
 	if unionType, isUnion := other.(*UnionType); isUnion {
 		return unionType.Contains(t)
+	}
+	return false
+}
+
+// TypeGuardType is a special return type for type guard functions
+// It behaves like boolean but carries information about the guarded type
+type TypeGuardType struct {
+	GuardedType Type // The type being guarded (e.g., "string" in "value is string")
+}
+
+func (t *TypeGuardType) String() string {
+	return "boolean" // Type guards return boolean at runtime
+}
+func (t *TypeGuardType) Equals(other Type) bool {
+	// Type guards are compatible with boolean
+	if _, ok := other.(*BooleanType); ok {
+		return true
+	}
+	if otherGuard, ok := other.(*TypeGuardType); ok {
+		return t.GuardedType.Equals(otherGuard.GuardedType)
+	}
+	return false
+}
+func (t *TypeGuardType) IsAssignableTo(other Type) bool {
+	// Type guards can be assigned to boolean
+	if _, ok := other.(*BooleanType); ok {
+		return true
+	}
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	if otherGuard, ok := other.(*TypeGuardType); ok {
+		return t.GuardedType.IsAssignableTo(otherGuard.GuardedType)
 	}
 	return false
 }
@@ -116,6 +153,28 @@ func (t *VoidType) Equals(other Type) bool {
 	return ok
 }
 func (t *VoidType) IsAssignableTo(other Type) bool {
+	if t.Equals(other) {
+		return true
+	}
+	_, isAny := other.(*AnyType)
+	return isAny
+}
+
+// GenericParamType represents a generic type parameter (e.g., T in class Box<T>)
+type GenericParamType struct {
+	Name string // The parameter name (e.g., "T")
+}
+
+func (t *GenericParamType) String() string { return t.Name }
+func (t *GenericParamType) Equals(other Type) bool {
+	otherParam, ok := other.(*GenericParamType)
+	if !ok {
+		return false
+	}
+	return t.Name == otherParam.Name
+}
+func (t *GenericParamType) IsAssignableTo(other Type) bool {
+	// Generic parameters are only assignable to themselves or any
 	if t.Equals(other) {
 		return true
 	}
@@ -243,6 +302,13 @@ func (t *ArrayType) IsAssignableTo(other Type) bool {
 	if otherArray, ok := other.(*ArrayType); ok {
 		return t.ElementType.IsAssignableTo(otherArray.ElementType)
 	}
+	// Special case: any[] is assignable to table<K, V> for flexibility
+	// This allows empty {} literals typed as any[] to be assigned to table types
+	if _, ok := other.(*TableType); ok {
+		if _, isAny := t.ElementType.(*AnyType); isAny {
+			return true
+		}
+	}
 	return false
 }
 
@@ -279,8 +345,10 @@ func (t *TableType) IsAssignableTo(other Type) bool {
 
 // FunctionType represents a function type
 type FunctionType struct {
-	Parameters []Type
-	ReturnType Type
+	Parameters       []Type
+	ReturnType       Type
+	GenericParams    []string // Generic type parameter names (e.g., ["T", "U"])
+	HasRestParameter bool     // True if the last parameter is a rest parameter
 }
 
 func (t *FunctionType) String() string {
@@ -392,6 +460,62 @@ func (t *UnionType) Contains(typ Type) bool {
 	return false
 }
 
+// IntersectionType represents an intersection of multiple types (T1 & T2)
+type IntersectionType struct {
+	Types []Type
+}
+
+func (t *IntersectionType) String() string {
+	typeStrs := make([]string, 0, len(t.Types))
+	for _, typ := range t.Types {
+		if typ != nil {
+			typeStrs = append(typeStrs, typ.String())
+		}
+	}
+	return strings.Join(typeStrs, " & ")
+}
+
+func (t *IntersectionType) Equals(other Type) bool {
+	otherIntersection, ok := other.(*IntersectionType)
+	if !ok {
+		return false
+	}
+	if len(t.Types) != len(otherIntersection.Types) {
+		return false
+	}
+	// Check if all types match (order-independent)
+	for _, typ := range t.Types {
+		found := false
+		for _, otherTyp := range otherIntersection.Types {
+			if typ.Equals(otherTyp) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func (t *IntersectionType) IsAssignableTo(other Type) bool {
+	if t.Equals(other) {
+		return true
+	}
+	if _, isAny := other.(*AnyType); isAny {
+		return true
+	}
+	// An intersection type is assignable to a type if ANY of its members is assignable
+	// Because the intersection has ALL the properties/capabilities of each member
+	for _, typ := range t.Types {
+		if typ.IsAssignableTo(other) {
+			return true
+		}
+	}
+	return false
+}
+
 // OptionalType represents an optional type (T | nil)
 type OptionalType struct {
 	BaseType Type
@@ -417,6 +541,23 @@ func (t *OptionalType) IsAssignableTo(other Type) bool {
 	// Optional type is assignable to another optional with compatible base
 	if otherOpt, ok := other.(*OptionalType); ok {
 		return t.BaseType.IsAssignableTo(otherOpt.BaseType)
+	}
+	// Optional type T? should be assignable to union T | nil
+	if otherUnion, ok := other.(*UnionType); ok {
+		// Check if the union represents T | nil
+		hasNil := false
+		hasBaseType := false
+		for _, typ := range otherUnion.Types {
+			if _, isNil := typ.(*NilType); isNil {
+				hasNil = true
+			} else if t.BaseType.Equals(typ) || t.BaseType.IsAssignableTo(typ) {
+				hasBaseType = true
+			}
+		}
+		// If union is exactly T | nil (2 types), it's compatible with T?
+		if hasNil && hasBaseType && len(otherUnion.Types) == 2 {
+			return true
+		}
 	}
 	// Optional is NOT assignable to non-optional (must unwrap first)
 	return false
@@ -527,6 +668,7 @@ type ClassType struct {
 	Constructor         *FunctionType             // Constructor signature
 	Implements          []*InterfaceType
 	IsAbstract          bool                      // Whether class is abstract
+	GenericParams       []string                  // Generic type parameter names (e.g., ["T", "U"])
 }
 
 func (t *ClassType) String() string {
@@ -721,6 +863,23 @@ func (t *InterfaceType) IsAssignableTo(other Type) bool {
 		// If we have all required properties and methods, we're compatible
 		return true
 	}
+
+	// Check if this interface (table literal) is assignable to a table type
+	// e.g., { john = 95, jane = 87 } should be assignable to table<string, number>
+	if otherTable, ok := other.(*TableType); ok {
+		// For table literals (which have identifier keys), all keys are strings
+		// Check that all property types are assignable to the table's value type
+		for _, propType := range t.Properties {
+			if !propType.IsAssignableTo(otherTable.ValueType) {
+				return false
+			}
+		}
+		// If we have no methods and all property values match, we're compatible
+		if len(t.Methods) == 0 {
+			return true
+		}
+	}
+
 	return false
 }
 
@@ -830,18 +989,30 @@ func (t *GenericType) IsAssignableTo(other Type) bool {
 // IsNumericType checks if a type is numeric
 func IsNumericType(t Type) bool {
 	_, ok := t.(*NumberType)
+	if ok {
+		return true
+	}
+	_, ok = t.(*NumberLiteralType)
 	return ok
 }
 
 // IsStringType checks if a type is a string
 func IsStringType(t Type) bool {
 	_, ok := t.(*StringType)
+	if ok {
+		return true
+	}
+	_, ok = t.(*StringLiteralType)
 	return ok
 }
 
-// IsBooleanType checks if a type is boolean
+// IsBooleanType checks if a type is boolean (or a type guard, which acts like boolean)
 func IsBooleanType(t Type) bool {
 	_, ok := t.(*BooleanType)
+	if ok {
+		return true
+	}
+	_, ok = t.(*TypeGuardType)
 	return ok
 }
 

@@ -164,6 +164,8 @@ func (g *Generator) getExpressionToken(expr ast.Expression) lexer.Token {
 		return node.Token
 	case *ast.StringLiteral:
 		return node.Token
+	case *ast.TemplateLiteral:
+		return node.Token
 	case *ast.BooleanLiteral:
 		return node.Token
 	case *ast.CallExpression:
@@ -234,11 +236,24 @@ func (g *Generator) generateVariableDeclaration(node *ast.VariableDeclaration) s
 	var output strings.Builder
 	output.WriteString(g.generateIndent())
 	output.WriteString("local ")
-	output.WriteString(node.Name.Value)
 
-	if node.Value != nil {
+	// Write all variable names
+	for i, name := range node.Names {
+		if i > 0 {
+			output.WriteString(", ")
+		}
+		output.WriteString(name.Value)
+	}
+
+	// Write values if present
+	if len(node.Values) > 0 {
 		output.WriteString(" = ")
-		output.WriteString(g.generateExpression(node.Value))
+		for i, val := range node.Values {
+			if i > 0 {
+				output.WriteString(", ")
+			}
+			output.WriteString(g.generateExpression(val))
+		}
 	}
 
 	output.WriteString("\n")
@@ -255,15 +270,35 @@ func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) s
 	output.WriteString("(")
 
 	// Parameters (without type annotations)
-	params := make([]string, len(node.Parameters))
+	params := make([]string, 0, len(node.Parameters))
+	var restParam *ast.Parameter
 	for i, param := range node.Parameters {
-		params[i] = param.Name.Value
+		if param.IsRest {
+			restParam = param
+			// Add ... to parameter list
+			params = append(params, "...")
+			break
+		}
+		params = append(params, param.Name.Value)
+		// Check if next param is rest, if so don't include regular params after
+		if i+1 < len(node.Parameters) && node.Parameters[i+1].IsRest {
+			restParam = node.Parameters[i+1]
+			params = append(params, "...")
+			break
+		}
 	}
 	output.WriteString(strings.Join(params, ", "))
 	output.WriteString(")\n")
 
 	// Body
 	g.indent++
+
+	// If there's a rest parameter, pack the varargs into a table
+	if restParam != nil {
+		output.WriteString(g.generateIndent())
+		output.WriteString(fmt.Sprintf("local %s = {...}\n", restParam.Name.Value))
+	}
+
 	for _, stmt := range node.Body.Statements {
 		output.WriteString(g.generateStatement(stmt))
 	}
@@ -281,9 +316,14 @@ func (g *Generator) generateReturnStatement(node *ast.ReturnStatement) string {
 	output.WriteString(g.generateIndent())
 	output.WriteString("return")
 
-	if node.ReturnValue != nil {
+	if len(node.ReturnValues) > 0 {
 		output.WriteString(" ")
-		output.WriteString(g.generateExpression(node.ReturnValue))
+		for i, val := range node.ReturnValues {
+			if i > 0 {
+				output.WriteString(", ")
+			}
+			output.WriteString(g.generateExpression(val))
+		}
 	}
 
 	output.WriteString("\n")
@@ -351,7 +391,14 @@ func (g *Generator) generateForStatement(node *ast.ForStatement) string {
 
 	output.WriteString(g.generateIndent())
 	output.WriteString("for ")
-	output.WriteString(node.Variable.Value)
+
+	// Write all loop variables
+	for i, v := range node.Variables {
+		if i > 0 {
+			output.WriteString(", ")
+		}
+		output.WriteString(v.Value)
+	}
 
 	if node.IsGeneric {
 		// Generic for loop: for k, v in pairs(table) do
@@ -609,6 +656,8 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 		return node.Token.Literal
 	case *ast.StringLiteral:
 		return fmt.Sprintf("\"%s\"", node.Value)
+	case *ast.TemplateLiteral:
+		return g.generateTemplateLiteral(node)
 	case *ast.BooleanLiteral:
 		if node.Value {
 			return "true"
@@ -628,6 +677,11 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 		return g.generateDotExpression(node)
 	case *ast.IndexExpression:
 		return g.generateIndexExpression(node)
+	case *ast.FunctionExpression:
+		return g.generateFunctionExpression(node)
+	case *ast.TypeAssertion:
+		// Type assertions are compile-time only, just return the expression
+		return g.generateExpression(node.Expression)
 	default:
 		return ""
 	}
@@ -635,6 +689,36 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 
 // generateTableLiteral generates code for a table literal
 func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
+	// Check if any value is a spread expression
+	hasSpread := false
+	for _, val := range node.Values {
+		if _, ok := val.(*ast.SpreadExpression); ok {
+			hasSpread = true
+			break
+		}
+	}
+
+	// If there are spread expressions in array values, we need special handling
+	if hasSpread {
+		var output strings.Builder
+		output.WriteString("(function() local __temp = {}; ")
+
+		for _, val := range node.Values {
+			if spread, ok := val.(*ast.SpreadExpression); ok {
+				// Insert all elements from the spread array
+				spreadValue := g.generateExpression(spread.Value)
+				output.WriteString(fmt.Sprintf("for _, __v in ipairs(%s) do table.insert(__temp, __v) end; ", spreadValue))
+			} else {
+				// Insert single element
+				output.WriteString(fmt.Sprintf("table.insert(__temp, %s); ", g.generateExpression(val)))
+			}
+		}
+
+		output.WriteString("return __temp end)()")
+		return output.String()
+	}
+
+	// No spread - use normal table literal generation
 	var output strings.Builder
 	output.WriteString("{")
 
@@ -689,6 +773,12 @@ func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
 	operator := node.Operator
 	right := g.generateExpression(node.Right)
 
+	// Handle nullish coalescing operator (??)
+	if operator == "??" {
+		// Generate: (function() local __temp = left; if __temp ~= nil then return __temp else return right end end)()
+		return fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp else return %s end end)()", left, right)
+	}
+
 	// Convert operators to Lua equivalents
 	switch operator {
 	case "!=":
@@ -724,6 +814,45 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 		}
 	}
 
+	// Check if any argument is a spread expression
+	hasSpread := false
+	for _, arg := range node.Arguments {
+		if _, ok := arg.(*ast.SpreadExpression); ok {
+			hasSpread = true
+			break
+		}
+	}
+
+	// If there are spread arguments, we need special handling
+	if hasSpread {
+		// Simple case: single spread argument
+		if len(node.Arguments) == 1 {
+			if spread, ok := node.Arguments[0].(*ast.SpreadExpression); ok {
+				spreadValue := g.generateExpression(spread.Value)
+				return fmt.Sprintf("%s(table.unpack(%s))", function, spreadValue)
+			}
+		}
+
+		// Complex case: mixed regular and spread arguments
+		// Build a table with all args and unpack it
+		var tableBuilder strings.Builder
+		tableBuilder.WriteString("{")
+		for i, arg := range node.Arguments {
+			if i > 0 {
+				tableBuilder.WriteString(", ")
+			}
+			if spread, ok := arg.(*ast.SpreadExpression); ok {
+				// Use table.unpack to spread the array
+				tableBuilder.WriteString(fmt.Sprintf("table.unpack(%s)", g.generateExpression(spread.Value)))
+			} else {
+				tableBuilder.WriteString(g.generateExpression(arg))
+			}
+		}
+		tableBuilder.WriteString("}")
+		return fmt.Sprintf("%s(table.unpack(%s))", function, tableBuilder.String())
+	}
+
+	// No spread arguments - normal case
 	args := make([]string, len(node.Arguments))
 	for i, arg := range node.Arguments {
 		args[i] = g.generateExpression(arg)
@@ -732,10 +861,62 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 	return fmt.Sprintf("%s(%s)", function, strings.Join(args, ", "))
 }
 
+// generateTemplateLiteral generates code for a template literal
+func (g *Generator) generateTemplateLiteral(node *ast.TemplateLiteral) string {
+	// Template literals are converted to Lua string concatenation
+	// `Hello ${name}` becomes "Hello " .. tostring(name)
+
+	if len(node.Parts) == 1 && len(node.Expressions) == 0 {
+		// No interpolation, just a plain string
+		return fmt.Sprintf("\"%s\"", node.Parts[0])
+	}
+
+	var parts []string
+	for i, part := range node.Parts {
+		// Add the string part if it's not empty
+		if part != "" {
+			parts = append(parts, fmt.Sprintf("\"%s\"", part))
+		}
+
+		// Add the expression (converted to string) if there's one at this position
+		if i < len(node.Expressions) {
+			exprCode := g.generateExpression(node.Expressions[i])
+			// Use tostring() to convert the expression to a string
+			parts = append(parts, fmt.Sprintf("tostring(%s)", exprCode))
+		}
+	}
+
+	// Filter out empty parts
+	nonEmptyParts := []string{}
+	for _, part := range parts {
+		if part != "" && part != "\"\"" {
+			nonEmptyParts = append(nonEmptyParts, part)
+		}
+	}
+
+	if len(nonEmptyParts) == 0 {
+		return "\"\""
+	}
+
+	if len(nonEmptyParts) == 1 {
+		return nonEmptyParts[0]
+	}
+
+	// Concatenate all parts with ..
+	return strings.Join(nonEmptyParts, " .. ")
+}
+
 // generateDotExpression generates code for a dot expression
 func (g *Generator) generateDotExpression(node *ast.DotExpression) string {
 	left := g.generateExpression(node.Left)
 	right := g.generateExpression(node.Right)
+
+	// Handle optional chaining (?.)
+	if node.IsOptional {
+		// Generate safe navigation: (function() if left ~= nil then return left.right else return nil end end)()
+		// For efficiency, use a simpler pattern when left is a simple identifier
+		return fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp.%s else return nil end end)()", left, right)
+	}
 
 	return fmt.Sprintf("%s.%s", left, right)
 }
@@ -746,6 +927,33 @@ func (g *Generator) generateIndexExpression(node *ast.IndexExpression) string {
 	index := g.generateExpression(node.Index)
 
 	return fmt.Sprintf("%s[%s]", left, index)
+}
+
+// generateFunctionExpression generates code for an anonymous function expression
+func (g *Generator) generateFunctionExpression(node *ast.FunctionExpression) string {
+	var output strings.Builder
+
+	output.WriteString("function(")
+
+	// Parameters (without type annotations)
+	params := make([]string, len(node.Parameters))
+	for i, param := range node.Parameters {
+		params[i] = param.Name.Value
+	}
+	output.WriteString(strings.Join(params, ", "))
+	output.WriteString(")\n")
+
+	// Body
+	g.indent++
+	for _, stmt := range node.Body.Statements {
+		output.WriteString(g.generateStatement(stmt))
+	}
+	g.indent--
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("end")
+
+	return output.String()
 }
 
 // generateIndent generates the current indentation

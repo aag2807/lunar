@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"lunar/internal/ast"
 	"lunar/internal/lexer"
+	"lunar/internal/parser"
+	"os"
 )
 
 // TypeError represents a type error
@@ -220,7 +222,7 @@ func NewChecker() *Checker {
 	env.Set("void", Void)
 	env.Set("any", Any)
 
-	return &Checker{
+	checker := &Checker{
 		env:                env,
 		errors:             []*TypeError{},
 		classes:            make(map[string]*ClassType),
@@ -228,6 +230,67 @@ func NewChecker() *Checker {
 		enums:              make(map[string]*EnumType),
 		typeAliases:        make(map[string]Type),
 		genericTypeAliases: make(map[string]*GenericTypeAlias),
+	}
+
+	// Load standard library declarations
+	checker.loadStdlib()
+
+	return checker
+}
+
+// loadStdlib loads the Lua standard library type definitions
+func (c *Checker) loadStdlib() {
+	// List of stdlib files to load
+	stdlibFiles := []string{"lua.d.lunar", "table.d.lunar", "string.d.lunar", "math.d.lunar"}
+
+	// Try to find stdlib directory relative to the current directory
+	stdlibDirs := []string{
+		"stdlib",
+		"../stdlib",
+		"../../stdlib",
+		"../../../stdlib",
+	}
+
+	var foundDir string
+	for _, dir := range stdlibDirs {
+		if _, err := os.Stat(dir); err == nil {
+			foundDir = dir
+			break
+		}
+	}
+
+	if foundDir == "" {
+		// If stdlib not found, silently continue (tests can still define what they need)
+		return
+	}
+
+	// Load each stdlib file
+	for _, filename := range stdlibFiles {
+		filepath := foundDir + "/" + filename
+		content, err := os.ReadFile(filepath)
+		if err != nil {
+			continue // Skip files that don't exist
+		}
+
+		// Parse the stdlib file
+		l := lexer.New(string(content))
+		p := parser.New(l)
+		statements := p.Parse()
+
+		if len(p.Errors()) > 0 {
+			// Stdlib file has parse errors, silently continue
+			continue
+		}
+
+		// Register stdlib declarations
+		for _, stmt := range statements {
+			c.registerTypeDefinition(stmt)
+		}
+
+		// Check stdlib statements to register functions and variables
+		for _, stmt := range statements {
+			c.checkStatement(stmt)
+		}
 	}
 }
 
@@ -267,6 +330,12 @@ func (c *Checker) registerTypeDefinition(stmt ast.Statement) {
 
 // registerClass registers a class type
 func (c *Checker) registerClass(node *ast.ClassDeclaration) {
+	// Extract generic parameter names
+	genericParams := make([]string, len(node.GenericParams))
+	for i, param := range node.GenericParams {
+		genericParams[i] = param.Value
+	}
+
 	classType := &ClassType{
 		Name:                node.Name.Value,
 		Properties:          make(map[string]Type),
@@ -279,6 +348,7 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		MethodVisibility:    make(map[string]string),
 		Implements:          []*InterfaceType{},
 		IsAbstract:          node.IsAbstract,
+		GenericParams:       genericParams,
 	}
 
 	// Add generic type parameters to scope temporarily
@@ -286,7 +356,8 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 	if len(node.GenericParams) > 0 {
 		c.env = NewEnclosedEnvironment(prevEnv)
 		for _, genericParam := range node.GenericParams {
-			c.env.Set(genericParam.Value, Any)
+			// Store as GenericParamType so we can substitute it later
+			c.env.Set(genericParam.Value, &GenericParamType{Name: genericParam.Value})
 		}
 	}
 
@@ -326,8 +397,9 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 			}
 		}
 		classType.Constructor = &FunctionType{
-			Parameters: params,
-			ReturnType: classType, // Constructor returns an instance of the class
+			Parameters:    params,
+			ReturnType:    classType, // Constructor returns an instance of the class
+			GenericParams: []string{}, // Constructors are not separately generic
 		}
 	}
 
@@ -342,8 +414,9 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 			returnType = c.resolveTypeExpression(method.ReturnType)
 		}
 		funcType := &FunctionType{
-			Parameters: params,
-			ReturnType: returnType,
+			Parameters:    params,
+			ReturnType:    returnType,
+			GenericParams: []string{}, // Methods are not separately generic
 		}
 		methodName := method.Name.Value
 
@@ -424,8 +497,9 @@ func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
 			returnType = c.resolveTypeExpression(method.ReturnType)
 		}
 		interfaceType.Methods[method.Name.Value] = &FunctionType{
-			Parameters: params,
-			ReturnType: returnType,
+			Parameters:    params,
+			ReturnType:    returnType,
+			GenericParams: []string{}, // Interface methods are not separately generic
 		}
 	}
 
@@ -585,6 +659,19 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		}
 		return &UnionType{Types: types}
 
+	case *ast.IntersectionType:
+		types := make([]Type, 0, len(node.Types))
+		for _, t := range node.Types {
+			resolvedType := c.resolveTypeExpression(t)
+			// Flatten nested intersections
+			if intersectionType, isIntersection := resolvedType.(*IntersectionType); isIntersection {
+				types = append(types, intersectionType.Types...)
+			} else {
+				types = append(types, resolvedType)
+			}
+		}
+		return &IntersectionType{Types: types}
+
 	case *ast.TupleType:
 		elements := make([]Type, len(node.Types))
 		for i, elem := range node.Types {
@@ -601,7 +688,11 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		if node.ReturnType != nil {
 			returnType = c.resolveTypeExpression(node.ReturnType)
 		}
-		return &FunctionType{Parameters: params, ReturnType: returnType}
+		return &FunctionType{
+			Parameters:    params,
+			ReturnType:    returnType,
+			GenericParams: []string{}, // Function types in annotations are not generic
+		}
 
 	case *ast.GenericType:
 		// Check if this is a generic type alias instantiation like Nullable<string>
@@ -628,7 +719,31 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 			}
 		}
 
-		// Not a generic type alias, try regular type resolution
+		// Not a generic type alias, check for generic classes/functions
+		if baseIdent, ok := node.BaseType.(*ast.Identifier); ok {
+			// Resolve type arguments
+			typeArgs := make([]Type, len(node.TypeArguments))
+			for i, arg := range node.TypeArguments {
+				typeArgs[i] = c.resolveTypeExpression(arg)
+			}
+
+			// Check if it's a generic class
+			if classType, exists := c.classes[baseIdent.Value]; exists {
+				if len(classType.GenericParams) > 0 {
+					if len(typeArgs) != len(classType.GenericParams) {
+						c.addError(
+							fmt.Sprintf("Class '%s' expects %d type arguments, got %d",
+								classType.Name, len(classType.GenericParams), len(typeArgs)),
+							lexer.Token{},
+						)
+						return classType
+					}
+					return c.instantiateGenericClass(classType, typeArgs)
+				}
+			}
+		}
+
+		// Fall back to regular type resolution (ignoring type arguments)
 		baseType := c.resolveTypeExpression(node.BaseType)
 		return baseType
 
@@ -639,6 +754,17 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 	case *ast.NumberLiteral:
 		// Number literal in type position becomes a literal type
 		return &NumberLiteralType{Value: node.Value}
+
+	case *ast.TypeGuardType:
+		// Type guard like "value is string"
+		// Returns a special TypeGuardType that acts like boolean but carries guard info
+		guardedType := c.resolveTypeExpression(node.GuardType)
+		return &TypeGuardType{GuardedType: guardedType}
+
+	case *ast.OptionalType:
+		// Optional type T? is syntactic sugar for T | nil
+		baseType := c.resolveTypeExpression(node.Type)
+		return &UnionType{Types: []Type{baseType, Nil}}
 
 	default:
 		c.addError(fmt.Sprintf("Cannot resolve type expression: %T", expr), lexer.Token{})
@@ -673,6 +799,138 @@ func (c *Checker) substituteTypeParams(body ast.Expression, typeParams []string,
 	c.env = prevEnv
 
 	return result
+}
+
+// instantiateGenericClass creates a new ClassType with type parameters substituted
+func (c *Checker) instantiateGenericClass(classType *ClassType, typeArgs []Type) *ClassType {
+	// Create substitution map
+	substitutions := make(map[string]Type)
+	for i, param := range classType.GenericParams {
+		substitutions[param] = typeArgs[i]
+	}
+
+	// Create a new class type with substituted types
+	instantiated := &ClassType{
+		Name:              classType.Name,
+		Properties:        make(map[string]Type),
+		Methods:           make(map[string]*FunctionType),
+		StaticProperties:  make(map[string]Type),
+		StaticMethods:     make(map[string]*FunctionType),
+		Constructor:       nil,
+		Parent:            classType.Parent,
+		Implements:        classType.Implements,
+		IsAbstract:        classType.IsAbstract,
+		AbstractMethods:   classType.AbstractMethods,
+		GenericParams:     []string{}, // Instantiated classes are not generic
+		PropertyVisibility: classType.PropertyVisibility,
+		MethodVisibility:  classType.MethodVisibility,
+	}
+
+	// Substitute properties
+	for name, typ := range classType.Properties {
+		instantiated.Properties[name] = c.substituteType(typ, substitutions)
+	}
+
+	// Substitute methods
+	for name, funcType := range classType.Methods {
+		instantiated.Methods[name] = c.substituteFunctionType(funcType, substitutions)
+	}
+
+	// Substitute static properties
+	for name, typ := range classType.StaticProperties {
+		instantiated.StaticProperties[name] = c.substituteType(typ, substitutions)
+	}
+
+	// Substitute static methods
+	for name, funcType := range classType.StaticMethods {
+		instantiated.StaticMethods[name] = c.substituteFunctionType(funcType, substitutions)
+	}
+
+	// Substitute constructor
+	if classType.Constructor != nil {
+		substitutedConstructor := c.substituteFunctionType(classType.Constructor, substitutions)
+		// The constructor should return the instantiated class, not the generic class
+		substitutedConstructor.ReturnType = instantiated
+		instantiated.Constructor = substitutedConstructor
+	}
+
+	return instantiated
+}
+
+// instantiateGenericFunction creates a new FunctionType with type parameters substituted
+func (c *Checker) instantiateGenericFunction(funcType *FunctionType, typeArgs []Type) *FunctionType {
+	// Create substitution map
+	substitutions := make(map[string]Type)
+	for i, param := range funcType.GenericParams {
+		substitutions[param] = typeArgs[i]
+	}
+
+	return c.substituteFunctionType(funcType, substitutions)
+}
+
+// substituteFunctionType creates a new FunctionType with type parameters substituted
+func (c *Checker) substituteFunctionType(funcType *FunctionType, substitutions map[string]Type) *FunctionType {
+	newParams := make([]Type, len(funcType.Parameters))
+	for i, param := range funcType.Parameters {
+		newParams[i] = c.substituteType(param, substitutions)
+	}
+
+	newReturnType := c.substituteType(funcType.ReturnType, substitutions)
+
+	return &FunctionType{
+		Parameters:    newParams,
+		ReturnType:    newReturnType,
+		GenericParams: []string{}, // Instantiated functions are not generic
+	}
+}
+
+// substituteType replaces type parameter references with actual types
+func (c *Checker) substituteType(typ Type, substitutions map[string]Type) Type {
+	if typ == nil {
+		return nil
+	}
+
+	switch t := typ.(type) {
+	case *GenericParamType:
+		// This is a type parameter reference - substitute it
+		if subst, exists := substitutions[t.Name]; exists {
+			return subst
+		}
+		return t
+
+	case *ArrayType:
+		return &ArrayType{ElementType: c.substituteType(t.ElementType, substitutions)}
+
+	case *TableType:
+		return &TableType{
+			KeyType:   c.substituteType(t.KeyType, substitutions),
+			ValueType: c.substituteType(t.ValueType, substitutions),
+		}
+
+	case *FunctionType:
+		return c.substituteFunctionType(t, substitutions)
+
+	case *UnionType:
+		newTypes := make([]Type, len(t.Types))
+		for i, typ := range t.Types {
+			newTypes[i] = c.substituteType(typ, substitutions)
+		}
+		return &UnionType{Types: newTypes}
+
+	case *OptionalType:
+		return &OptionalType{BaseType: c.substituteType(t.BaseType, substitutions)}
+
+	case *TupleType:
+		newElements := make([]Type, len(t.Elements))
+		for i, elem := range t.Elements {
+			newElements[i] = c.substituteType(elem, substitutions)
+		}
+		return &TupleType{Elements: newElements}
+
+	default:
+		// For all other types (primitives, classes, etc.), return as-is
+		return t
+	}
 }
 
 // checkStatement checks a statement
@@ -724,39 +982,107 @@ func (c *Checker) checkStatement(stmt ast.Statement) {
 
 // checkVariableDeclaration checks a variable declaration
 func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
-	var declaredType Type
-	if node.Type != nil {
-		declaredType = c.resolveTypeExpression(node.Type)
+	// Resolve declared types for each variable
+	declaredTypes := make([]Type, len(node.Names))
+	for i, typ := range node.Types {
+		if typ != nil {
+			declaredTypes[i] = c.resolveTypeExpression(typ)
+		}
 	}
 
-	var valueType Type
-	if node.Value != nil {
-		valueType = c.checkExpression(node.Value)
-	} else {
-		valueType = Nil
+	// Handle no value assignment
+	if len(node.Values) == 0 {
+		// Register variables with their declared types (or nil)
+		for i, name := range node.Names {
+			var varType Type
+			if declaredTypes[i] != nil {
+				varType = declaredTypes[i]
+			} else {
+				varType = Nil
+			}
+
+			if node.IsConstant {
+				c.env.SetConst(name.Value, varType)
+			} else {
+				c.env.Set(name.Value, varType)
+			}
+		}
+		return
 	}
 
-	// If type is declared, check if value is assignable
-	if declaredType != nil {
-		if !valueType.IsAssignableTo(declaredType) {
-			c.addError(
-				fmt.Sprintf("Cannot assign type '%s' to variable of type '%s'",
-					valueType.String(), declaredType.String()),
-				node.Token,
-			)
-		}
-		// Use SetConst if variable is declared as const
-		if node.IsConstant {
-			c.env.SetConst(node.Name.Value, declaredType)
+	// Get value types
+	var valueTypes []Type
+
+	// If there's only one value and it's a call expression, it might return a tuple
+	if len(node.Values) == 1 {
+		valueType := c.checkExpression(node.Values[0])
+
+		// Check if it's a tuple type (multiple return values)
+		if tupleType, ok := valueType.(*TupleType); ok {
+			valueTypes = tupleType.Elements
 		} else {
-			c.env.Set(node.Name.Value, declaredType)
+			valueTypes = []Type{valueType}
 		}
 	} else {
-		// Infer type from value
-		if node.IsConstant {
-			c.env.SetConst(node.Name.Value, valueType)
+		// Multiple values - evaluate each
+		valueTypes = make([]Type, len(node.Values))
+		for i, val := range node.Values {
+			valueTypes[i] = c.checkExpression(val)
+		}
+	}
+
+	// Check that the number of variables matches number of values
+	if len(node.Names) != len(valueTypes) {
+		c.addError(
+			fmt.Sprintf("Number of variables (%d) does not match number of values (%d)",
+				len(node.Names), len(valueTypes)),
+			node.Token,
+		)
+		// Register variables anyway to avoid cascading errors
+		for i, name := range node.Names {
+			var varType Type = Any
+			if i < len(declaredTypes) && declaredTypes[i] != nil {
+				varType = declaredTypes[i]
+			} else if i < len(valueTypes) {
+				varType = valueTypes[i]
+			}
+
+			if node.IsConstant {
+				c.env.SetConst(name.Value, varType)
+			} else {
+				c.env.Set(name.Value, varType)
+			}
+		}
+		return
+	}
+
+	// Register each variable with type checking
+	for i, name := range node.Names {
+		declaredType := declaredTypes[i]
+		valueType := valueTypes[i]
+
+		// Determine final type and check assignability
+		var finalType Type
+		if declaredType != nil {
+			// Type is declared - check if value is assignable
+			if !valueType.IsAssignableTo(declaredType) {
+				c.addError(
+					fmt.Sprintf("Cannot assign type '%s' to variable '%s' of type '%s'",
+						valueType.String(), name.Value, declaredType.String()),
+					node.Token,
+				)
+			}
+			finalType = declaredType
 		} else {
-			c.env.Set(node.Name.Value, valueType)
+			// Infer type from value
+			finalType = valueType
+		}
+
+		// Register variable
+		if node.IsConstant {
+			c.env.SetConst(name.Value, finalType)
+		} else {
+			c.env.Set(name.Value, finalType)
 		}
 	}
 }
@@ -768,17 +1094,40 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	if len(node.GenericParams) > 0 {
 		c.env = NewEnclosedEnvironment(prevEnv)
 		for _, genericParam := range node.GenericParams {
-			c.env.Set(genericParam.Value, Any)
+			// Store as GenericParamType so we can substitute it later
+			c.env.Set(genericParam.Value, &GenericParamType{Name: genericParam.Value})
 		}
 	}
 
 	// Create function type
 	params := make([]Type, len(node.Parameters))
 	for i, param := range node.Parameters {
-		if param.Type != nil {
-			params[i] = c.resolveTypeExpression(param.Type)
+		// Validate rest parameters
+		if param.IsRest {
+			// Rest parameter must be last
+			if i != len(node.Parameters)-1 {
+				c.addError("Rest parameter must be the last parameter", param.Token)
+			}
+			// Rest parameter type should be an array
+			if param.Type != nil {
+				paramType := c.resolveTypeExpression(param.Type)
+				if _, ok := paramType.(*ArrayType); !ok && !paramType.Equals(Any) {
+					c.addError(
+						fmt.Sprintf("Rest parameter must have array type, got '%s'", paramType.String()),
+						param.Token,
+					)
+				}
+				params[i] = paramType
+			} else {
+				// Default to any[] for rest parameters
+				params[i] = &ArrayType{ElementType: Any}
+			}
 		} else {
-			params[i] = Any
+			if param.Type != nil {
+				params[i] = c.resolveTypeExpression(param.Type)
+			} else {
+				params[i] = Any
+			}
 		}
 	}
 
@@ -787,9 +1136,23 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		returnType = c.resolveTypeExpression(node.ReturnType)
 	}
 
+	// Extract generic parameter names
+	genericParams := make([]string, len(node.GenericParams))
+	for i, param := range node.GenericParams {
+		genericParams[i] = param.Value
+	}
+
+	// Check if the last parameter is a rest parameter
+	hasRestParam := false
+	if len(node.Parameters) > 0 && node.Parameters[len(node.Parameters)-1].IsRest {
+		hasRestParam = true
+	}
+
 	funcType := &FunctionType{
-		Parameters: params,
-		ReturnType: returnType,
+		Parameters:       params,
+		ReturnType:       returnType,
+		GenericParams:    genericParams,
+		HasRestParameter: hasRestParam,
 	}
 
 	// Restore environment and register function
@@ -827,7 +1190,8 @@ func (c *Checker) checkReturnStatement(node *ast.ReturnStatement) {
 		return
 	}
 
-	if node.ReturnValue == nil {
+	// Handle empty return
+	if len(node.ReturnValues) == 0 {
 		if !IsVoidType(c.currentFunctionReturnType) {
 			c.addError(
 				fmt.Sprintf("Function must return a value of type '%s'",
@@ -838,13 +1202,55 @@ func (c *Checker) checkReturnStatement(node *ast.ReturnStatement) {
 		return
 	}
 
-	returnType := c.checkExpression(node.ReturnValue)
-	if !returnType.IsAssignableTo(c.currentFunctionReturnType) {
+	// Handle single return value
+	if len(node.ReturnValues) == 1 {
+		returnType := c.checkExpression(node.ReturnValues[0])
+		if !returnType.IsAssignableTo(c.currentFunctionReturnType) {
+			c.addError(
+				fmt.Sprintf("Cannot return type '%s' from function with return type '%s'",
+					returnType.String(), c.currentFunctionReturnType.String()),
+				node.Token,
+			)
+		}
+		return
+	}
+
+	// Handle multiple return values - must match TupleType
+	returnTypes := make([]Type, len(node.ReturnValues))
+	for i, val := range node.ReturnValues {
+		returnTypes[i] = c.checkExpression(val)
+	}
+
+	// Check if expected return type is a tuple
+	tupleType, ok := c.currentFunctionReturnType.(*TupleType)
+	if !ok {
 		c.addError(
-			fmt.Sprintf("Cannot return type '%s' from function with return type '%s'",
-				returnType.String(), c.currentFunctionReturnType.String()),
+			fmt.Sprintf("Cannot return multiple values from function with return type '%s'",
+				c.currentFunctionReturnType.String()),
 			node.Token,
 		)
+		return
+	}
+
+	// Check tuple element count
+	if len(returnTypes) != len(tupleType.Elements) {
+		c.addError(
+			fmt.Sprintf("Function expects %d return values, got %d",
+				len(tupleType.Elements), len(returnTypes)),
+			node.Token,
+		)
+		return
+	}
+
+	// Check each return value type
+	for i, retType := range returnTypes {
+		if !retType.IsAssignableTo(tupleType.Elements[i]) {
+			c.addError(
+				fmt.Sprintf("Return value %d: cannot return type '%s', expected '%s'",
+					i+1, retType.String(), tupleType.Elements[i].String()),
+				node.Token,
+			)
+		}
 	}
 }
 
@@ -858,10 +1264,85 @@ func (c *Checker) checkIfStatement(node *ast.IfStatement) {
 		)
 	}
 
-	c.checkBlockStatement(node.Consequence)
-	if node.Alternative != nil {
-		c.checkBlockStatement(node.Alternative)
+	// Check for type narrowing from type guard functions
+	varName, narrowedType := c.extractTypeNarrowing(node.Condition)
+
+	if varName != "" && narrowedType != nil {
+		// Type narrowing applies: create new scope with narrowed type
+		prevEnv := c.env
+
+		// Then block: apply narrowed type
+		c.env = NewEnclosedEnvironment(prevEnv)
+		originalType, _ := prevEnv.Get(varName)
+		c.env.Set(varName, narrowedType)
+		c.checkBlockStatement(node.Consequence)
+		c.env = prevEnv
+
+		// Else block: apply complementary type if possible
+		if node.Alternative != nil {
+			c.env = NewEnclosedEnvironment(prevEnv)
+			if unionType, ok := originalType.(*UnionType); ok {
+				// Remove the narrowed type from the union
+				remainingTypes := []Type{}
+				for _, t := range unionType.Types {
+					if !t.Equals(narrowedType) {
+						remainingTypes = append(remainingTypes, t)
+					}
+				}
+				if len(remainingTypes) == 1 {
+					c.env.Set(varName, remainingTypes[0])
+				} else if len(remainingTypes) > 1 {
+					c.env.Set(varName, &UnionType{Types: remainingTypes})
+				}
+			}
+			c.checkBlockStatement(node.Alternative)
+			c.env = prevEnv
+		}
+	} else {
+		// No type narrowing: check blocks normally
+		c.checkBlockStatement(node.Consequence)
+		if node.Alternative != nil {
+			c.checkBlockStatement(node.Alternative)
+		}
 	}
+}
+
+// extractTypeNarrowing checks if the expression is a type guard call and extracts narrowing info
+// Returns the variable name and the narrowed type, or empty string and nil if not a type guard
+func (c *Checker) extractTypeNarrowing(expr ast.Expression) (string, Type) {
+	// Check if this is a call expression
+	callExpr, ok := expr.(*ast.CallExpression)
+	if !ok || len(callExpr.Arguments) != 1 {
+		return "", nil
+	}
+
+	// Get the function being called
+	var funcType *FunctionType
+	if ident, ok := callExpr.Function.(*ast.Identifier); ok {
+		typ, exists := c.env.Get(ident.Value)
+		if !exists {
+			return "", nil
+		}
+		funcType, ok = typ.(*FunctionType)
+		if !ok {
+			return "", nil
+		}
+	} else {
+		return "", nil
+	}
+
+	// Check if return type is a type guard
+	guardType, ok := funcType.ReturnType.(*TypeGuardType)
+	if !ok {
+		return "", nil
+	}
+
+	// Extract the variable being guarded from the argument
+	if argIdent, ok := callExpr.Arguments[0].(*ast.Identifier); ok {
+		return argIdent.Value, guardType.GuardedType
+	}
+
+	return "", nil
 }
 
 // checkWhileStatement checks a while statement
@@ -883,8 +1364,16 @@ func (c *Checker) checkForStatement(node *ast.ForStatement) {
 	prevEnv := c.env
 	c.env = NewEnclosedEnvironment(prevEnv)
 
-	// Check loop variable
-	c.env.Set(node.Variable.Value, Number)
+	// Check loop variables
+	for _, variable := range node.Variables {
+		// For generic for loops, variables can be any type (index, value, etc.)
+		// For numeric for loops, variable is a number (loop counter)
+		if node.IsGeneric {
+			c.env.Set(variable.Value, Any)
+		} else {
+			c.env.Set(variable.Value, Number)
+		}
+	}
 
 	if node.IsGeneric {
 		// Generic for loop (for-in)
@@ -1308,12 +1797,16 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 	case *ast.StringLiteral:
 		// String literals infer as literal types for precision
 		return &StringLiteralType{Value: node.Value}
+	case *ast.TemplateLiteral:
+		return c.checkTemplateLiteral(node)
 	case *ast.BooleanLiteral:
 		return Boolean
 	case *ast.NilLiteral:
 		return Nil
 	case *ast.TableLiteral:
 		return c.checkTableLiteral(node)
+	case *ast.FunctionExpression:
+		return c.checkFunctionExpression(node)
 	case *ast.PrefixExpression:
 		return c.checkPrefixExpression(node)
 	case *ast.InfixExpression:
@@ -1324,6 +1817,12 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 		return c.checkDotExpression(node)
 	case *ast.IndexExpression:
 		return c.checkIndexExpression(node)
+	case *ast.GenericType:
+		return c.checkGenericInstantiation(node)
+	case *ast.SpreadExpression:
+		return c.checkSpreadExpression(node)
+	case *ast.TypeAssertion:
+		return c.checkTypeAssertion(node)
 	default:
 		return Any
 	}
@@ -1411,13 +1910,19 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 	// Check if this is a record-like table (all keys are string identifiers)
 	if len(node.Values) == 0 && len(node.Pairs) > 0 {
 		properties := make(map[string]Type)
+		methods := make(map[string]*FunctionType)
 		isRecord := true
 
 		for key, value := range node.Pairs {
 			// Check if key is an identifier (field name)
 			if ident, ok := key.(*ast.Identifier); ok {
 				valueType := c.checkExpression(value)
-				properties[ident.Value] = valueType
+				// Distinguish between methods (functions) and properties
+				if funcType, ok := valueType.(*FunctionType); ok {
+					methods[ident.Value] = funcType
+				} else {
+					properties[ident.Value] = valueType
+				}
 			} else {
 				// Not a simple identifier key, treat as regular table
 				isRecord = false
@@ -1430,14 +1935,99 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 			return &InterfaceType{
 				Name:       "<table literal>",
 				Properties: properties,
-				Methods:    make(map[string]*FunctionType),
+				Methods:    methods,
 				Extends:    []*InterfaceType{},
 			}
 		}
 	}
 
-	// For array-style or mixed tables, return a generic table type
+	// Check if this is an array-style table (has sequential Values, or empty with no Pairs)
+	if len(node.Pairs) == 0 {
+		// Infer element type from the values
+		// Collect all unique types
+		seenTypes := make(map[string]Type)
+		for _, value := range node.Values {
+			valueType := c.checkExpression(value)
+			// If it's a spread expression, unwrap the array type
+			if _, ok := value.(*ast.SpreadExpression); ok {
+				if arrayType, isArray := valueType.(*ArrayType); isArray {
+					valueType = arrayType.ElementType
+				}
+			}
+			seenTypes[valueType.String()] = valueType
+		}
+
+		// If all elements have the same type, use that type
+		if len(seenTypes) == 1 {
+			for _, t := range seenTypes {
+				return &ArrayType{ElementType: t}
+			}
+		}
+
+		// If elements have different types, create a union type
+		if len(seenTypes) > 1 {
+			types := make([]Type, 0, len(seenTypes))
+			for _, t := range seenTypes {
+				types = append(types, t)
+			}
+			return &ArrayType{ElementType: &UnionType{Types: types}}
+		}
+
+		// Empty array defaults to any[]
+		return &ArrayType{ElementType: Any}
+	}
+
+	// For mixed or key-value tables, return a generic table type
 	return &TableType{KeyType: Any, ValueType: Any}
+}
+
+// checkFunctionExpression checks an anonymous function expression
+func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
+	// Create new environment for function scope
+	prevEnv := c.env
+	c.env = NewEnclosedEnvironment(prevEnv)
+
+	// Resolve parameter types and add to environment
+	paramTypes := make([]Type, len(node.Parameters))
+	for i, param := range node.Parameters {
+		paramType := c.resolveTypeExpression(param.Type)
+		paramTypes[i] = paramType
+		c.env.Set(param.Name.Value, paramType)
+	}
+
+	// Resolve return type
+	var returnType Type = Void
+	if node.ReturnType != nil {
+		returnType = c.resolveTypeExpression(node.ReturnType)
+	} else {
+		// Try to infer return type for arrow functions with single expression body
+		if len(node.Body.Statements) == 1 {
+			if retStmt, ok := node.Body.Statements[0].(*ast.ReturnStatement); ok {
+				if len(retStmt.ReturnValues) == 1 {
+					// Infer from the single return expression
+					returnType = c.checkExpression(retStmt.ReturnValues[0])
+				}
+			}
+		}
+	}
+
+	// Set currentFunctionReturnType for return statement checking
+	prevReturnType := c.currentFunctionReturnType
+	c.currentFunctionReturnType = returnType
+
+	// Type check the body
+	c.checkBlockStatement(node.Body)
+
+	// Restore environment and return type
+	c.env = prevEnv
+	c.currentFunctionReturnType = prevReturnType
+
+	// Return the function type
+	return &FunctionType{
+		Parameters:    paramTypes,
+		ReturnType:    returnType,
+		GenericParams: []string{}, // Function expressions are not generic
+	}
 }
 
 // checkPrefixExpression checks a prefix expression
@@ -1494,6 +2084,19 @@ func (c *Checker) checkInfixExpression(node *ast.InfixExpression) Type {
 		// String concatenation
 		return String
 
+	case "??":
+		// Nullish coalescing - returns right value if left is nil
+		// If left is T?, result is T | R (where R is right type)
+		// In practice, if left is optional, unwrap it and union with right
+		if _, ok := leftType.(*OptionalType); ok {
+			// Left is optional, so result is the unwrapped left type OR right type
+			// For simplicity, return right type (as it's the fallback)
+			return rightType
+		}
+		// If left is not optional, ?? still works (returns left if not nil, otherwise right)
+		// Result type is left | right, but for simplicity return right type
+		return rightType
+
 	default:
 		return Any
 	}
@@ -1528,8 +2131,17 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 
 		fnType := classType.Constructor
 
-		// Check argument count
-		if len(node.Arguments) != len(fnType.Parameters) {
+		// Check if any argument is a spread expression
+		hasSpread := false
+		for _, arg := range node.Arguments {
+			if _, ok := arg.(*ast.SpreadExpression); ok {
+				hasSpread = true
+				break
+			}
+		}
+
+		// Check argument count (skip if there are spread arguments)
+		if !hasSpread && len(node.Arguments) != len(fnType.Parameters) {
 			c.addError(
 				fmt.Sprintf("Constructor expects %d arguments, got %d",
 					len(fnType.Parameters), len(node.Arguments)),
@@ -1565,8 +2177,84 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 		return Any
 	}
 
-	// Check argument count
-	if len(node.Arguments) != len(fnType.Parameters) {
+	// Check if any argument is a spread expression (used for multiple checks)
+	hasSpreadArgs := false
+	for _, arg := range node.Arguments {
+		if _, ok := arg.(*ast.SpreadExpression); ok {
+			hasSpreadArgs = true
+			break
+		}
+	}
+
+	// If the function is generic and called without explicit type arguments, try to infer them
+	if len(fnType.GenericParams) > 0 {
+		// Check argument count first (skip if there are spread arguments or function has rest parameter)
+		if !hasSpreadArgs && !fnType.HasRestParameter && len(node.Arguments) != len(fnType.Parameters) {
+			c.addError(
+				fmt.Sprintf("Function expects %d arguments, got %d",
+					len(fnType.Parameters), len(node.Arguments)),
+				node.Token,
+			)
+			return fnType.ReturnType
+		}
+
+		// If function has rest parameter, check minimum argument count
+		if !hasSpreadArgs && fnType.HasRestParameter {
+			minArgs := len(fnType.Parameters) - 1
+			if len(node.Arguments) < minArgs {
+				c.addError(
+					fmt.Sprintf("Function expects at least %d arguments, got %d",
+						minArgs, len(node.Arguments)),
+					node.Token,
+				)
+				return fnType.ReturnType
+			}
+		}
+
+		// Infer type arguments from call arguments
+		typeArgs := make([]Type, len(fnType.GenericParams))
+		inferred := make([]bool, len(fnType.GenericParams))
+
+		for i, arg := range node.Arguments {
+			argType := c.checkExpression(arg)
+			paramType := fnType.Parameters[i]
+
+			// If the parameter type is a GenericParamType, infer from the argument
+			if genericParam, ok := paramType.(*GenericParamType); ok {
+				// Find which generic parameter this is
+				for j, gpName := range fnType.GenericParams {
+					if genericParam.Name == gpName {
+						if !inferred[j] {
+							typeArgs[j] = argType
+							inferred[j] = true
+						}
+						break
+					}
+				}
+			}
+		}
+
+		// Check if all type parameters were inferred
+		allInferred := true
+		for i, inf := range inferred {
+			if !inf {
+				c.addError(
+					fmt.Sprintf("Could not infer type parameter '%s'", fnType.GenericParams[i]),
+					node.Token,
+				)
+				allInferred = false
+				typeArgs[i] = Any // Fallback to Any
+			}
+		}
+
+		if allInferred {
+			// Instantiate the function with inferred types
+			fnType = c.instantiateGenericFunction(fnType, typeArgs)
+		}
+	}
+
+	// Check argument count (skip if there are spread arguments or function has rest parameter)
+	if !hasSpreadArgs && !fnType.HasRestParameter && len(node.Arguments) != len(fnType.Parameters) {
 		c.addError(
 			fmt.Sprintf("Function expects %d arguments, got %d",
 				len(fnType.Parameters), len(node.Arguments)),
@@ -1575,15 +2263,48 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 		return fnType.ReturnType
 	}
 
-	// Check argument types
-	for i, arg := range node.Arguments {
-		argType := c.checkExpression(arg)
-		if !argType.IsAssignableTo(fnType.Parameters[i]) {
+	// If function has rest parameter, check minimum argument count
+	if !hasSpreadArgs && fnType.HasRestParameter {
+		minArgs := len(fnType.Parameters) - 1 // All params except the rest parameter
+		if len(node.Arguments) < minArgs {
 			c.addError(
-				fmt.Sprintf("Argument %d: cannot pass type '%s' to parameter of type '%s'",
-					i+1, argType.String(), fnType.Parameters[i].String()),
+				fmt.Sprintf("Function expects at least %d arguments, got %d",
+					minArgs, len(node.Arguments)),
 				node.Token,
 			)
+			return fnType.ReturnType
+		}
+	}
+
+	// Check argument types (basic check, skip detailed checks with spread)
+	if !hasSpreadArgs {
+		for i, arg := range node.Arguments {
+			argType := c.checkExpression(arg)
+
+			// Determine which parameter type to check against
+			var paramType Type
+			if fnType.HasRestParameter && i >= len(fnType.Parameters)-1 {
+				// This argument goes to the rest parameter - unwrap array type
+				restParamType := fnType.Parameters[len(fnType.Parameters)-1]
+				if arrayType, ok := restParamType.(*ArrayType); ok {
+					paramType = arrayType.ElementType
+				} else {
+					paramType = Any
+				}
+			} else if i < len(fnType.Parameters) {
+				paramType = fnType.Parameters[i]
+			} else {
+				// This should not happen if our count checking is correct
+				continue
+			}
+
+			if !argType.IsAssignableTo(paramType) {
+				c.addError(
+					fmt.Sprintf("Argument %d: cannot pass type '%s' to parameter of type '%s'",
+						i+1, argType.String(), paramType.String()),
+					node.Token,
+				)
+			}
 		}
 	}
 
@@ -1603,8 +2324,24 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 
 	propertyName := rightIdent.Value
 
+	// Handle optional chaining - unwrap optional types
+	isLeftOptional := false
+	actualLeftType := leftType
+	if optType, ok := leftType.(*OptionalType); ok {
+		isLeftOptional = true
+		actualLeftType = optType.BaseType
+	}
+
+	// Helper function to wrap result if needed
+	wrapIfOptional := func(resultType Type) Type {
+		if node.IsOptional || isLeftOptional {
+			return &OptionalType{BaseType: resultType}
+		}
+		return resultType
+	}
+
 	// Check if left type has the property
-	switch typ := leftType.(type) {
+	switch typ := actualLeftType.(type) {
 	case *ClassType:
 		// Check static properties first (when accessing class directly like Math.PI)
 		if propType, ok := typ.GetStaticProperty(propertyName); ok {
@@ -1619,7 +2356,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return propType
+			return wrapIfOptional(propType)
 		}
 		// Check static methods
 		if methodType, ok := typ.GetStaticMethod(propertyName); ok {
@@ -1634,7 +2371,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return methodType
+			return wrapIfOptional(methodType)
 		}
 		// Check instance properties
 		if propType, ok := typ.GetProperty(propertyName); ok {
@@ -1646,7 +2383,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return propType
+			return wrapIfOptional(propType)
 		}
 		// Check instance methods
 		if methodType, ok := typ.GetMethod(propertyName); ok {
@@ -1658,43 +2395,42 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return methodType
+			return wrapIfOptional(methodType)
 		}
-		c.addError(
-			fmt.Sprintf("Type '%s' has no property or method '%s'", typ.String(), propertyName),
-			node.Token,
-		)
-		return Any
+		// In Lua, accessing a non-existent property returns nil at runtime
+		// Allow this for type guards and dynamic property access
+		// Return 'any' to be permissive (the property might exist in subclasses)
+		return wrapIfOptional(Any)
 
 	case *InterfaceType:
 		// Check properties
 		if propType, ok := typ.GetProperty(propertyName); ok {
-			return propType
+			return wrapIfOptional(propType)
 		}
 		// Check methods
 		if methodType, ok := typ.GetMethod(propertyName); ok {
-			return methodType
+			return wrapIfOptional(methodType)
 		}
 		c.addError(
 			fmt.Sprintf("Type '%s' has no property or method '%s'", typ.String(), propertyName),
 			node.Token,
 		)
-		return Any
+		return wrapIfOptional(Any)
 
 	case *EnumType:
 		// Check enum members
 		if memberType, ok := typ.GetMemberType(propertyName); ok {
-			return memberType
+			return wrapIfOptional(memberType)
 		}
 		c.addError(
 			fmt.Sprintf("Enum '%s' has no member '%s'", typ.String(), propertyName),
 			node.Token,
 		)
-		return Any
+		return wrapIfOptional(Any)
 
 	default:
 		// For other types, allow any property access (could be table access)
-		return Any
+		return wrapIfOptional(Any)
 	}
 }
 
@@ -1728,6 +2464,127 @@ func (c *Checker) checkIndexExpression(node *ast.IndexExpression) Type {
 		// For other types, allow any index access
 		return Any
 	}
+}
+
+// checkGenericInstantiation checks a generic type instantiation like Box<string> or identity<number>
+func (c *Checker) checkGenericInstantiation(node *ast.GenericType) Type {
+	// Get the base type (should be an identifier)
+	baseIdent, ok := node.BaseType.(*ast.Identifier)
+	if !ok {
+		c.addError("Generic instantiation base must be an identifier", node.Token)
+		return Any
+	}
+
+	// Resolve type arguments
+	typeArgs := make([]Type, len(node.TypeArguments))
+	for i, arg := range node.TypeArguments {
+		typeArgs[i] = c.resolveTypeExpression(arg)
+	}
+
+	// Check if it's a generic class
+	if classType, exists := c.classes[baseIdent.Value]; exists {
+		if len(classType.GenericParams) == 0 {
+			c.addError(
+				fmt.Sprintf("Class '%s' is not generic", classType.Name),
+				node.Token,
+			)
+			return classType
+		}
+
+		// Check type argument count
+		if len(typeArgs) != len(classType.GenericParams) {
+			c.addError(
+				fmt.Sprintf("Class '%s' expects %d type arguments, got %d",
+					classType.Name, len(classType.GenericParams), len(typeArgs)),
+				node.Token,
+			)
+			return classType
+		}
+
+		// Create an instantiated class type with substituted type parameters
+		return c.instantiateGenericClass(classType, typeArgs)
+	}
+
+	// Check if it's a generic function
+	if typ, exists := c.env.Get(baseIdent.Value); exists {
+		if funcType, ok := typ.(*FunctionType); ok {
+			if len(funcType.GenericParams) == 0 {
+				c.addError(
+					fmt.Sprintf("Function '%s' is not generic", baseIdent.Value),
+					node.Token,
+				)
+				return funcType
+			}
+
+			// Check type argument count
+			if len(typeArgs) != len(funcType.GenericParams) {
+				c.addError(
+					fmt.Sprintf("Function '%s' expects %d type arguments, got %d",
+						baseIdent.Value, len(funcType.GenericParams), len(typeArgs)),
+					node.Token,
+				)
+				return funcType
+			}
+
+			// Create an instantiated function type with substituted type parameters
+			return c.instantiateGenericFunction(funcType, typeArgs)
+		}
+	}
+
+	c.addError(fmt.Sprintf("'%s' is not a generic type or function", baseIdent.Value), node.Token)
+	return Any
+}
+
+// checkSpreadExpression checks a spread expression
+func (c *Checker) checkSpreadExpression(node *ast.SpreadExpression) Type {
+	valueType := c.checkExpression(node.Value)
+
+	// Spread expression should contain an array or table
+	if arrayType, ok := valueType.(*ArrayType); ok {
+		return arrayType
+	}
+
+	if tableType, ok := valueType.(*TableType); ok {
+		return tableType
+	}
+
+	// If it's Any, allow it
+	if valueType.Equals(Any) {
+		return Any
+	}
+
+	c.addError(
+		fmt.Sprintf("Cannot spread type '%s', expected array or table", valueType.String()),
+		node.Token,
+	)
+	return Any
+}
+
+// checkTypeAssertion checks a type assertion (value as Type)
+func (c *Checker) checkTypeAssertion(node *ast.TypeAssertion) Type {
+	// Check the expression being asserted (ensures it's valid)
+	c.checkExpression(node.Expression)
+
+	// Resolve the target type
+	targetType := c.resolveTypeExpression(node.TargetType)
+
+	// Type assertions are generally allowed, but we can warn about impossible casts
+	// For now, we'll be permissive - the developer knows what they're doing
+	// We could add stricter checking here in the future
+
+	// Return the target type - that's what the assertion claims it is
+	return targetType
+}
+
+func (c *Checker) checkTemplateLiteral(node *ast.TemplateLiteral) Type {
+	// Type check all expressions inside ${...}
+	for _, expr := range node.Expressions {
+		c.checkExpression(expr)
+		// We don't enforce that expressions are strings - they'll be converted at runtime
+	}
+
+	// Template literals always result in a string
+	return String
 }
 
 // canAccessMember checks if the current context can access a member with the given visibility
@@ -1793,17 +2650,21 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 	// For ambient declarations, we only register types, not check implementations
 	switch decl := node.Declaration.(type) {
 	case *ast.VariableDeclaration:
-		// Register the variable with its declared type
-		if decl.Type != nil {
-			declaredType := c.resolveTypeExpression(decl.Type)
-			if decl.IsConstant {
-				c.env.SetConst(decl.Name.Value, declaredType)
+		// Register each variable with its declared type
+		for i, name := range decl.Names {
+			var varType Type
+			if i < len(decl.Types) && decl.Types[i] != nil {
+				varType = c.resolveTypeExpression(decl.Types[i])
 			} else {
-				c.env.Set(decl.Name.Value, declaredType)
+				// No type annotation on ambient declaration - use any
+				varType = Any
 			}
-		} else {
-			// No type annotation on ambient declaration - use any
-			c.env.Set(decl.Name.Value, Any)
+
+			if decl.IsConstant {
+				c.env.SetConst(name.Value, varType)
+			} else {
+				c.env.Set(name.Value, varType)
+			}
 		}
 
 	case *ast.FunctionDeclaration:
@@ -1823,8 +2684,9 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 		}
 
 		funcType := &FunctionType{
-			Parameters: params,
-			ReturnType: returnType,
+			Parameters:    params,
+			ReturnType:    returnType,
+			GenericParams: []string{}, // Ambient function declarations are not generic
 		}
 		c.env.Set(decl.Name.Value, funcType)
 

@@ -7,9 +7,10 @@ const (
 	EOF     = "EOF"
 
 	// identifiers + literals
-	IDENT  = "IDENT"
-	NUMBER = "NUMBER"
-	STRING = "STRING"
+	IDENT           = "IDENT"
+	NUMBER          = "NUMBER"
+	STRING          = "STRING"
+	TEMPLATE_STRING = "TEMPLATE_STRING" // backtick string with ${} interpolation
 
 	//operators
 	ASSIGN   = "="
@@ -17,8 +18,10 @@ const (
 	MINUS    = "-"
 	BANG     = "!"
 	ASTERISK = "*"
-	SLASH    = "/"
-	MODULO   = "%"
+	SLASH     = "/"
+	MODULO    = "%"
+	HASH      = "#"
+	AMPERSAND = "&" // for intersection types Type1 & Type2
 
 	//comparison
 	EQ         = "=="
@@ -35,7 +38,8 @@ const (
 	NOT = "not"
 
 	//concat operator
-	CONCAT = ".."
+	CONCAT   = ".."
+	ELLIPSIS = "..."
 
 	//delimeters
 	COMMA    = ","
@@ -65,6 +69,7 @@ const (
 	CONST       = "const"
 	RETURN      = "return"
 	IF          = "if"
+	ELSEIF      = "elseif"
 	ELSE        = "else"
 	THEN        = "then"
 	FOR         = "for"
@@ -82,6 +87,8 @@ const (
 	IMPORT      = "import"
 	FROM        = "from"
 	DECLARE     = "declare"
+	IS          = "is" // for type guards: value is Type
+	AS          = "as" // for type assertions: value as Type
 
 	//types
 	ANY         = "any"
@@ -96,6 +103,10 @@ const (
 	QUESTION = "?"
 	TABLE    = "table"
 	PIPE     = "|"
+
+	// Optional chaining and nullish coalescing
+	OPTIONAL_CHAIN     = "?."
+	NULLISH_COALESCE   = "??"
 )
 
 // Map of keywords
@@ -116,6 +127,7 @@ var keywords = map[string]TokenType{
 	"const":       CONST,
 	"return":      RETURN,
 	"if":          IF,
+	"elseif":      ELSEIF,
 	"else":        ELSE,
 	"then":        THEN,
 	"for":         FOR,
@@ -136,6 +148,8 @@ var keywords = map[string]TokenType{
 	"import":      IMPORT,
 	"from":        FROM,
 	"declare":     DECLARE,
+	"is":          IS,
+	"as":          AS,
 	"table":       TABLE,
 	"any":         ANY,
 	"string":      STRING_TYPE,

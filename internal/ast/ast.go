@@ -55,6 +55,29 @@ func (i *StringLiteral) String() string {
 	return fmt.Sprintf("\"%s\"", i.Value)
 }
 
+type TemplateLiteral struct {
+	Token       lexer.Token // the backtick token
+	Parts       []string    // string parts between ${}
+	Expressions []Expression // expressions inside ${}
+}
+
+func (tl *TemplateLiteral) expressionNode()      {}
+func (tl *TemplateLiteral) TokenLiteral() string { return tl.Token.Literal }
+func (tl *TemplateLiteral) String() string {
+	var out string
+	out += "`"
+	for i, part := range tl.Parts {
+		out += part
+		if i < len(tl.Expressions) {
+			out += "${"
+			out += tl.Expressions[i].String()
+			out += "}"
+		}
+	}
+	out += "`"
+	return out
+}
+
 type BooleanLiteral struct {
 	Token lexer.Token
 	Value bool
@@ -126,15 +149,20 @@ func (ce *CallExpression) String() string {
 }
 
 type DotExpression struct {
-	Token lexer.Token
-	Left  Expression
-	Right Expression
+	Token      lexer.Token
+	Left       Expression
+	Right      Expression
+	IsOptional bool // true for optional chaining (?.)
 }
 
 func (de *DotExpression) expressionNode()      {}
 func (de *DotExpression) TokenLiteral() string { return de.Token.Literal }
 func (de *DotExpression) String() string {
-	return fmt.Sprintf("%s.%s", de.Left.String(), de.Right.String())
+	operator := "."
+	if de.IsOptional {
+		operator = "?."
+	}
+	return fmt.Sprintf("%s%s%s", de.Left.String(), operator, de.Right.String())
 }
 
 type IndexExpression struct {
@@ -147,6 +175,31 @@ func (ie *IndexExpression) expressionNode()      {}
 func (ie *IndexExpression) TokenLiteral() string { return ie.Token.Literal }
 func (ie *IndexExpression) String() string {
 	return fmt.Sprintf("%s[%s]", ie.Left.String(), ie.Index.String())
+}
+
+// SpreadExpression represents spread syntax ...expr
+type SpreadExpression struct {
+	Token lexer.Token // '...' token
+	Value Expression  // the expression being spread
+}
+
+func (se *SpreadExpression) expressionNode()      {}
+func (se *SpreadExpression) TokenLiteral() string { return se.Token.Literal }
+func (se *SpreadExpression) String() string {
+	return fmt.Sprintf("...%s", se.Value.String())
+}
+
+// TypeAssertion represents type assertion syntax value as Type
+type TypeAssertion struct {
+	Token      lexer.Token // 'as' token
+	Expression Expression  // the expression being asserted
+	TargetType Expression  // the type to assert to
+}
+
+func (ta *TypeAssertion) expressionNode()      {}
+func (ta *TypeAssertion) TokenLiteral() string { return ta.Token.Literal }
+func (ta *TypeAssertion) String() string {
+	return fmt.Sprintf("(%s as %s)", ta.Expression.String(), ta.TargetType.String())
 }
 
 type TableLiteral struct {
@@ -191,9 +244,9 @@ type Statement interface {
 
 type VariableDeclaration struct {
 	Token      lexer.Token
-	Name       *Identifier
-	Type       Expression
-	Value      Expression
+	Names      []*Identifier // Support multiple variables (e.g., local x, y = 1, 2)
+	Types      []Expression  // Type annotations for each variable
+	Values     []Expression  // Values for each variable
 	IsConstant bool
 }
 
@@ -208,18 +261,29 @@ func (vd *VariableDeclaration) String() string {
 		out.WriteString("local ")
 	}
 
-	out.WriteString(vd.Name.String())
+	// Write all variable names with types
+	for i, name := range vd.Names {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(name.String())
 
-	// Type annotation
-	if vd.Type != nil {
-		out.WriteString(": ")
-		out.WriteString(vd.Type.String())
+		// Type annotation
+		if i < len(vd.Types) && vd.Types[i] != nil {
+			out.WriteString(": ")
+			out.WriteString(vd.Types[i].String())
+		}
 	}
 
 	// Value assignment
-	if vd.Value != nil {
+	if len(vd.Values) > 0 {
 		out.WriteString(" = ")
-		out.WriteString(vd.Value.String())
+		for i, val := range vd.Values {
+			if i > 0 {
+				out.WriteString(", ")
+			}
+			out.WriteString(val.String())
+		}
 	}
 
 	return out.String()
@@ -272,6 +336,23 @@ func (ut *UnionType) String() string {
 	return strings.Join(typeStrs, " | ")
 }
 
+type IntersectionType struct {
+	Token lexer.Token // '&' token
+	Types []Expression
+}
+
+func (it *IntersectionType) expressionNode()      {}
+func (it *IntersectionType) TokenLiteral() string { return it.Token.Literal }
+func (it *IntersectionType) String() string {
+	typeStrs := []string{}
+	for _, t := range it.Types {
+		if t != nil {
+			typeStrs = append(typeStrs, t.String())
+		}
+	}
+	return strings.Join(typeStrs, " & ")
+}
+
 type TupleType struct {
 	Token lexer.Token // '(' token
 	Types []Expression
@@ -321,16 +402,33 @@ func (gt *GenericType) String() string {
 	return fmt.Sprintf("%s<%s>", gt.BaseType.String(), strings.Join(argStrs, ", "))
 }
 
+// TypeGuardType represents a type guard return type like "value is string"
+type TypeGuardType struct {
+	Token     lexer.Token // the parameter name token
+	ParamName *Identifier // the parameter being guarded (e.g., "value")
+	GuardType Expression  // the type being guarded (e.g., "string")
+}
+
+func (tg *TypeGuardType) expressionNode()      {}
+func (tg *TypeGuardType) TokenLiteral() string { return tg.Token.Literal }
+func (tg *TypeGuardType) String() string {
+	return fmt.Sprintf("%s is %s", tg.ParamName.String(), tg.GuardType.String())
+}
+
 type Parameter struct {
-	Token lexer.Token
-	Name  *Identifier
-	Type  Expression
+	Token  lexer.Token
+	Name   *Identifier
+	Type   Expression
+	IsRest bool // true for ...param
 }
 
 func (p *Parameter) expressionNode()      {}
 func (p *Parameter) TokenLiteral() string { return p.Token.Literal }
 func (p *Parameter) String() string {
 	var out strings.Builder
+	if p.IsRest {
+		out.WriteString("...")
+	}
 	out.WriteString(p.Name.String())
 	if p.Type != nil {
 		out.WriteString(": ")
@@ -398,9 +496,44 @@ func (fd *FunctionDeclaration) String() string {
 	return out.String()
 }
 
+// FunctionExpression represents an anonymous function expression
+type FunctionExpression struct {
+	Token         lexer.Token       // The 'function' token
+	GenericParams []*Identifier     // generic type parameters like <T, U>
+	Parameters    []*Parameter
+	ReturnType    Expression
+	Body          *BlockStatement
+}
+
+func (fe *FunctionExpression) expressionNode()      {}
+func (fe *FunctionExpression) TokenLiteral() string { return fe.Token.Literal }
+func (fe *FunctionExpression) String() string {
+	var out strings.Builder
+
+	params := []string{}
+	for _, p := range fe.Parameters {
+		params = append(params, p.String())
+	}
+
+	out.WriteString("function(")
+	out.WriteString(strings.Join(params, ", "))
+	out.WriteString(")")
+
+	if fe.ReturnType != nil {
+		out.WriteString(": ")
+		out.WriteString(fe.ReturnType.String())
+	}
+
+	out.WriteString(" ")
+	out.WriteString(fe.Body.String())
+	out.WriteString(" end")
+
+	return out.String()
+}
+
 type ReturnStatement struct {
-	Token       lexer.Token
-	ReturnValue Expression
+	Token        lexer.Token
+	ReturnValues []Expression // Support multiple return values
 }
 
 func (rs *ReturnStatement) statementNode()       {}
@@ -408,8 +541,13 @@ func (rs *ReturnStatement) TokenLiteral() string { return rs.Token.Literal }
 func (rs *ReturnStatement) String() string {
 	var out strings.Builder
 	out.WriteString("return ")
-	if rs.ReturnValue != nil {
-		out.WriteString(rs.ReturnValue.String())
+	for i, val := range rs.ReturnValues {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		if val != nil {
+			out.WriteString(val.String())
+		}
 	}
 	return out.String()
 }
@@ -475,13 +613,13 @@ func (ws *WhileStatement) String() string {
 }
 
 type ForStatement struct {
-	Token    lexer.Token // 'for' token
-	Variable *Identifier
-	Start    Expression // for numeric: start value
-	End      Expression // for numeric: end value
-	Step     Expression // for numeric: step value (optional)
-	Iterator Expression // for generic: iterator expression
-	Body     *BlockStatement
+	Token     lexer.Token // 'for' token
+	Variables []*Identifier // loop variables (can be multiple for generic for loops)
+	Start     Expression // for numeric: start value
+	End       Expression // for numeric: end value
+	Step      Expression // for numeric: step value (optional)
+	Iterator  Expression // for generic: iterator expression
+	Body      *BlockStatement
 	IsGeneric bool // true if generic for, false if numeric for
 }
 
@@ -491,7 +629,14 @@ func (fs *ForStatement) String() string {
 	var out strings.Builder
 
 	out.WriteString("for ")
-	out.WriteString(fs.Variable.String())
+
+	// Write all loop variables
+	for i, v := range fs.Variables {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(v.String())
+	}
 
 	if fs.IsGeneric {
 		out.WriteString(" in ")

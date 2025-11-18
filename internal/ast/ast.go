@@ -388,6 +388,31 @@ func (mt *MappedType) String() string {
 	return result
 }
 
+// TemplateLiteralType represents a template literal type: `Hello ${string}` or `${T}_${U}`
+type TemplateLiteralType struct {
+	Token      lexer.Token  // The backtick token
+	Parts      []string     // String literal parts (always has one more element than Types)
+	Types      []Expression // Type expressions between the string parts
+	RawLiteral string       // The original template string for reference
+}
+
+func (tlt *TemplateLiteralType) expressionNode()      {}
+func (tlt *TemplateLiteralType) TokenLiteral() string { return tlt.Token.Literal }
+func (tlt *TemplateLiteralType) String() string {
+	var result strings.Builder
+	result.WriteString("`")
+	for i, part := range tlt.Parts {
+		result.WriteString(part)
+		if i < len(tlt.Types) {
+			result.WriteString("${")
+			result.WriteString(tlt.Types[i].String())
+			result.WriteString("}")
+		}
+	}
+	result.WriteString("`")
+	return result.String()
+}
+
 type UnionType struct {
 	Token lexer.Token // '|' token
 	Types []Expression

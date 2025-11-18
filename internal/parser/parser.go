@@ -5,6 +5,7 @@ import (
 	"lunar/internal/ast"
 	"lunar/internal/lexer"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -779,6 +780,9 @@ func (p *Parser) parseType() ast.Expression {
 	case lexer.FALSE:
 		// Boolean literal type: false
 		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: false}
+	case lexer.TEMPLATE_STRING:
+		// Template literal type: `Hello ${string}` or `${T}_${U}`
+		return p.parseTemplateLiteralType()
 	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
 		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	default:
@@ -857,6 +861,78 @@ func (p *Parser) parseMappedType() ast.Expression {
 	}
 
 	return mappedType
+}
+
+// parseTemplateLiteralType parses template literal types: `Hello ${string}` or `${T}_${U}`
+func (p *Parser) parseTemplateLiteralType() ast.Expression {
+	templateLiteral := &ast.TemplateLiteralType{
+		Token:      p.curToken,
+		RawLiteral: p.curToken.Literal,
+		Parts:      []string{},
+		Types:      []ast.Expression{},
+	}
+
+	// Parse the template string to extract parts and type expressions
+	// The template string is in p.curToken.Literal
+	content := p.curToken.Literal
+	var parts []string
+	var types []ast.Expression
+	var currentPart strings.Builder
+
+	i := 0
+	for i < len(content) {
+		if i < len(content)-1 && content[i] == '$' && content[i+1] == '{' {
+			// Found ${...} - save current part and parse the type
+			parts = append(parts, currentPart.String())
+			currentPart.Reset()
+
+			// Find the matching }
+			i += 2 // Skip ${
+			start := i
+			braceCount := 1
+			for i < len(content) && braceCount > 0 {
+				if content[i] == '{' {
+					braceCount++
+				} else if content[i] == '}' {
+					braceCount--
+				}
+				if braceCount > 0 {
+					i++
+				}
+			}
+
+			if braceCount != 0 {
+				// Unmatched braces
+				return nil
+			}
+
+			// Parse the type expression
+			typeStr := content[start:i]
+			// Create a mini-parser for the type expression
+			typeLexer := lexer.New(typeStr)
+			typeParser := New(typeLexer)
+			typeParser.nextToken() // Initialize parser
+			typeExpr := typeParser.parseType()
+			if typeExpr == nil {
+				return nil
+			}
+			types = append(types, typeExpr)
+
+			i++ // Skip closing }
+		} else {
+			// Regular character
+			currentPart.WriteByte(content[i])
+			i++
+		}
+	}
+
+	// Add the final part
+	parts = append(parts, currentPart.String())
+
+	templateLiteral.Parts = parts
+	templateLiteral.Types = types
+
+	return templateLiteral
 }
 
 func (p *Parser) parseSimpleType() ast.Expression {

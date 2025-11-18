@@ -936,6 +936,10 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		// For now, create a generic mapped type that will be instantiated later
 		return c.resolveMappedType(node, constraintType)
 
+	case *ast.TemplateLiteralType:
+		// Template literal type `Hello ${string}` or `${T}_${U}`
+		return c.resolveTemplateLiteralType(node)
+
 	default:
 		c.addError(fmt.Sprintf("Cannot resolve type expression: %T", expr), lexer.Token{})
 		return Any
@@ -3589,4 +3593,81 @@ func (c *Checker) resolveMappedValueType(valueTypeExpr ast.Expression, typeParam
 	c.env = prevEnv
 
 	return result
+}
+
+// resolveTemplateLiteralType resolves template literal types like `Hello ${string}` or `${T}_${U}`
+func (c *Checker) resolveTemplateLiteralType(node *ast.TemplateLiteralType) Type {
+	// Resolve all type expressions in the template
+	resolvedTypes := make([]Type, len(node.Types))
+	for i, typeExpr := range node.Types {
+		resolvedTypes[i] = c.resolveTypeExpression(typeExpr)
+	}
+
+	// Generate all possible string combinations
+	// Start with the first part
+	combinations := []string{node.Parts[0]}
+
+	// For each type expression, generate new combinations
+	for i, typ := range resolvedTypes {
+		var newCombinations []string
+
+		// Extract possible string values from the type
+		stringValues := c.extractStringValues(typ)
+
+		// For each existing combination and each string value, create new combinations
+		for _, combo := range combinations {
+			for _, value := range stringValues {
+				newCombo := combo + value + node.Parts[i+1]
+				newCombinations = append(newCombinations, newCombo)
+			}
+		}
+
+		combinations = newCombinations
+	}
+
+	// If we couldn't generate any combinations, or if any type is `string` (unbounded),
+	// return a general string type
+	if len(combinations) == 0 {
+		return String
+	}
+
+	// Check if we have an unbounded string type
+	for _, typ := range resolvedTypes {
+		if _, isString := typ.(*StringType); isString {
+			// Unbounded - return string type
+			return String
+		}
+	}
+
+	// Create a union of string literal types
+	if len(combinations) == 1 {
+		return &StringLiteralType{Value: combinations[0]}
+	}
+
+	literalTypes := make([]Type, len(combinations))
+	for i, combo := range combinations {
+		literalTypes[i] = &StringLiteralType{Value: combo}
+	}
+
+	return &UnionType{Types: literalTypes}
+}
+
+// extractStringValues extracts possible string values from a type
+func (c *Checker) extractStringValues(typ Type) []string {
+	switch t := typ.(type) {
+	case *StringLiteralType:
+		return []string{t.Value}
+	case *UnionType:
+		var values []string
+		for _, memberType := range t.Types {
+			values = append(values, c.extractStringValues(memberType)...)
+		}
+		return values
+	case *StringType:
+		// Unbounded string - return empty to signal this
+		return []string{"<string>"}
+	default:
+		// For non-string types, convert to string representation
+		return []string{t.String()}
+	}
 }

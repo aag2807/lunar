@@ -859,9 +859,19 @@ func (t *ClassType) GetStaticMethod(name string) (*FunctionType, bool) {
 	return typ, ok
 }
 
-// IsReadonly checks if a property is readonly
+// IsReadonly checks if a property is readonly (including inherited properties)
 func (t *ClassType) IsReadonly(name string) bool {
-	return t.ReadonlyProps[name]
+	// Check own properties first
+	if readonly, ok := t.ReadonlyProps[name]; ok {
+		return readonly
+	}
+
+	// Check parent class
+	if t.Parent != nil {
+		return t.Parent.IsReadonly(name)
+	}
+
+	return false
 }
 
 // IsAbstractMethod checks if a method is abstract

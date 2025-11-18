@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -23,6 +24,7 @@ func main() {
 	sourceMap := flag.Bool("source-map", false, "Generate source map (.lua.map file)")
 	showVersion := flag.Bool("version", false, "Show version information")
 	showHelp := flag.Bool("help", false, "Show help message")
+	replMode := flag.Bool("repl", false, "Start interactive REPL mode")
 
 	flag.Parse()
 
@@ -35,6 +37,12 @@ func main() {
 	// Handle help flag
 	if *showHelp {
 		printHelp()
+		os.Exit(0)
+	}
+
+	// Handle REPL mode
+	if *replMode {
+		runREPL()
 		os.Exit(0)
 	}
 
@@ -254,11 +262,13 @@ func printHelp() {
 	fmt.Printf("Version: %s\n\n", version)
 	fmt.Println("Usage:")
 	fmt.Println("  lunar [options] <input.lunar>")
+	fmt.Println("  lunar --repl")
 	fmt.Println()
 	fmt.Println("Options:")
 	fmt.Println("  -o <file>        Output file (default: replaces .lunar with .lua)")
 	fmt.Println("  --no-typecheck   Skip type checking")
 	fmt.Println("  --source-map     Generate source map (.lua.map file)")
+	fmt.Println("  --repl           Start interactive REPL mode")
 	fmt.Println("  --version        Show version information")
 	fmt.Println("  --help           Show this help message")
 	fmt.Println()
@@ -267,7 +277,150 @@ func printHelp() {
 	fmt.Println("  lunar main.lunar -o output.lua")
 	fmt.Println("  lunar main.lunar --no-typecheck")
 	fmt.Println("  lunar main.lunar --source-map")
+	fmt.Println("  lunar --repl")
 	fmt.Println()
 	fmt.Println("For more information about the Lunar language:")
 	fmt.Println("  See README.md in the repository")
+}
+
+// runREPL starts the interactive Read-Eval-Print-Loop
+func runREPL() {
+	fmt.Println("Lunar REPL - Interactive Mode")
+	fmt.Printf("Version %s\n", version)
+	fmt.Println("Type 'exit' or 'quit' to exit, 'help' for commands")
+	fmt.Println()
+
+	scanner := bufio.NewScanner(os.Stdin)
+	var multiLineBuffer strings.Builder
+	nestingLevel := 0
+	allStatements := []ast.Statement{}
+	checker := types.NewChecker()
+
+	for {
+		// Print prompt
+		if nestingLevel > 0 {
+			fmt.Print("... ")
+		} else {
+			fmt.Print(">>> ")
+		}
+
+		// Read input
+		if !scanner.Scan() {
+			fmt.Println("\nGoodbye!")
+			break
+		}
+
+		line := scanner.Text()
+
+		// Handle special commands (only at top level)
+		if nestingLevel == 0 {
+			switch strings.TrimSpace(line) {
+			case "exit", "quit":
+				fmt.Println("Goodbye!")
+				return
+			case "help":
+				printREPLHelp()
+				continue
+			case "clear":
+				allStatements = []ast.Statement{}
+				checker = types.NewChecker()
+				fmt.Println("Context cleared")
+				continue
+			case "context":
+				fmt.Printf("Accumulated %d statements\n", len(allStatements))
+				continue
+			}
+		}
+
+		// Calculate nesting level change
+		words := strings.Fields(line)
+		for _, word := range words {
+			switch word {
+			case "function", "if", "while", "for", "do", "class", "interface", "enum", "namespace":
+				nestingLevel++
+			case "end":
+				if nestingLevel > 0 {
+					nestingLevel--
+				}
+			}
+		}
+
+		// Accumulate input
+		multiLineBuffer.WriteString(line)
+		multiLineBuffer.WriteString("\n")
+
+		// Continue if still in a block
+		if nestingLevel > 0 {
+			continue
+		}
+
+		// Build complete input
+		input := multiLineBuffer.String()
+		multiLineBuffer.Reset()
+
+		// Skip empty input
+		if strings.TrimSpace(input) == "" {
+			continue
+		}
+
+		// Parse input
+		l := lexer.New(input)
+		p := parser.New(l)
+		statements := p.Parse()
+
+		// Check for parser errors
+		if len(p.Errors()) > 0 {
+			fmt.Println("Parse errors:")
+			for _, err := range p.Errors() {
+				fmt.Printf("  %s\n", err)
+			}
+			continue
+		}
+
+		// Type check with accumulated context
+		tempStatements := append(allStatements, statements...)
+		typeErrors := checker.Check(tempStatements)
+		if len(typeErrors) > 0 {
+			fmt.Println("Type errors:")
+			for _, err := range typeErrors {
+				fmt.Printf("  Line %d: %s\n", err.Line, err.Message)
+			}
+			continue
+		}
+
+		// Generate Lua code for new statements only
+		luaCode := codegen.Generate(statements)
+
+		// Print generated Lua
+		if strings.TrimSpace(luaCode) != "" {
+			fmt.Println("-- Lua output:")
+			fmt.Println(luaCode)
+		}
+
+		// Accumulate successful statements
+		allStatements = append(allStatements, statements...)
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+	}
+}
+
+// printREPLHelp prints help for the REPL
+func printREPLHelp() {
+	fmt.Println("REPL Commands:")
+	fmt.Println("  help     - Show this help")
+	fmt.Println("  clear    - Clear accumulated context")
+	fmt.Println("  context  - Show number of accumulated statements")
+	fmt.Println("  exit     - Exit the REPL (or 'quit')")
+	fmt.Println()
+	fmt.Println("Multi-line input:")
+	fmt.Println("  Blocks (function, if, class, etc.) automatically")
+	fmt.Println("  continue until 'end' is reached")
+	fmt.Println()
+	fmt.Println("Examples:")
+	fmt.Println("  >>> local x: number = 42")
+	fmt.Println("  >>> function add(a: number, b: number): number")
+	fmt.Println("  ...   return a + b")
+	fmt.Println("  ... end")
 }

@@ -1139,6 +1139,29 @@ func (es *ExportStatement) String() string {
 	return fmt.Sprintf("export %s", es.Statement.String())
 }
 
+// NamespaceDeclaration represents a namespace for organizing code
+type NamespaceDeclaration struct {
+	Token      lexer.Token // 'namespace' token
+	Name       *Identifier
+	Statements []Statement // declarations inside the namespace
+}
+
+func (ns *NamespaceDeclaration) statementNode()       {}
+func (ns *NamespaceDeclaration) TokenLiteral() string { return ns.Token.Literal }
+func (ns *NamespaceDeclaration) String() string {
+	var out strings.Builder
+	out.WriteString("namespace ")
+	out.WriteString(ns.Name.String())
+	out.WriteString("\n")
+	for _, stmt := range ns.Statements {
+		out.WriteString("  ")
+		out.WriteString(stmt.String())
+		out.WriteString("\n")
+	}
+	out.WriteString("end")
+	return out.String()
+}
+
 // ImportStatement represents an import declaration
 type ImportStatement struct {
 	Token   lexer.Token   // 'import' token

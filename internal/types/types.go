@@ -1035,6 +1035,34 @@ func (t *InterfaceType) GetProperty(name string) (Type, bool) {
 	return nil, false
 }
 
+// NamespaceType represents a namespace that contains other types and functions
+type NamespaceType struct {
+	Name    string
+	Members map[string]Type // Types, functions, classes, etc. in the namespace
+}
+
+func (t *NamespaceType) String() string {
+	return t.Name
+}
+func (t *NamespaceType) Equals(other Type) bool {
+	otherNs, ok := other.(*NamespaceType)
+	if !ok {
+		return false
+	}
+	return t.Name == otherNs.Name
+}
+func (t *NamespaceType) IsAssignableTo(other Type) bool {
+	return t.Equals(other)
+}
+
+// GetMember returns a member of the namespace by name
+func (t *NamespaceType) GetMember(name string) (Type, bool) {
+	if member, ok := t.Members[name]; ok {
+		return member, true
+	}
+	return nil, false
+}
+
 // EnumType represents an enum type
 type EnumType struct {
 	Name    string

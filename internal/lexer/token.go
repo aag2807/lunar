@@ -66,6 +66,7 @@ const (
 	READONLY    = "readonly"
 	GET         = "get"
 	SET         = "set"
+	NAMESPACE   = "namespace"
 	FUNCTION    = "function"
 	LOCAL       = "local"
 	CONST       = "const"
@@ -130,6 +131,7 @@ var keywords = map[string]TokenType{
 	"readonly":    READONLY,
 	"get":         GET,
 	"set":         SET,
+	"namespace":   NAMESPACE,
 	"function":    FUNCTION,
 	"local":       LOCAL,
 	"const":       CONST,

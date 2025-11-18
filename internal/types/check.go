@@ -355,6 +355,8 @@ func (c *Checker) registerTypeDefinition(stmt ast.Statement) {
 		c.registerEnum(node)
 	case *ast.TypeDeclaration:
 		c.registerTypeAlias(node)
+	case *ast.NamespaceDeclaration:
+		c.registerNamespace(node)
 	case *ast.DeclareStatement:
 		// Ambient declarations - register the underlying declaration
 		if node.Declaration != nil {
@@ -1676,6 +1678,8 @@ func (c *Checker) checkStatement(stmt ast.Statement) {
 		// Enum declarations don't need runtime checking
 	case *ast.TypeDeclaration:
 		// Type declarations don't need runtime checking
+	case *ast.NamespaceDeclaration:
+		c.checkNamespaceDeclaration(node)
 	case *ast.DeclareStatement:
 		// Ambient declarations - register without checking implementation
 		c.checkDeclareStatement(node)
@@ -3392,6 +3396,75 @@ func (c *Checker) addError(message string, token lexer.Token) {
 		Line:    token.Line,
 		Column:  token.Column,
 	})
+}
+
+// registerNamespace registers all declarations in a namespace
+func (c *Checker) registerNamespace(node *ast.NamespaceDeclaration) {
+	nsName := node.Name.Value
+
+	// Create a namespace type to track its contents
+	nsType := &NamespaceType{
+		Name:    nsName,
+		Members: make(map[string]Type),
+	}
+
+	// Register all declarations in the namespace with prefixed names
+	for _, stmt := range node.Statements {
+		switch s := stmt.(type) {
+		case *ast.ClassDeclaration:
+			c.registerClass(s)
+			// Store reference in namespace
+			if classType, ok := c.classes[s.Name.Value]; ok {
+				nsType.Members[s.Name.Value] = classType
+			}
+		case *ast.InterfaceDeclaration:
+			c.registerInterface(s)
+			if ifaceType, ok := c.interfaces[s.Name.Value]; ok {
+				nsType.Members[s.Name.Value] = ifaceType
+			}
+		case *ast.EnumDeclaration:
+			c.registerEnum(s)
+			if enumType, ok := c.enums[s.Name.Value]; ok {
+				nsType.Members[s.Name.Value] = enumType
+			}
+		case *ast.TypeDeclaration:
+			c.registerTypeAlias(s)
+			if aliasType, ok := c.typeAliases[s.Name.Value]; ok {
+				nsType.Members[s.Name.Value] = aliasType
+			}
+		case *ast.FunctionDeclaration:
+			// Register function in namespace
+			params := make([]Type, len(s.Parameters))
+			for i, param := range s.Parameters {
+				if param.Type != nil {
+					params[i] = c.resolveTypeExpression(param.Type)
+				} else {
+					params[i] = Any
+				}
+			}
+			var returnType Type = Void
+			if s.ReturnType != nil {
+				returnType = c.resolveTypeExpression(s.ReturnType)
+			}
+			funcType := &FunctionType{
+				Parameters: params,
+				ReturnType: returnType,
+			}
+			nsType.Members[s.Name.Value] = funcType
+			c.env.Set(s.Name.Value, funcType)
+		}
+	}
+
+	// Register the namespace itself
+	c.env.Set(nsName, nsType)
+}
+
+// checkNamespaceDeclaration checks all statements in a namespace
+func (c *Checker) checkNamespaceDeclaration(node *ast.NamespaceDeclaration) {
+	// Check all statements in the namespace
+	for _, stmt := range node.Statements {
+		c.checkStatement(stmt)
+	}
 }
 
 // checkExportStatement checks an export statement

@@ -1805,6 +1805,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseEnumDeclaration()
 	case lexer.TYPE:
 		return p.parseTypeDeclaration()
+	case lexer.NAMESPACE:
+		return p.parseNamespaceDeclaration()
 	case lexer.EXPORT:
 		return p.parseExportStatement()
 	case lexer.IMPORT:
@@ -2651,6 +2653,32 @@ func (p *Parser) parseImportStatement() *ast.ImportStatement {
 	importStmt.Module = p.curToken.Literal
 
 	return importStmt
+}
+
+// parseNamespaceDeclaration parses a namespace declaration
+func (p *Parser) parseNamespaceDeclaration() *ast.NamespaceDeclaration {
+	ns := &ast.NamespaceDeclaration{
+		Token: p.curToken, // 'namespace' token
+	}
+
+	// Parse namespace name
+	if !p.expectPeekIdentOrContextual() {
+		return nil
+	}
+	ns.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	p.nextToken() // move past name
+
+	// Parse namespace body until 'end'
+	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+		stmt := p.parseStatement()
+		if stmt != nil {
+			ns.Statements = append(ns.Statements, stmt)
+		}
+		p.nextToken()
+	}
+
+	return ns
 }
 
 // parseDeclareStatement parses ambient declarations like: declare const name: Type

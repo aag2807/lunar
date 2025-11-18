@@ -255,6 +255,8 @@ func (g *Generator) generateStatement(stmt ast.Statement) string {
 	case *ast.TypeDeclaration:
 		// Type aliases are type-only, don't generate code
 		return ""
+	case *ast.NamespaceDeclaration:
+		return g.generateNamespaceDeclaration(node)
 	case *ast.ExportStatement:
 		return g.generateExportStatement(node)
 	case *ast.ImportStatement:
@@ -766,6 +768,62 @@ func (g *Generator) generateEnumDeclaration(node *ast.EnumDeclaration) string {
 
 	output.WriteString(g.generateIndent())
 	output.WriteString("}\n")
+
+	return output.String()
+}
+
+// generateNamespaceDeclaration generates code for a namespace (transpiled to Lua table)
+func (g *Generator) generateNamespaceDeclaration(node *ast.NamespaceDeclaration) string {
+	var output strings.Builder
+	nsName := node.Name.Value
+
+	// Create namespace table
+	output.WriteString(g.generateIndent())
+	output.WriteString(fmt.Sprintf("local %s = {}\n\n", nsName))
+
+	// Generate all statements in the namespace
+	for _, stmt := range node.Statements {
+		switch s := stmt.(type) {
+		case *ast.ClassDeclaration:
+			// Generate class and assign to namespace
+			classCode := g.generateClassDeclaration(s)
+			output.WriteString(classCode)
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("%s.%s = %s\n\n", nsName, s.Name.Value, s.Name.Value))
+		case *ast.FunctionDeclaration:
+			// Generate function and assign to namespace
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("function %s.%s(", nsName, s.Name.Value))
+			params := make([]string, len(s.Parameters))
+			for i, param := range s.Parameters {
+				params[i] = param.Name.Value
+			}
+			output.WriteString(strings.Join(params, ", "))
+			output.WriteString(")\n")
+
+			g.indent++
+			if s.Body != nil {
+				for _, bodyStmt := range s.Body.Statements {
+					output.WriteString(g.generateStatement(bodyStmt))
+				}
+			}
+			g.indent--
+
+			output.WriteString(g.generateIndent())
+			output.WriteString("end\n\n")
+		case *ast.EnumDeclaration:
+			// Generate enum and assign to namespace
+			enumCode := g.generateEnumDeclaration(s)
+			output.WriteString(enumCode)
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("%s.%s = %s\n\n", nsName, s.Name.Value, s.Name.Value))
+		case *ast.InterfaceDeclaration, *ast.TypeDeclaration:
+			// Type-only declarations don't generate code
+		default:
+			// Generate other statements normally
+			output.WriteString(g.generateStatement(stmt))
+		}
+	}
 
 	return output.String()
 }

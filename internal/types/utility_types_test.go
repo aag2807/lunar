@@ -280,3 +280,208 @@ local resp: StringResponses = "success"
 		}
 	}
 }
+func TestPickType(t *testing.T) {
+	input := `
+interface Person
+	name: string
+	age: number
+	email: string
+end
+
+type PersonName = Pick<Person, "name">
+local p: PersonName
+`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	checker := NewChecker()
+	errors := checker.Check(statements)
+
+	if len(errors) > 0 {
+		t.Errorf("Expected no errors, got %d:", len(errors))
+		for _, err := range errors {
+			t.Errorf("  %s", err.Message)
+		}
+	}
+}
+
+func TestPickMultipleProperties(t *testing.T) {
+	input := `
+interface User
+	id: number
+	name: string
+	email: string
+	age: number
+end
+
+type UserCredentials = Pick<User, "email" | "name">
+local creds: UserCredentials
+`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	checker := NewChecker()
+	errors := checker.Check(statements)
+
+	if len(errors) > 0 {
+		t.Errorf("Expected no errors, got %d:", len(errors))
+		for _, err := range errors {
+			t.Errorf("  %s", err.Message)
+		}
+	}
+}
+
+func TestOmitType(t *testing.T) {
+	input := `
+interface Person
+	id: number
+	name: string
+	email: string
+	age: number
+end
+
+type PersonWithoutId = Omit<Person, "id">
+local p: PersonWithoutId
+`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	checker := NewChecker()
+	errors := checker.Check(statements)
+
+	if len(errors) > 0 {
+		t.Errorf("Expected no errors, got %d:", len(errors))
+		for _, err := range errors {
+			t.Errorf("  %s", err.Message)
+		}
+	}
+}
+
+func TestRecordType(t *testing.T) {
+	input := `
+type StringMap = Record<"a" | "b" | "c", number>
+local map: StringMap
+`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	checker := NewChecker()
+	errors := checker.Check(statements)
+
+	if len(errors) > 0 {
+		t.Errorf("Expected no errors, got %d:", len(errors))
+		for _, err := range errors {
+			t.Errorf("  %s", err.Message)
+		}
+	}
+}
+
+func TestPartialType(t *testing.T) {
+	input := `
+interface Config
+	host: string
+	port: number
+end
+
+type PartialConfig = Partial<Config>
+local config: PartialConfig
+`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	checker := NewChecker()
+	errors := checker.Check(statements)
+
+	if len(errors) > 0 {
+		t.Errorf("Expected no errors, got %d:", len(errors))
+		for _, err := range errors {
+			t.Errorf("  %s", err.Message)
+		}
+	}
+}
+
+func TestRequiredType(t *testing.T) {
+	input := `
+interface MaybeUser
+	name: string | nil
+	age: number | nil
+end
+
+type User = Required<MaybeUser>
+local user: User
+`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	checker := NewChecker()
+	errors := checker.Check(statements)
+
+	if len(errors) > 0 {
+		t.Errorf("Expected no errors, got %d:", len(errors))
+		for _, err := range errors {
+			t.Errorf("  %s", err.Message)
+		}
+	}
+}
+
+func TestParametersType(t *testing.T) {
+	input := `
+type AddFunc = (a: number, b: number) => number
+
+type AddParams = Parameters<AddFunc>
+`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	checker := NewChecker()
+	errors := checker.Check(statements)
+
+	if len(errors) > 0 {
+		t.Errorf("Expected no errors, got %d:", len(errors))
+		for _, err := range errors {
+			t.Errorf("  %s", err.Message)
+		}
+	}
+}

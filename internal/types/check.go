@@ -261,9 +261,16 @@ func NewChecker() *Checker {
 func (c *Checker) registerUtilityTypes() {
 	// These will be handled specially in resolveTypeExpression when instantiated
 	// We just mark them as existing so they can be referenced
-	c.env.Set("Exclude", Any)  // Exclude<T, U>
-	c.env.Set("Extract", Any)  // Extract<T, U>
-	c.env.Set("NonNullable", Any) // NonNullable<T>
+	c.env.Set("Exclude", Any)       // Exclude<T, U>
+	c.env.Set("Extract", Any)       // Extract<T, U>
+	c.env.Set("NonNullable", Any)   // NonNullable<T>
+	c.env.Set("Pick", Any)          // Pick<T, K>
+	c.env.Set("Omit", Any)          // Omit<T, K>
+	c.env.Set("Record", Any)        // Record<K, V>
+	c.env.Set("Partial", Any)       // Partial<T>
+	c.env.Set("Required", Any)      // Required<T>
+	c.env.Set("ReturnType", Any)    // ReturnType<F>
+	c.env.Set("Parameters", Any)    // Parameters<F>
 }
 
 // loadStdlib loads the Lua standard library type definitions
@@ -784,6 +791,55 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 					return Any
 				}
 				return c.nonNullable(typeArgs[0])
+
+			case "Pick":
+				if len(typeArgs) != 2 {
+					c.addError("Pick<T, K> expects 2 type arguments", lexer.Token{})
+					return Any
+				}
+				return c.pickType(typeArgs[0], typeArgs[1])
+
+			case "Omit":
+				if len(typeArgs) != 2 {
+					c.addError("Omit<T, K> expects 2 type arguments", lexer.Token{})
+					return Any
+				}
+				return c.omitType(typeArgs[0], typeArgs[1])
+
+			case "Record":
+				if len(typeArgs) != 2 {
+					c.addError("Record<K, V> expects 2 type arguments", lexer.Token{})
+					return Any
+				}
+				return c.recordType(typeArgs[0], typeArgs[1])
+
+			case "Partial":
+				if len(typeArgs) != 1 {
+					c.addError("Partial<T> expects 1 type argument", lexer.Token{})
+					return Any
+				}
+				return c.partialType(typeArgs[0])
+
+			case "Required":
+				if len(typeArgs) != 1 {
+					c.addError("Required<T> expects 1 type argument", lexer.Token{})
+					return Any
+				}
+				return c.requiredType(typeArgs[0])
+
+			case "ReturnType":
+				if len(typeArgs) != 1 {
+					c.addError("ReturnType<F> expects 1 type argument", lexer.Token{})
+					return Any
+				}
+				return c.returnType(typeArgs[0])
+
+			case "Parameters":
+				if len(typeArgs) != 1 {
+					c.addError("Parameters<F> expects 1 type argument", lexer.Token{})
+					return Any
+				}
+				return c.parametersType(typeArgs[0])
 			}
 
 			// Check if it's a generic class
@@ -1071,6 +1127,194 @@ func (c *Checker) nonNullable(t Type) Type {
 
 	// Otherwise return T as is
 	return t
+}
+
+// pickType implements Pick<T, K> utility type
+// Constructs a type by picking a set of properties K from T
+func (c *Checker) pickType(t Type, keys Type) Type {
+	switch objType := t.(type) {
+	case *InterfaceType:
+		picked := &InterfaceType{
+			Name:       objType.Name + "_Picked",
+			Properties: make(map[string]Type),
+			Methods:    make(map[string]*FunctionType),
+		}
+
+		// Extract keys from the keys type
+		keyList := c.extractKeyNames(keys)
+		for _, key := range keyList {
+			if propType, ok := objType.Properties[key]; ok {
+				picked.Properties[key] = propType
+			}
+			if methodType, ok := objType.Methods[key]; ok {
+				picked.Methods[key] = methodType
+			}
+		}
+		return picked
+
+	case *ClassType:
+		picked := &ClassType{
+			Name:       objType.Name + "_Picked",
+			Properties: make(map[string]Type),
+			Methods:    make(map[string]*FunctionType),
+		}
+
+		keyList := c.extractKeyNames(keys)
+		for _, key := range keyList {
+			if propType, ok := objType.Properties[key]; ok {
+				picked.Properties[key] = propType
+			}
+			if methodType, ok := objType.Methods[key]; ok {
+				picked.Methods[key] = methodType
+			}
+		}
+		return picked
+
+	default:
+		return Any
+	}
+}
+
+// omitType implements Omit<T, K> utility type
+// Constructs a type by omitting a set of properties K from T
+func (c *Checker) omitType(t Type, keys Type) Type {
+	// Omit<T, K> = Pick<T, Exclude<keyof T, K>>
+	allKeys := c.resolveKeyof(t)
+	remainingKeys := c.excludeTypes(allKeys, keys)
+	return c.pickType(t, remainingKeys)
+}
+
+// recordType implements Record<K, V> utility type
+// Constructs a type with a set of properties K of type V
+func (c *Checker) recordType(keys Type, valueType Type) Type {
+	record := &InterfaceType{
+		Name:       "Record",
+		Properties: make(map[string]Type),
+		Methods:    make(map[string]*FunctionType),
+	}
+
+	keyList := c.extractKeyNames(keys)
+	for _, key := range keyList {
+		record.Properties[key] = valueType
+	}
+
+	return record
+}
+
+// partialType implements Partial<T> utility type
+// Makes all properties in T optional
+func (c *Checker) partialType(t Type) Type {
+	switch objType := t.(type) {
+	case *InterfaceType:
+		partial := &InterfaceType{
+			Name:       objType.Name + "_Partial",
+			Properties: make(map[string]Type),
+			Methods:    make(map[string]*FunctionType),
+		}
+
+		// Make all properties optional (T | nil)
+		for name, propType := range objType.Properties {
+			partial.Properties[name] = &UnionType{Types: []Type{propType, Nil}}
+		}
+		for name, methodType := range objType.Methods {
+			partial.Methods[name] = methodType
+		}
+		return partial
+
+	case *ClassType:
+		partial := &ClassType{
+			Name:       objType.Name + "_Partial",
+			Properties: make(map[string]Type),
+			Methods:    make(map[string]*FunctionType),
+		}
+
+		for name, propType := range objType.Properties {
+			partial.Properties[name] = &UnionType{Types: []Type{propType, Nil}}
+		}
+		for name, methodType := range objType.Methods {
+			partial.Methods[name] = methodType
+		}
+		return partial
+
+	default:
+		return t
+	}
+}
+
+// requiredType implements Required<T> utility type
+// Makes all properties in T required (removes optionality)
+func (c *Checker) requiredType(t Type) Type {
+	switch objType := t.(type) {
+	case *InterfaceType:
+		required := &InterfaceType{
+			Name:       objType.Name + "_Required",
+			Properties: make(map[string]Type),
+			Methods:    make(map[string]*FunctionType),
+		}
+
+		// Remove optionality from properties
+		for name, propType := range objType.Properties {
+			required.Properties[name] = c.nonNullable(propType)
+		}
+		for name, methodType := range objType.Methods {
+			required.Methods[name] = methodType
+		}
+		return required
+
+	case *ClassType:
+		required := &ClassType{
+			Name:       objType.Name + "_Required",
+			Properties: make(map[string]Type),
+			Methods:    make(map[string]*FunctionType),
+		}
+
+		for name, propType := range objType.Properties {
+			required.Properties[name] = c.nonNullable(propType)
+		}
+		for name, methodType := range objType.Methods {
+			required.Methods[name] = methodType
+		}
+		return required
+
+	default:
+		return t
+	}
+}
+
+// returnType implements ReturnType<F> utility type
+// Extracts the return type from a function type
+func (c *Checker) returnType(f Type) Type {
+	if funcType, ok := f.(*FunctionType); ok {
+		return funcType.ReturnType
+	}
+	return Any
+}
+
+// parametersType implements Parameters<F> utility type
+// Extracts parameter types from a function type as a tuple
+func (c *Checker) parametersType(f Type) Type {
+	if funcType, ok := f.(*FunctionType); ok {
+		return &TupleType{Elements: funcType.Parameters}
+	}
+	return Never
+}
+
+// extractKeyNames extracts string literal names from a key type
+func (c *Checker) extractKeyNames(keys Type) []string {
+	var names []string
+
+	switch k := keys.(type) {
+	case *StringLiteralType:
+		names = append(names, k.Value)
+	case *UnionType:
+		for _, member := range k.Types {
+			if strLit, ok := member.(*StringLiteralType); ok {
+				names = append(names, strLit.Value)
+			}
+		}
+	}
+
+	return names
 }
 
 // resolveKeyof extracts keys from an object type and returns a union of string literals

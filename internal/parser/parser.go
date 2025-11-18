@@ -1607,6 +1607,27 @@ func (p *Parser) parseParameter() *ast.Parameter {
 		Token: p.curToken,
 	}
 
+	// Check for visibility modifiers (for constructor parameter properties)
+	switch p.curToken.Type {
+	case lexer.PUBLIC, lexer.PRIVATE, lexer.PROTECTED:
+		param.Visibility = p.curToken.Literal
+		p.nextToken()
+		// Check for readonly after visibility
+		if p.curToken.Type == lexer.READONLY {
+			param.IsReadonly = true
+			p.nextToken()
+		}
+	case lexer.READONLY:
+		param.IsReadonly = true
+		p.nextToken()
+		// Check for visibility after readonly (readonly public is also valid)
+		switch p.curToken.Type {
+		case lexer.PUBLIC, lexer.PRIVATE, lexer.PROTECTED:
+			param.Visibility = p.curToken.Literal
+			p.nextToken()
+		}
+	}
+
 	// Check for rest parameter (...name)
 	if p.curTokenIs(lexer.ELLIPSIS) {
 		param.IsRest = true

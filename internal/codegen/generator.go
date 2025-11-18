@@ -599,6 +599,14 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 		output.WriteString(g.generateIndent())
 		output.WriteString("local self = setmetatable({}, " + className + ")\n")
 
+		// Initialize constructor parameter properties
+		for _, param := range node.Constructor.Parameters {
+			if param.Visibility != "" {
+				output.WriteString(g.generateIndent())
+				output.WriteString(fmt.Sprintf("self.%s = %s\n", param.Name.Value, param.Name.Value))
+			}
+		}
+
 		// Initialize properties from constructor body
 		for _, stmt := range node.Constructor.Body.Statements {
 			output.WriteString(g.generateStatement(stmt))

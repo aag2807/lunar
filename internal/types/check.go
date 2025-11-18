@@ -98,6 +98,25 @@ func (e *Environment) GetAllNames() []string {
 	return names
 }
 
+// GetAll returns all type bindings in this environment and outer scopes
+func (e *Environment) GetAll() map[string]Type {
+	result := make(map[string]Type)
+
+	// Collect from outer scopes first (so inner scopes override)
+	if e.outer != nil {
+		for name, typ := range e.outer.GetAll() {
+			result[name] = typ
+		}
+	}
+
+	// Collect from current scope (overrides outer)
+	for name, typ := range e.store {
+		result[name] = typ
+	}
+
+	return result
+}
+
 // levenshteinDistance calculates the edit distance between two strings
 // Used for "Did you mean?" suggestions
 func levenshteinDistance(s1, s2 string) int {
@@ -213,6 +232,9 @@ type Checker struct {
 
 	// Current class context (for visibility checking)
 	currentClass *ClassType
+
+	// Track if we're inside a constructor (for readonly assignment checking)
+	inConstructor bool
 }
 
 // ModuleInfo represents information about a module
@@ -344,6 +366,11 @@ func (c *Checker) Check(statements []ast.Statement) []*TypeError {
 	return c.errors
 }
 
+// GetEnv returns the type environment for LSP integration
+func (c *Checker) GetEnv() *Environment {
+	return c.env
+}
+
 // registerTypeDefinition registers classes, interfaces, enums, and type aliases
 func (c *Checker) registerTypeDefinition(stmt ast.Statement) {
 	switch node := stmt.(type) {
@@ -438,6 +465,23 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 				params[i] = c.resolveTypeExpression(param.Type)
 			} else {
 				params[i] = Any
+			}
+
+			// Handle constructor parameter properties
+			if param.Visibility != "" {
+				propName := param.Name.Value
+				propType := params[i]
+
+				// Add as class property
+				classType.Properties[propName] = propType
+
+				// Track readonly
+				if param.IsReadonly {
+					classType.ReadonlyProps[propName] = true
+				}
+
+				// Track visibility
+				classType.PropertyVisibility[propName] = param.Visibility
 			}
 		}
 		classType.Constructor = &FunctionType{
@@ -1874,7 +1918,24 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	if len(node.GenericParams) > 0 {
 		c.env = prevEnv
 	}
-	c.env.Set(node.Name.Value, funcType)
+
+	// Check if function with same name already exists (for method overloading)
+	if existingType, ok := c.env.Get(node.Name.Value); ok {
+		if existingFunc, ok := existingType.(*FunctionType); ok {
+			// Add this as an overload to the existing function
+			existingFunc.Overloads = append(existingFunc.Overloads, funcType)
+			// Don't re-set in environment, the existing function reference is updated
+		} else {
+			// Name exists but is not a function - error
+			c.addError(
+				fmt.Sprintf("Cannot overload '%s' - it is not a function", node.Name.Value),
+				node.Token,
+			)
+			c.env.Set(node.Name.Value, funcType)
+		}
+	} else {
+		c.env.Set(node.Name.Value, funcType)
+	}
 
 	// Check function body in new scope
 	prevReturnType := c.currentFunctionReturnType
@@ -2178,11 +2239,24 @@ func (c *Checker) checkAssignmentStatement(node *ast.AssignmentStatement) {
 			if rightIdent, ok := dotExpr.Right.(*ast.Identifier); ok {
 				propName := rightIdent.Value
 				if classType.IsReadonly(propName) {
-					c.addError(
-						fmt.Sprintf("Cannot assign to readonly property '%s'", propName),
-						node.Token,
-					)
-					return
+					// Allow readonly assignment in constructor if assigning to self
+					allowAssignment := false
+					if c.inConstructor && c.currentClass != nil {
+						// Check if we're assigning to self
+						if leftIdent, ok := dotExpr.Left.(*ast.Identifier); ok {
+							if leftIdent.Value == "self" && c.currentClass == classType {
+								allowAssignment = true
+							}
+						}
+					}
+
+					if !allowAssignment {
+						c.addError(
+							fmt.Sprintf("Cannot assign to readonly property '%s'", propName),
+							node.Token,
+						)
+						return
+					}
 				}
 			}
 		}
@@ -2269,8 +2343,11 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 			c.env.Set(param.Name.Value, paramType)
 		}
 
-		// Check constructor body
+		// Check constructor body (allow readonly assignments in constructor)
+		prevInConstructor := c.inConstructor
+		c.inConstructor = true
 		c.checkBlockStatement(node.Constructor.Body)
+		c.inConstructor = prevInConstructor
 
 		c.env = prevEnv
 		c.currentFunctionReturnType = prevReturnType
@@ -2975,6 +3052,11 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 		}
 	}
 
+	// Resolve overloads if the function has multiple signatures
+	if len(fnType.Overloads) > 0 && !hasSpreadArgs {
+		fnType = c.resolveOverload(fnType, node)
+	}
+
 	// If the function is generic and called without explicit type arguments, try to infer them
 	if len(fnType.GenericParams) > 0 {
 		// Check argument count first (skip if there are spread arguments or function has rest parameter)
@@ -3098,6 +3180,124 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 	}
 
 	return fnType.ReturnType
+}
+
+// resolveOverload finds the best matching overload for a function call
+func (c *Checker) resolveOverload(fnType *FunctionType, node *ast.CallExpression) *FunctionType {
+	// Collect all signatures: the primary signature plus all overloads
+	allSignatures := make([]*FunctionType, 0, len(fnType.Overloads)+1)
+	allSignatures = append(allSignatures, fnType)
+	allSignatures = append(allSignatures, fnType.Overloads...)
+
+	// Get argument types
+	argTypes := make([]Type, len(node.Arguments))
+	for i, arg := range node.Arguments {
+		argTypes[i] = c.checkExpression(arg)
+	}
+
+	// Find matching overloads
+	var matches []*FunctionType
+	for _, sig := range allSignatures {
+		if c.overloadMatches(sig, argTypes) {
+			matches = append(matches, sig)
+		}
+	}
+
+	// If no matches found, return the primary signature (will generate error later)
+	if len(matches) == 0 {
+		c.addError(
+			fmt.Sprintf("No overload matches this call with %d arguments", len(argTypes)),
+			node.Token,
+		)
+		return fnType
+	}
+
+	// If exactly one match, use it
+	if len(matches) == 1 {
+		return matches[0]
+	}
+
+	// Multiple matches - find the most specific one
+	best := matches[0]
+	for _, match := range matches[1:] {
+		if c.isMoreSpecific(match, best, argTypes) {
+			best = match
+		}
+	}
+
+	return best
+}
+
+// overloadMatches checks if a function signature matches the given arguments
+func (c *Checker) overloadMatches(fnType *FunctionType, argTypes []Type) bool {
+	// Check argument count
+	if fnType.HasRestParameter {
+		// Need at least (params - 1) arguments
+		if len(argTypes) < len(fnType.Parameters)-1 {
+			return false
+		}
+	} else {
+		// Must have exact number of arguments
+		if len(argTypes) != len(fnType.Parameters) {
+			return false
+		}
+	}
+
+	// Check if each argument is assignable to its parameter
+	for i, argType := range argTypes {
+		var paramType Type
+		if fnType.HasRestParameter && i >= len(fnType.Parameters)-1 {
+			// Rest parameter - get element type
+			restParamType := fnType.Parameters[len(fnType.Parameters)-1]
+			if arrayType, ok := restParamType.(*ArrayType); ok {
+				paramType = arrayType.ElementType
+			} else {
+				paramType = Any
+			}
+		} else if i < len(fnType.Parameters) {
+			paramType = fnType.Parameters[i]
+		} else {
+			return false
+		}
+
+		if !argType.IsAssignableTo(paramType) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isMoreSpecific returns true if sig1 is more specific than sig2 for the given arguments
+func (c *Checker) isMoreSpecific(sig1, sig2 *FunctionType, argTypes []Type) bool {
+	// A signature is more specific if its parameter types are narrower
+	score1 := 0
+	score2 := 0
+
+	for i, argType := range argTypes {
+		if i >= len(sig1.Parameters) || i >= len(sig2.Parameters) {
+			break
+		}
+
+		param1 := sig1.Parameters[i]
+		param2 := sig2.Parameters[i]
+
+		// If param1 equals the argument type exactly, it's more specific
+		if param1.Equals(argType) && !param2.Equals(argType) {
+			score1++
+		} else if param2.Equals(argType) && !param1.Equals(argType) {
+			score2++
+		}
+
+		// 'any' is less specific than other types
+		if param1.Equals(Any) && !param2.Equals(Any) {
+			score2++
+		} else if param2.Equals(Any) && !param1.Equals(Any) {
+			score1++
+		}
+	}
+
+	return score1 > score2
 }
 
 // checkDotExpression checks a dot expression (property access)
@@ -3649,7 +3849,20 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 			ReturnType:    returnType,
 			GenericParams: []string{}, // Ambient function declarations are not generic
 		}
-		c.env.Set(decl.Name.Value, funcType)
+
+		// Check if function with same name already exists (for method overloading)
+		if existingType, ok := c.env.Get(decl.Name.Value); ok {
+			if existingFunc, ok := existingType.(*FunctionType); ok {
+				// Add this as an overload to the existing function
+				existingFunc.Overloads = append(existingFunc.Overloads, funcType)
+				// Don't re-set in environment, the existing function reference is updated
+			} else {
+				// Name exists but is not a function - just set the new function type
+				c.env.Set(decl.Name.Value, funcType)
+			}
+		} else {
+			c.env.Set(decl.Name.Value, funcType)
+		}
 
 	// Class, Interface, Enum, Type declarations are already handled in registerTypeDefinition
 	}

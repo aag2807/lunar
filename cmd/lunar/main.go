@@ -7,7 +7,9 @@ import (
 	"io/ioutil"
 	"lunar/internal/ast"
 	"lunar/internal/codegen"
+	"lunar/internal/formatter"
 	"lunar/internal/lexer"
+	"lunar/internal/linter"
 	"lunar/internal/parser"
 	"lunar/internal/types"
 	"os"
@@ -18,7 +20,7 @@ import (
 	"time"
 )
 
-const version = "1.2.0"
+const version = "1.3.0"
 
 func main() {
 	// Define command-line flags
@@ -30,6 +32,9 @@ func main() {
 	replMode := flag.Bool("repl", false, "Start interactive REPL mode")
 	watchMode := flag.Bool("watch", false, "Watch files for changes and recompile")
 	watchInterval := flag.Int("watch-interval", 500, "Watch interval in milliseconds")
+	formatMode := flag.Bool("format", false, "Format the source file")
+	formatInPlace := flag.Bool("format-write", false, "Format and write back to file")
+	lintMode := flag.Bool("lint", false, "Run linter to check for issues")
 
 	flag.Parse()
 
@@ -66,6 +71,24 @@ func main() {
 	if _, err := os.Stat(inputFile); os.IsNotExist(err) {
 		fmt.Fprintf(os.Stderr, "Error: Input file '%s' does not exist\n", inputFile)
 		os.Exit(1)
+	}
+
+	// Handle format mode
+	if *formatMode || *formatInPlace {
+		if err := formatFile(inputFile, *formatInPlace); err != nil {
+			fmt.Fprintf(os.Stderr, "Format failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	// Handle lint mode
+	if *lintMode {
+		if err := lintFile(inputFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Lint failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 
 	// Validate input file extension
@@ -266,6 +289,68 @@ func formatTypeErrors(filename string, source string, errors []*types.TypeError)
 	return fmt.Errorf("%s", sb.String())
 }
 
+// formatFile formats a Lunar source file
+func formatFile(inputFile string, writeBack bool) error {
+	// Read input file
+	source, err := ioutil.ReadFile(inputFile)
+	if err != nil {
+		return fmt.Errorf("failed to read input file: %w", err)
+	}
+
+	// Parse the file
+	l := lexer.New(string(source))
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		return fmt.Errorf("parse errors:\n%s", strings.Join(p.Errors(), "\n"))
+	}
+
+	// Format
+	f := formatter.New(formatter.DefaultOptions())
+	formatted := f.Format(statements)
+
+	if writeBack {
+		// Write back to file
+		if err := ioutil.WriteFile(inputFile, []byte(formatted), 0644); err != nil {
+			return fmt.Errorf("failed to write formatted file: %w", err)
+		}
+		fmt.Printf("Formatted %s\n", inputFile)
+	} else {
+		// Print to stdout
+		fmt.Print(formatted)
+	}
+
+	return nil
+}
+
+// lintFile runs the linter on a Lunar source file
+func lintFile(inputFile string) error {
+	// Read input file
+	source, err := ioutil.ReadFile(inputFile)
+	if err != nil {
+		return fmt.Errorf("failed to read input file: %w", err)
+	}
+
+	// Run linter
+	issues, err := linter.LintSource(string(source))
+	if err != nil {
+		return err
+	}
+
+	if len(issues) == 0 {
+		fmt.Printf("No issues found in %s\n", inputFile)
+		return nil
+	}
+
+	fmt.Printf("Found %d issue(s) in %s:\n\n", len(issues), inputFile)
+	for _, issue := range issues {
+		fmt.Println(issue)
+	}
+
+	return nil
+}
+
 // runWatchMode watches files for changes and recompiles automatically
 func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap bool, intervalMs int) {
 	fmt.Printf("Watching %s for changes (Ctrl+C to stop)\n", inputFile)
@@ -331,6 +416,9 @@ func printHelp() {
 	fmt.Println("  --source-map        Generate source map (.lua.map file)")
 	fmt.Println("  --watch             Watch files for changes and recompile")
 	fmt.Println("  --watch-interval    Watch interval in ms (default: 500)")
+	fmt.Println("  --format            Format source code and print to stdout")
+	fmt.Println("  --format-write      Format source code and write back to file")
+	fmt.Println("  --lint              Check code for potential issues")
 	fmt.Println("  --repl              Start interactive REPL mode")
 	fmt.Println("  --version           Show version information")
 	fmt.Println("  --help              Show this help message")

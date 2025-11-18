@@ -181,26 +181,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved error messages now include contextual suggestions
 - All Lua 5.1 standard library modules now have type declarations
 
-## [Unreleased] - Future (v1.3+)
+## [1.3.0] - 2025-11-18
+
+### Added - Advanced Type System Features
+
+- **Method Overloading**
+  - Functions can now have multiple signatures with different parameter types
+  - Automatic overload resolution selects the best matching signature based on argument types
+  - Support for both regular functions and declared (ambient) functions
+  - More specific type matches are preferred over `any` types
+  - Example:
+    ```lunar
+    function add(a: number, b: number): number
+        return a + b
+    end
+
+    function add(a: string, b: string): string
+        return a .. b
+    end
+    ```
+
+- **Constructor Parameter Properties**
+  - TypeScript-style shorthand for declaring class properties in constructor parameters
+  - Automatically creates class properties and assigns values
+  - Supports visibility modifiers: `public`, `private`, `protected`
+  - Supports `readonly` modifier
+  - Example:
+    ```lunar
+    class Person
+        function constructor(public name: string, private readonly id: number)
+        end
+    end
+    ```
+
+- **Enhanced Readonly Support**
+  - Readonly properties can now be initialized in constructors
+  - Inheritance chain checking for readonly properties
+  - Proper error messages when attempting to modify readonly properties outside constructors
+
+### Added - Developer Tools
+
+- **Code Formatter**
+  - Format Lunar source code with consistent indentation and style
+  - `--format` flag to print formatted code to stdout
+  - `--format-write` flag to format and write back to file
+  - Configurable options for indent style and size
+  - Example: `lunar --format myfile.lunar`
+
+- **Linter**
+  - Check code for potential issues and best practices
+  - `--lint` flag to run linter checks
+  - Checks for:
+    - Unused variables (warning)
+    - Naming conventions (camelCase for variables/functions, PascalCase for classes/interfaces)
+    - Missing type annotations (info)
+    - Empty blocks (warning)
+  - Configurable rules and severity levels
+  - Example: `lunar --lint myfile.lunar`
+
+- **Language Server Protocol (LSP)**
+  - Separate `lunar-lsp` binary for IDE/editor integration
+  - Diagnostics: Real-time type errors and parse errors
+  - Hover: Type information on hover
+  - Go to Definition: Jump to symbol definitions
+  - Auto-completion: Context-aware completions for variables, functions, classes, and keywords
+  - Document synchronization: Full text sync with open/change/close support
+  - JSON-RPC over stdio communication
+
+### Added - Comprehensive Tests
+
+- Method overloading tests (11 test cases)
+- Constructor parameter property tests (9 test cases)
+- Readonly edge case tests (15 test cases)
+
+### Changed
+
+- Updated command-line help to include new formatting and linting options
+- Improved readonly property checking to traverse inheritance chain
+
+## [Unreleased] - Future (v1.4+)
 
 ### Planned
 - Performance optimizations for large codebases
-- Watch mode for continuous compilation
 - Better IDE integration helpers
+- More linter rules
 
 ## [Unreleased] - Future (v2.0+)
 
 ### Planned
-- Language Server Protocol (LSP) implementation for IDE support
 - Package manager integration
-- Code formatter tool
 - Watch mode for continuous compilation
 - Incremental compilation
+- More LSP features (find references, rename, code actions)
 
 ---
 
 ## Version History
 
+- **1.3.0** (2025-11-18) - Method overloading, constructor parameter properties, code formatter, linter, LSP
 - **1.2.0** (2025-11-13) - "Did you mean?" suggestions, additional stdlib (coroutine, debug, package), integration tests
 - **1.1.0** (2025-11-13) - Context-aware keywords, source maps, complete stdlib support
 - **1.0.0** (2024-11-10) - Initial release with complete type system, OOP, generics, stdlib declarations, and tooling

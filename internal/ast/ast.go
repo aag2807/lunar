@@ -510,10 +510,12 @@ func (tg *TypeGuardType) String() string {
 }
 
 type Parameter struct {
-	Token  lexer.Token
-	Name   *Identifier
-	Type   Expression
-	IsRest bool // true for ...param
+	Token      lexer.Token
+	Name       *Identifier
+	Type       Expression
+	IsRest     bool   // true for ...param
+	Visibility string // "public", "private", "protected" for constructor parameter properties
+	IsReadonly bool   // true for readonly parameter properties
 }
 
 func (p *Parameter) expressionNode()      {}

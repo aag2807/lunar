@@ -5,6 +5,7 @@
 # Generated Lua files (keep source .lunar files only)
 *.lua
 !examples/*.lua.example
+!editors/**/*.lua
 
 # Test files (root directory only)
 /*test*.lunar

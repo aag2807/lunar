@@ -13,6 +13,14 @@ type Type interface {
 	IsAssignableTo(other Type) bool
 }
 
+// TypeString returns the string representation of a type
+func TypeString(t Type) string {
+	if t == nil {
+		return "unknown"
+	}
+	return t.String()
+}
+
 // Basic Types
 
 // NumberType represents the number type
@@ -859,9 +867,19 @@ func (t *ClassType) GetStaticMethod(name string) (*FunctionType, bool) {
 	return typ, ok
 }
 
-// IsReadonly checks if a property is readonly
+// IsReadonly checks if a property is readonly (including inherited properties)
 func (t *ClassType) IsReadonly(name string) bool {
-	return t.ReadonlyProps[name]
+	// Check own properties first
+	if readonly, ok := t.ReadonlyProps[name]; ok {
+		return readonly
+	}
+
+	// Check parent class
+	if t.Parent != nil {
+		return t.Parent.IsReadonly(name)
+	}
+
+	return false
 }
 
 // IsAbstractMethod checks if a method is abstract

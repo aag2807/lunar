@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"lunar/internal/ast"
+	"lunar/internal/bundler"
 	"lunar/internal/codegen"
 	"lunar/internal/formatter"
 	"lunar/internal/lexer"
@@ -13,6 +14,7 @@ import (
 	"lunar/internal/parser"
 	"lunar/internal/types"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -20,7 +22,7 @@ import (
 	"time"
 )
 
-const version = "1.3.0"
+const version = "1.4.0"
 
 func main() {
 	// Define command-line flags
@@ -35,6 +37,8 @@ func main() {
 	formatMode := flag.Bool("format", false, "Format the source file")
 	formatInPlace := flag.Bool("format-write", false, "Format and write back to file")
 	lintMode := flag.Bool("lint", false, "Run linter to check for issues")
+	bundleMode := flag.Bool("bundle", false, "Bundle all dependencies into a single file")
+	runMode := flag.Bool("run", false, "Run the compiled Lua file after compilation")
 
 	flag.Parse()
 
@@ -102,9 +106,31 @@ func main() {
 		output = strings.TrimSuffix(inputFile, ".lunar") + ".lua"
 	}
 
+	// Bundle mode
+	if *bundleMode {
+		if *watchMode {
+			runBundleWatchMode(inputFile, output, !*noTypeCheck, *runMode, *watchInterval)
+		} else {
+			if err := bundleFile(inputFile, output, !*noTypeCheck); err != nil {
+				fmt.Fprintf(os.Stderr, "Bundle failed:\n%v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("Successfully bundled %s -> %s\n", inputFile, output)
+
+			// Run if requested
+			if *runMode {
+				if err := runLuaFile(output); err != nil {
+					fmt.Fprintf(os.Stderr, "Run failed: %v\n", err)
+					os.Exit(1)
+				}
+			}
+		}
+		os.Exit(0)
+	}
+
 	// Watch mode or single compilation
 	if *watchMode {
-		runWatchMode(inputFile, output, !*noTypeCheck, *sourceMap, *watchInterval)
+		runWatchMode(inputFile, output, !*noTypeCheck, *sourceMap, *watchInterval, *runMode)
 	} else {
 		// Compile the file
 		if err := compile(inputFile, output, !*noTypeCheck, *sourceMap); err != nil {
@@ -115,6 +141,107 @@ func main() {
 		fmt.Printf("Successfully compiled %s -> %s\n", inputFile, output)
 		if *sourceMap {
 			fmt.Printf("Source map: %s.map\n", output)
+		}
+
+		// Run if requested
+		if *runMode {
+			if err := runLuaFile(output); err != nil {
+				fmt.Fprintf(os.Stderr, "Run failed: %v\n", err)
+				os.Exit(1)
+			}
+		}
+	}
+}
+
+// bundleFile bundles a Lunar file and all its dependencies
+func bundleFile(inputFile, outputFile string, typeCheck bool) error {
+	b := bundler.New(inputFile, typeCheck)
+	bundledCode, err := b.Bundle()
+	if err != nil {
+		return err
+	}
+
+	if err := ioutil.WriteFile(outputFile, []byte(bundledCode), 0644); err != nil {
+		return fmt.Errorf("failed to write output file: %w", err)
+	}
+
+	return nil
+}
+
+// runLuaFile executes a Lua file
+func runLuaFile(luaFile string) error {
+	// Try lua5.4, lua5.3, lua5.1, luajit, then lua
+	luaCommands := []string{"lua5.4", "lua5.3", "lua5.1", "luajit", "lua"}
+
+	var cmd *exec.Cmd
+	for _, luaCmd := range luaCommands {
+		if _, err := exec.LookPath(luaCmd); err == nil {
+			cmd = exec.Command(luaCmd, luaFile)
+			break
+		}
+	}
+
+	if cmd == nil {
+		return fmt.Errorf("no Lua interpreter found. Please install lua")
+	}
+
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	return cmd.Run()
+}
+
+// runBundleWatchMode watches files and rebundles/reruns on changes
+func runBundleWatchMode(inputFile, outputFile string, typeCheck, runAfter bool, intervalMs int) {
+	fmt.Printf("Watching %s for changes (Ctrl+C to stop)\n", inputFile)
+
+	// Get initial modification time
+	lastModTime := getFileModTime(inputFile)
+
+	// Initial bundle
+	if err := bundleFile(inputFile, outputFile, typeCheck); err != nil {
+		fmt.Fprintf(os.Stderr, "[%s] Bundle failed:\n%v\n", time.Now().Format("15:04:05"), err)
+	} else {
+		fmt.Printf("[%s] Successfully bundled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
+		if runAfter {
+			fmt.Printf("[%s] Running %s...\n", time.Now().Format("15:04:05"), outputFile)
+			if err := runLuaFile(outputFile); err != nil {
+				fmt.Fprintf(os.Stderr, "[%s] Run failed: %v\n", time.Now().Format("15:04:05"), err)
+			}
+		}
+	}
+
+	// Handle interrupt signal for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Watch loop
+	ticker := time.NewTicker(time.Duration(intervalMs) * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-sigChan:
+			fmt.Println("\nStopping watch mode...")
+			return
+		case <-ticker.C:
+			currentModTime := getFileModTime(inputFile)
+			if !currentModTime.Equal(lastModTime) {
+				lastModTime = currentModTime
+				fmt.Printf("[%s] File changed, rebundling...\n", time.Now().Format("15:04:05"))
+				if err := bundleFile(inputFile, outputFile, typeCheck); err != nil {
+					fmt.Fprintf(os.Stderr, "[%s] Bundle failed:\n%v\n", time.Now().Format("15:04:05"), err)
+				} else {
+					fmt.Printf("[%s] Successfully bundled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
+					if runAfter {
+						fmt.Printf("[%s] Running %s...\n", time.Now().Format("15:04:05"), outputFile)
+						if err := runLuaFile(outputFile); err != nil {
+							fmt.Fprintf(os.Stderr, "[%s] Run failed: %v\n", time.Now().Format("15:04:05"), err)
+						}
+					}
+				}
+			}
 		}
 	}
 }
@@ -352,7 +479,7 @@ func lintFile(inputFile string) error {
 }
 
 // runWatchMode watches files for changes and recompiles automatically
-func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap bool, intervalMs int) {
+func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap bool, intervalMs int, runAfter bool) {
 	fmt.Printf("Watching %s for changes (Ctrl+C to stop)\n", inputFile)
 
 	// Get initial modification time
@@ -363,6 +490,12 @@ func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap boo
 		fmt.Fprintf(os.Stderr, "[%s] Compilation failed:\n%v\n", time.Now().Format("15:04:05"), err)
 	} else {
 		fmt.Printf("[%s] Successfully compiled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
+		if runAfter {
+			fmt.Printf("[%s] Running %s...\n", time.Now().Format("15:04:05"), outputFile)
+			if err := runLuaFile(outputFile); err != nil {
+				fmt.Fprintf(os.Stderr, "[%s] Run failed: %v\n", time.Now().Format("15:04:05"), err)
+			}
+		}
 	}
 
 	// Handle interrupt signal for graceful shutdown
@@ -387,6 +520,12 @@ func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap boo
 					fmt.Fprintf(os.Stderr, "[%s] Compilation failed:\n%v\n", time.Now().Format("15:04:05"), err)
 				} else {
 					fmt.Printf("[%s] Successfully compiled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
+					if runAfter {
+						fmt.Printf("[%s] Running %s...\n", time.Now().Format("15:04:05"), outputFile)
+						if err := runLuaFile(outputFile); err != nil {
+							fmt.Fprintf(os.Stderr, "[%s] Run failed: %v\n", time.Now().Format("15:04:05"), err)
+						}
+					}
 				}
 			}
 		}
@@ -419,6 +558,8 @@ func printHelp() {
 	fmt.Println("  --format            Format source code and print to stdout")
 	fmt.Println("  --format-write      Format source code and write back to file")
 	fmt.Println("  --lint              Check code for potential issues")
+	fmt.Println("  --bundle            Bundle all dependencies into a single file")
+	fmt.Println("  --run               Run the compiled Lua file after compilation")
 	fmt.Println("  --repl              Start interactive REPL mode")
 	fmt.Println("  --version           Show version information")
 	fmt.Println("  --help              Show this help message")
@@ -429,6 +570,8 @@ func printHelp() {
 	fmt.Println("  lunar main.lunar --no-typecheck")
 	fmt.Println("  lunar main.lunar --source-map")
 	fmt.Println("  lunar main.lunar --watch")
+	fmt.Println("  lunar main.lunar --bundle --run")
+	fmt.Println("  lunar main.lunar --bundle --watch --run")
 	fmt.Println("  lunar --repl")
 	fmt.Println()
 	fmt.Println("For more information about the Lunar language:")

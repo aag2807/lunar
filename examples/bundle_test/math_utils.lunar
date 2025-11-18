@@ -1,0 +1,9 @@
+-- Math utilities module
+
+export function multiply(a: number, b: number): number
+    return a * b
+end
+
+export function square(n: number): number
+    return n * n
+end

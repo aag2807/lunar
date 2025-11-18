@@ -45,6 +45,8 @@ end
 ✅ **Readonly Properties** - Immutable properties that can only be set in constructors
 
 ### Developer Experience
+✅ **Bundler** - Bundle all dependencies into a single file with `--bundle`
+✅ **Run Mode** - Compile and execute with `--run`
 ✅ **Language Server Protocol (LSP)** - Full IDE integration with diagnostics, hover, completions
 ✅ **Neovim Plugin** - Ready-to-use editor integration
 ✅ **Code Formatter** - Automatic code formatting with `--format`
@@ -144,13 +146,25 @@ lua hello.lua
 lunar input.lunar
 
 # Compile without type checking
-lunar -no-typecheck input.lunar
+lunar --no-typecheck input.lunar
 
 # Generate source map for debugging
-lunar -source-map input.lunar
+lunar --source-map input.lunar
 
 # Specify output file
 lunar -o output.lua input.lunar
+
+# Bundle all dependencies into a single file
+lunar --bundle main.lunar
+
+# Bundle and run immediately
+lunar --bundle --run main.lunar
+
+# Watch mode with bundling and auto-run
+lunar --bundle --watch --run main.lunar
+
+# Compile and run (without bundling)
+lunar --run input.lunar
 
 # Format code (print to stdout)
 lunar --format input.lunar
@@ -162,13 +176,13 @@ lunar --format-write input.lunar
 lunar --lint input.lunar
 
 # Combine options (note: flags must come before filename)
-lunar -source-map -o output.lua input.lunar
+lunar --source-map -o output.lua input.lunar
 
 # Show version
-lunar -version
+lunar --version
 
 # Show help
-lunar -help
+lunar --help
 ```
 
 ## Documentation
@@ -285,6 +299,35 @@ print(person.name)  -- "Alice" (public)
 -- person.id = 456  -- Error: cannot assign to readonly property
 ```
 
+### Bundling Multiple Files
+
+```lunar
+-- utils.lunar
+export function greet(name: string): string
+    return "Hello, " .. name .. "!"
+end
+
+export function add(a: number, b: number): number
+    return a + b
+end
+```
+
+```lunar
+-- main.lunar
+import { greet, add } from "./utils"
+
+local message: string = greet("World")
+print(message)
+
+local sum: number = add(10, 20)
+print("Sum: " .. tostring(sum))
+```
+
+```bash
+# Bundle and run
+lunar --bundle --run main.lunar
+```
+
 ### Using Lua Libraries with Type Safety
 
 ```lunar
@@ -370,6 +413,7 @@ lunar/
 │   ├── parser/         # AST construction
 │   ├── types/          # Type checking
 │   ├── codegen/        # Lua code generation
+│   ├── bundler/        # Module bundler
 │   ├── ast/            # AST definitions
 │   ├── lsp/            # LSP implementation
 │   ├── formatter/      # Code formatter
@@ -402,7 +446,7 @@ lunar/
 - [x] Comprehensive stdlib coverage (coroutine, debug, package)
 - [x] Integration tests
 
-### v1.3 (Current) ✅
+### v1.3 ✅
 - [x] Method overloading with automatic resolution
 - [x] Constructor parameter properties (TypeScript-style)
 - [x] Enhanced readonly property enforcement
@@ -411,9 +455,15 @@ lunar/
 - [x] Language Server Protocol (LSP) implementation
 - [x] Neovim plugin
 
+### v1.4 (Current) ✅
+- [x] Webpack-like bundler (`--bundle`) for multi-file projects
+- [x] Run mode (`--run`) to execute after compilation
+- [x] Watch mode with bundling and auto-run
+- [x] Topological sort for correct dependency order
+- [x] Module system with internal `__require` for bundled code
+
 ### v2.0 (Future)
 - [ ] Package manager integration
-- [ ] Watch mode for continuous compilation
 - [ ] Incremental compilation
 - [ ] More LSP features (find references, rename, code actions)
 - [ ] VS Code extension

@@ -339,6 +339,9 @@ func (c *Checker) registerTypeDefinition(stmt ast.Statement) {
 		if node.Declaration != nil {
 			c.registerTypeDefinition(node.Declaration)
 		}
+	case *ast.ExportStatement:
+		// Handle exported type definitions
+		c.registerTypeDefinition(node.Statement)
 	}
 }
 

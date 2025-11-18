@@ -1,0 +1,18 @@
+-- Main entry point
+import { greet, add, VERSION } from "./utils"
+import { multiply, square } from "./math_utils"
+
+-- Use imported functions
+local message: string = greet("World")
+print(message)
+
+local sum: number = add(10, 20)
+print("Sum: " .. tostring(sum))
+
+local product: number = multiply(5, 6)
+print("Product: " .. tostring(product))
+
+local squared: number = square(7)
+print("7 squared: " .. tostring(squared))
+
+print("Version: " .. VERSION)

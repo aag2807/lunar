@@ -1,0 +1,11 @@
+-- Utility module
+
+export function greet(name: string): string
+    return "Hello, " .. name .. "!"
+end
+
+export function add(a: number, b: number): number
+    return a + b
+end
+
+export const VERSION: string = "1.0.0"

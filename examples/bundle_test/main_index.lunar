@@ -1,0 +1,7 @@
+-- Test index file resolution
+import { helper, HELPER_VERSION } from "./helpers"
+import { greet } from "./utils"
+
+print(helper())
+print("Helper version: " .. HELPER_VERSION)
+print(greet("Index Test"))

@@ -5,9 +5,11 @@ import (
 	"io/ioutil"
 	"lunar/internal/ast"
 	"lunar/internal/codegen"
+	"lunar/internal/config"
 	"lunar/internal/lexer"
 	"lunar/internal/parser"
 	"lunar/internal/types"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -30,6 +32,7 @@ type Bundler struct {
 	loadOrder    []string           // Topologically sorted module IDs
 	typeCheck    bool
 	declStmts    []ast.Statement // Declaration statements for type checking
+	config       *config.Config  // Project configuration
 }
 
 // New creates a new Bundler
@@ -40,6 +43,19 @@ func New(entryFile string, typeCheck bool) *Bundler {
 		baseDir:   filepath.Dir(absPath),
 		modules:   make(map[string]*Module),
 		typeCheck: typeCheck,
+		config:    config.DefaultConfig(),
+	}
+}
+
+// NewWithConfig creates a new Bundler with configuration
+func NewWithConfig(entryFile string, typeCheck bool, cfg *config.Config) *Bundler {
+	absPath, _ := filepath.Abs(entryFile)
+	return &Bundler{
+		entryFile: absPath,
+		baseDir:   filepath.Dir(absPath),
+		modules:   make(map[string]*Module),
+		typeCheck: typeCheck,
+		config:    cfg,
 	}
 }
 
@@ -184,15 +200,20 @@ func (b *Bundler) extractExports(statements []ast.Statement) []string {
 func (b *Bundler) resolveModule(importPath, fromFile string) (string, string, error) {
 	fromDir := filepath.Dir(fromFile)
 
+	// Apply path aliases from config
+	resolvedPath := b.config.ResolvePath(importPath, fromDir)
+	if resolvedPath != importPath {
+		// Path was aliased, resolve from base directory
+		importPath = resolvedPath
+		fromDir = b.baseDir
+	}
+
 	// Handle relative imports
 	if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
-		// Try with .lunar extension
 		resolved := filepath.Join(fromDir, importPath)
-		if !strings.HasSuffix(resolved, ".lunar") {
-			resolved += ".lunar"
-		}
 
-		absPath, err := filepath.Abs(resolved)
+		// Try different resolution strategies
+		absPath, err := b.resolveFile(resolved)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to resolve %s: %w", importPath, err)
 		}
@@ -211,6 +232,36 @@ func (b *Bundler) resolveModule(importPath, fromFile string) (string, string, er
 	// For non-relative imports (e.g., "lua" stdlib), don't bundle them
 	// They'll be left as regular require() calls
 	return "", importPath, fmt.Errorf("cannot bundle external module: %s", importPath)
+}
+
+// resolveFile tries to resolve a file path with various extensions and index files
+func (b *Bundler) resolveFile(basePath string) (string, error) {
+	// Try exact path with .lunar extension
+	if !strings.HasSuffix(basePath, ".lunar") {
+		lunarPath := basePath + ".lunar"
+		if _, err := os.Stat(lunarPath); err == nil {
+			return filepath.Abs(lunarPath)
+		}
+	} else {
+		if _, err := os.Stat(basePath); err == nil {
+			return filepath.Abs(basePath)
+		}
+	}
+
+	// Try as directory with index.lunar
+	indexPath := filepath.Join(basePath, "index.lunar")
+	if _, err := os.Stat(indexPath); err == nil {
+		return filepath.Abs(indexPath)
+	}
+
+	// Try without extension (in case it's already .lunar)
+	if strings.HasSuffix(basePath, ".lunar") {
+		if _, err := os.Stat(basePath); err == nil {
+			return filepath.Abs(basePath)
+		}
+	}
+
+	return "", fmt.Errorf("module not found: %s", basePath)
 }
 
 // topologicalSort sorts modules in dependency order
@@ -414,4 +465,13 @@ func (b *Bundler) generateModuleWrapper(module *Module) string {
 // transformImports transforms import statements (placeholder for future use)
 func (b *Bundler) transformImports(statements []ast.Statement, fromFile string) []ast.Statement {
 	return statements
+}
+
+// GetAllFiles returns all file paths that were bundled
+func (b *Bundler) GetAllFiles() []string {
+	var files []string
+	for _, module := range b.modules {
+		files = append(files, module.Path)
+	}
+	return files
 }

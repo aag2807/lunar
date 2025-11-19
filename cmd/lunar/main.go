@@ -8,6 +8,7 @@ import (
 	"lunar/internal/ast"
 	"lunar/internal/bundler"
 	"lunar/internal/codegen"
+	"lunar/internal/config"
 	"lunar/internal/formatter"
 	"lunar/internal/lexer"
 	"lunar/internal/linter"
@@ -22,7 +23,7 @@ import (
 	"time"
 )
 
-const version = "1.4.0"
+const version = "1.5.0"
 
 func main() {
 	// Define command-line flags
@@ -39,6 +40,7 @@ func main() {
 	lintMode := flag.Bool("lint", false, "Run linter to check for issues")
 	bundleMode := flag.Bool("bundle", false, "Bundle all dependencies into a single file")
 	runMode := flag.Bool("run", false, "Run the compiled Lua file after compilation")
+	configFile := flag.String("config", "", "Path to lunar.config.json (auto-detected if not specified)")
 
 	flag.Parse()
 
@@ -100,18 +102,58 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Warning: Input file '%s' does not have .lunar extension\n", inputFile)
 	}
 
+	// Load configuration
+	var cfg *config.Config
+	var err error
+	var configDir string
+	if *configFile != "" {
+		cfg, err = config.LoadFromFile(*configFile)
+		configDir = filepath.Dir(*configFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		// Auto-discover config file
+		configDir, cfg, err = config.FindConfig(filepath.Dir(inputFile))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+			os.Exit(1)
+		}
+		if configDir == "" {
+			configDir = filepath.Dir(inputFile)
+		}
+	}
+
+	// Merge command-line flags with config (CLI takes precedence)
+	cfg.Merge(*noTypeCheck, *sourceMap, *bundleMode)
+
 	// Determine output file
 	output := *outputFile
 	if output == "" {
-		output = strings.TrimSuffix(inputFile, ".lunar") + ".lua"
+		if cfg.OutFile != "" {
+			output = filepath.Join(configDir, cfg.OutFile)
+		} else if cfg.OutDir != "" {
+			baseName := strings.TrimSuffix(filepath.Base(inputFile), ".lunar") + ".lua"
+			output = filepath.Join(configDir, cfg.OutDir, baseName)
+		} else {
+			output = strings.TrimSuffix(inputFile, ".lunar") + ".lua"
+		}
+	}
+
+	// Create output directory if it doesn't exist
+	outDir := filepath.Dir(output)
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating output directory: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Bundle mode
-	if *bundleMode {
+	if *bundleMode || cfg.CompilerOptions.Bundle {
 		if *watchMode {
-			runBundleWatchMode(inputFile, output, !*noTypeCheck, *runMode, *watchInterval)
+			runBundleWatchMode(inputFile, output, !*noTypeCheck, *runMode, *watchInterval, cfg)
 		} else {
-			if err := bundleFile(inputFile, output, !*noTypeCheck); err != nil {
+			if err := bundleFile(inputFile, output, !*noTypeCheck, cfg); err != nil {
 				fmt.Fprintf(os.Stderr, "Bundle failed:\n%v\n", err)
 				os.Exit(1)
 			}
@@ -154,18 +196,24 @@ func main() {
 }
 
 // bundleFile bundles a Lunar file and all its dependencies
-func bundleFile(inputFile, outputFile string, typeCheck bool) error {
-	b := bundler.New(inputFile, typeCheck)
+func bundleFile(inputFile, outputFile string, typeCheck bool, cfg *config.Config) error {
+	_, err := bundleFileWithDeps(inputFile, outputFile, typeCheck, cfg)
+	return err
+}
+
+// bundleFileWithDeps bundles a Lunar file and returns all dependency file paths
+func bundleFileWithDeps(inputFile, outputFile string, typeCheck bool, cfg *config.Config) ([]string, error) {
+	b := bundler.NewWithConfig(inputFile, typeCheck, cfg)
 	bundledCode, err := b.Bundle()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if err := ioutil.WriteFile(outputFile, []byte(bundledCode), 0644); err != nil {
-		return fmt.Errorf("failed to write output file: %w", err)
+		return nil, fmt.Errorf("failed to write output file: %w", err)
 	}
 
-	return nil
+	return b.GetAllFiles(), nil
 }
 
 // runLuaFile executes a Lua file
@@ -193,23 +241,34 @@ func runLuaFile(luaFile string) error {
 }
 
 // runBundleWatchMode watches files and rebundles/reruns on changes
-func runBundleWatchMode(inputFile, outputFile string, typeCheck, runAfter bool, intervalMs int) {
-	fmt.Printf("Watching %s for changes (Ctrl+C to stop)\n", inputFile)
+func runBundleWatchMode(inputFile, outputFile string, typeCheck, runAfter bool, intervalMs int, cfg *config.Config) {
+	fmt.Printf("Watching %s and dependencies for changes (Ctrl+C to stop)\n", inputFile)
 
-	// Get initial modification time
-	lastModTime := getFileModTime(inputFile)
+	// Track modification times for all files
+	fileModTimes := make(map[string]time.Time)
+	var watchedFiles []string
 
 	// Initial bundle
-	if err := bundleFile(inputFile, outputFile, typeCheck); err != nil {
+	files, err := bundleFileWithDeps(inputFile, outputFile, typeCheck, cfg)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "[%s] Bundle failed:\n%v\n", time.Now().Format("15:04:05"), err)
+		// Still watch the entry file even if bundle fails
+		watchedFiles = []string{inputFile}
 	} else {
+		watchedFiles = files
 		fmt.Printf("[%s] Successfully bundled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
+		fmt.Printf("[%s] Watching %d file(s)\n", time.Now().Format("15:04:05"), len(watchedFiles))
 		if runAfter {
 			fmt.Printf("[%s] Running %s...\n", time.Now().Format("15:04:05"), outputFile)
 			if err := runLuaFile(outputFile); err != nil {
 				fmt.Fprintf(os.Stderr, "[%s] Run failed: %v\n", time.Now().Format("15:04:05"), err)
 			}
 		}
+	}
+
+	// Initialize modification times
+	for _, file := range watchedFiles {
+		fileModTimes[file] = getFileModTime(file)
 	}
 
 	// Handle interrupt signal for graceful shutdown
@@ -226,13 +285,42 @@ func runBundleWatchMode(inputFile, outputFile string, typeCheck, runAfter bool, 
 			fmt.Println("\nStopping watch mode...")
 			return
 		case <-ticker.C:
-			currentModTime := getFileModTime(inputFile)
-			if !currentModTime.Equal(lastModTime) {
-				lastModTime = currentModTime
-				fmt.Printf("[%s] File changed, rebundling...\n", time.Now().Format("15:04:05"))
-				if err := bundleFile(inputFile, outputFile, typeCheck); err != nil {
+			// Check if any watched file has changed
+			changed := false
+			var changedFile string
+			for _, file := range watchedFiles {
+				currentModTime := getFileModTime(file)
+				if lastModTime, exists := fileModTimes[file]; exists {
+					if !currentModTime.Equal(lastModTime) {
+						changed = true
+						changedFile = file
+						fileModTimes[file] = currentModTime
+						break
+					}
+				}
+			}
+
+			if changed {
+				// Get relative path for cleaner output
+				relPath, err := filepath.Rel(filepath.Dir(inputFile), changedFile)
+				if err != nil {
+					relPath = changedFile
+				}
+				fmt.Printf("[%s] %s changed, rebundling...\n", time.Now().Format("15:04:05"), relPath)
+
+				files, err := bundleFileWithDeps(inputFile, outputFile, typeCheck, cfg)
+				if err != nil {
 					fmt.Fprintf(os.Stderr, "[%s] Bundle failed:\n%v\n", time.Now().Format("15:04:05"), err)
 				} else {
+					// Update watched files list (dependencies may have changed)
+					watchedFiles = files
+					// Update mod times for new files
+					for _, file := range watchedFiles {
+						if _, exists := fileModTimes[file]; !exists {
+							fileModTimes[file] = getFileModTime(file)
+						}
+					}
+
 					fmt.Printf("[%s] Successfully bundled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
 					if runAfter {
 						fmt.Printf("[%s] Running %s...\n", time.Now().Format("15:04:05"), outputFile)
@@ -560,6 +648,7 @@ func printHelp() {
 	fmt.Println("  --lint              Check code for potential issues")
 	fmt.Println("  --bundle            Bundle all dependencies into a single file")
 	fmt.Println("  --run               Run the compiled Lua file after compilation")
+	fmt.Println("  --config <file>     Path to lunar.config.json")
 	fmt.Println("  --repl              Start interactive REPL mode")
 	fmt.Println("  --version           Show version information")
 	fmt.Println("  --help              Show this help message")

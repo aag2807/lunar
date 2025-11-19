@@ -40,6 +40,7 @@ func main() {
 	lintMode := flag.Bool("lint", false, "Run linter to check for issues")
 	bundleMode := flag.Bool("bundle", false, "Bundle all dependencies into a single file")
 	runMode := flag.Bool("run", false, "Run the compiled Lua file after compilation")
+	testMode := flag.Bool("test", false, "Run tests in the specified directory")
 	configFile := flag.String("config", "", "Path to lunar.config.json (auto-detected if not specified)")
 
 	flag.Parse()
@@ -92,6 +93,15 @@ func main() {
 	if *lintMode {
 		if err := lintFile(inputFile); err != nil {
 			fmt.Fprintf(os.Stderr, "Lint failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	// Handle test mode
+	if *testMode {
+		if err := runTests(inputFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Tests failed: %v\n", err)
 			os.Exit(1)
 		}
 		os.Exit(0)
@@ -685,6 +695,7 @@ func printHelp() {
 	fmt.Println("  --lint              Check code for potential issues")
 	fmt.Println("  --bundle            Bundle all dependencies into a single file")
 	fmt.Println("  --run               Run the compiled Lua file after compilation")
+	fmt.Println("  --test              Run tests in directory (*_test.lunar files)")
 	fmt.Println("  --config <file>     Path to lunar.config.json")
 	fmt.Println("  --repl              Start interactive REPL mode")
 	fmt.Println("  --version           Show version information")
@@ -698,6 +709,7 @@ func printHelp() {
 	fmt.Println("  lunar main.lunar --watch")
 	fmt.Println("  lunar main.lunar --bundle --run")
 	fmt.Println("  lunar main.lunar --bundle --watch --run")
+	fmt.Println("  lunar --test ./tests")
 	fmt.Println("  lunar --repl")
 	fmt.Println()
 	fmt.Println("For more information about the Lunar language:")
@@ -844,4 +856,138 @@ func printREPLHelp() {
 	fmt.Println("  >>> function add(a: number, b: number): number")
 	fmt.Println("  ...   return a + b")
 	fmt.Println("  ... end")
+}
+
+// runTests discovers and runs all test files in a directory
+func runTests(path string) error {
+	// Check if path is a directory or file
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("cannot access path: %w", err)
+	}
+
+	var testDir string
+	if info.IsDir() {
+		testDir = path
+	} else {
+		testDir = filepath.Dir(path)
+	}
+
+	// Discover test files
+	testFiles, err := discoverTestFiles(testDir)
+	if err != nil {
+		return fmt.Errorf("failed to discover tests: %w", err)
+	}
+
+	if len(testFiles) == 0 {
+		fmt.Println("No test files found")
+		fmt.Println("Test files should match: *_test.lunar or *.test.lunar")
+		return nil
+	}
+
+	fmt.Printf("Found %d test file(s):\n", len(testFiles))
+	for _, f := range testFiles {
+		relPath, _ := filepath.Rel(testDir, f)
+		fmt.Printf("  - %s\n", relPath)
+	}
+	fmt.Println()
+
+	// Create a temporary test runner file
+	runnerContent := generateTestRunner(testFiles, testDir)
+	runnerFile := filepath.Join(testDir, "__test_runner__.lunar")
+
+	if err := ioutil.WriteFile(runnerFile, []byte(runnerContent), 0644); err != nil {
+		return fmt.Errorf("failed to create test runner: %w", err)
+	}
+	defer os.Remove(runnerFile)
+
+	// Bundle the test runner
+	b := bundler.New(runnerFile, false)
+	bundledCode, err := b.Bundle()
+	if err != nil {
+		return fmt.Errorf("failed to bundle tests: %w", err)
+	}
+
+	// Write bundled output
+	outputFile := filepath.Join(testDir, "__test_runner__.lua")
+	if err := ioutil.WriteFile(outputFile, []byte(bundledCode), 0644); err != nil {
+		return fmt.Errorf("failed to write bundled tests: %w", err)
+	}
+	defer os.Remove(outputFile)
+
+	// Run the tests
+	fmt.Println("Running tests...")
+	fmt.Println(strings.Repeat("-", 50))
+
+	cmd := exec.Command("lua", outputFile)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Dir = testDir
+
+	err = cmd.Run()
+
+	fmt.Println(strings.Repeat("-", 50))
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("tests failed with exit code %d", exitErr.ExitCode())
+		}
+		return fmt.Errorf("failed to run tests: %w", err)
+	}
+
+	fmt.Println("All tests passed!")
+	return nil
+}
+
+// discoverTestFiles finds all test files in a directory
+func discoverTestFiles(dir string) ([]string, error) {
+	var testFiles []string
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			// Skip vendor and hidden directories
+			if info.Name() == "vendor" || strings.HasPrefix(info.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Check for test file patterns
+		name := info.Name()
+		if strings.HasSuffix(name, "_test.lunar") || strings.HasSuffix(name, ".test.lunar") {
+			testFiles = append(testFiles, path)
+		}
+
+		return nil
+	})
+
+	return testFiles, err
+}
+
+// generateTestRunner creates a Lunar file that imports and runs all test files
+func generateTestRunner(testFiles []string, baseDir string) string {
+	var sb strings.Builder
+
+	sb.WriteString("-- Auto-generated test runner\n")
+	sb.WriteString("import { runTests } from \"vendor/testing\"\n\n")
+
+	// Import each test file (wildcard import to execute the file)
+	for _, testFile := range testFiles {
+		relPath, _ := filepath.Rel(baseDir, testFile)
+		// Convert to import path (remove .lunar, use ./)
+		importPath := "./" + strings.TrimSuffix(relPath, ".lunar")
+		importPath = strings.ReplaceAll(importPath, "\\", "/")
+
+		sb.WriteString(fmt.Sprintf("import * from \"%s\"\n", importPath))
+	}
+
+	sb.WriteString("\n-- Run all tests\n")
+	sb.WriteString("runTests()\n")
+
+	return sb.String()
 }

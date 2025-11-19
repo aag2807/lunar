@@ -34,6 +34,9 @@ type CompilerOptions struct {
 	SourceMap   bool `json:"sourceMap,omitempty"`
 	Declaration bool `json:"declaration,omitempty"`
 
+	// Target Lua version: "lua51", "lua52", "lua53", "lua54", "luajit"
+	Target string `json:"target,omitempty"`
+
 	// Module resolution
 	BaseURL string            `json:"baseUrl,omitempty"`
 	Paths   map[string]string `json:"paths,omitempty"`
@@ -41,6 +44,20 @@ type CompilerOptions struct {
 	// Bundling
 	Bundle    bool `json:"bundle,omitempty"`
 	TreeShake bool `json:"treeShake,omitempty"`
+}
+
+// Target constants
+const (
+	TargetLua51  = "lua51"
+	TargetLua52  = "lua52"
+	TargetLua53  = "lua53"
+	TargetLua54  = "lua54"
+	TargetLuaJIT = "luajit"
+)
+
+// IsLuaJIT returns true if target is LuaJIT or Lua 5.1
+func (c *CompilerOptions) IsLuaJIT() bool {
+	return c.Target == TargetLuaJIT || c.Target == TargetLua51
 }
 
 // DefaultConfig returns a config with default values
@@ -51,6 +68,7 @@ func DefaultConfig() *Config {
 			NoTypeCheck: false,
 			SourceMap:   false,
 			Declaration: false,
+			Target:      TargetLua53,
 			BaseURL:     ".",
 			Paths:       make(map[string]string),
 			Bundle:      false,
@@ -160,7 +178,7 @@ func (c *Config) ResolvePath(importPath string, fromDir string) string {
 }
 
 // Merge merges command-line options into the config
-func (c *Config) Merge(noTypeCheck, sourceMap, bundle bool) {
+func (c *Config) Merge(noTypeCheck, sourceMap, bundle bool, target string) {
 	if noTypeCheck {
 		c.CompilerOptions.NoTypeCheck = true
 	}
@@ -169,5 +187,8 @@ func (c *Config) Merge(noTypeCheck, sourceMap, bundle bool) {
 	}
 	if bundle {
 		c.CompilerOptions.Bundle = true
+	}
+	if target != "" {
+		c.CompilerOptions.Target = target
 	}
 }

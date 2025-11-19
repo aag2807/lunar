@@ -17,8 +17,9 @@ const (
 	PLUS     = "+"
 	MINUS    = "-"
 	BANG     = "!"
-	ASTERISK = "*"
+	ASTERISK  = "*"
 	SLASH     = "/"
+	FLOOR_DIV = "//"
 	MODULO    = "%"
 	HASH      = "#"
 	AMPERSAND = "&" // for intersection types Type1 & Type2

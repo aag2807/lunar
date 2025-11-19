@@ -1,0 +1,8 @@
+-- Test integer division for different Lua targets
+local a: number = 10
+local b: number = 3
+
+-- Integer division (floor division)
+local result: number = a // b
+
+print("10 // 3 =", result)

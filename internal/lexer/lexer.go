@@ -102,7 +102,12 @@ func (l *Lexer) NextToken() Token {
 	case '*':
 		tok = newToken(ASTERISK, l.ch, l.line, l.column)
 	case '/':
-		tok = newToken(SLASH, l.ch, l.line, l.column)
+		if l.peekChar() == '/' {
+			l.readChar()
+			tok = Token{Type: FLOOR_DIV, Literal: "//", Line: l.line, Column: l.column}
+		} else {
+			tok = newToken(SLASH, l.ch, l.line, l.column)
+		}
 	case '%':
 		tok = newToken(MODULO, l.ch, l.line, l.column)
 	case '#':

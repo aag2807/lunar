@@ -38,6 +38,7 @@ var precedences = map[lexer.TokenType]int{
 	lexer.MINUS:            SUM,
 	lexer.ASTERISK:         PRODUCT,
 	lexer.SLASH:            PRODUCT,
+	lexer.FLOOR_DIV:        PRODUCT,
 	lexer.MODULO:           PRODUCT,
 	lexer.DOT:              DOT,
 	lexer.OPTIONAL_CHAIN:   DOT, // ?. has same precedence as .
@@ -107,6 +108,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.MINUS, p.parseInfixExpression)
 	p.registerInfix(lexer.ASTERISK, p.parseInfixExpression)
 	p.registerInfix(lexer.SLASH, p.parseInfixExpression)
+	p.registerInfix(lexer.FLOOR_DIV, p.parseInfixExpression)
 	p.registerInfix(lexer.MODULO, p.parseInfixExpression)
 	p.registerInfix(lexer.EQ, p.parseInfixExpression)
 	p.registerInfix(lexer.NOT_EQ, p.parseInfixExpression)

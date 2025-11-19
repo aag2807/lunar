@@ -41,6 +41,7 @@ func main() {
 	bundleMode := flag.Bool("bundle", false, "Bundle all dependencies into a single file")
 	runMode := flag.Bool("run", false, "Run the compiled Lua file after compilation")
 	testMode := flag.Bool("test", false, "Run tests in the specified directory")
+	targetLua := flag.String("target", "", "Target Lua version: lua51, lua52, lua53, lua54, luajit")
 	configFile := flag.String("config", "", "Path to lunar.config.json (auto-detected if not specified)")
 
 	flag.Parse()
@@ -136,7 +137,7 @@ func main() {
 	}
 
 	// Merge command-line flags with config (CLI takes precedence)
-	cfg.Merge(*noTypeCheck, *sourceMap, *bundleMode)
+	cfg.Merge(*noTypeCheck, *sourceMap, *bundleMode, *targetLua)
 
 	// Determine output file
 	output := *outputFile
@@ -182,10 +183,10 @@ func main() {
 
 	// Watch mode or single compilation
 	if *watchMode {
-		runWatchMode(inputFile, output, !*noTypeCheck, *sourceMap, *watchInterval, *runMode)
+		runWatchMode(inputFile, output, !*noTypeCheck, *sourceMap, *watchInterval, *runMode, cfg.CompilerOptions.Target)
 	} else {
 		// Compile the file
-		if err := compile(inputFile, output, !*noTypeCheck, *sourceMap); err != nil {
+		if err := compile(inputFile, output, !*noTypeCheck, *sourceMap, cfg.CompilerOptions.Target); err != nil {
 			fmt.Fprintf(os.Stderr, "Compilation failed:\n%v\n", err)
 			os.Exit(1)
 		}
@@ -345,7 +346,7 @@ func runBundleWatchMode(inputFile, outputFile string, typeCheck, runAfter bool, 
 }
 
 // compile compiles a Lunar source file to Lua
-func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool) error {
+func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool, target string) error {
 	// Auto-load declaration files from the same directory
 	declarationStatements := []ast.Statement{}
 	if typeCheck {
@@ -396,7 +397,7 @@ func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool) er
 	var luaCode string
 	if generateSourceMap {
 		// Generate with source map
-		sourceMapData, sourceMapObj := codegen.GenerateWithSourceMap(statements, inputFile, outputFile, false)
+		sourceMapData, sourceMapObj := codegen.GenerateWithSourceMapAndTarget(statements, inputFile, outputFile, false, target)
 		luaCode = sourceMapData
 
 		// Add source map comment to Lua file
@@ -414,7 +415,7 @@ func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool) er
 		}
 	} else {
 		// Generate without source map
-		luaCode = codegen.Generate(statements)
+		luaCode = codegen.GenerateWithTarget(statements, target)
 	}
 
 	// Write output file
@@ -614,14 +615,14 @@ func lintFile(inputFile string) error {
 }
 
 // runWatchMode watches files for changes and recompiles automatically
-func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap bool, intervalMs int, runAfter bool) {
+func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap bool, intervalMs int, runAfter bool, target string) {
 	fmt.Printf("Watching %s for changes (Ctrl+C to stop)\n", inputFile)
 
 	// Get initial modification time
 	lastModTime := getFileModTime(inputFile)
 
 	// Initial compilation
-	if err := compile(inputFile, outputFile, typeCheck, generateSourceMap); err != nil {
+	if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target); err != nil {
 		fmt.Fprintf(os.Stderr, "[%s] Compilation failed:\n%v\n", time.Now().Format("15:04:05"), err)
 	} else {
 		fmt.Printf("[%s] Successfully compiled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
@@ -651,7 +652,7 @@ func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap boo
 			if !currentModTime.Equal(lastModTime) {
 				lastModTime = currentModTime
 				fmt.Printf("[%s] File changed, recompiling...\n", time.Now().Format("15:04:05"))
-				if err := compile(inputFile, outputFile, typeCheck, generateSourceMap); err != nil {
+				if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target); err != nil {
 					fmt.Fprintf(os.Stderr, "[%s] Compilation failed:\n%v\n", time.Now().Format("15:04:05"), err)
 				} else {
 					fmt.Printf("[%s] Successfully compiled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
@@ -688,6 +689,7 @@ func printHelp() {
 	fmt.Println("  -o <file>           Output file (default: replaces .lunar with .lua)")
 	fmt.Println("  --no-typecheck      Skip type checking")
 	fmt.Println("  --source-map        Generate source map (.lua.map file)")
+	fmt.Println("  --target <version>  Target Lua version: lua51, lua52, lua53, lua54, luajit")
 	fmt.Println("  --watch             Watch files for changes and recompile")
 	fmt.Println("  --watch-interval    Watch interval in ms (default: 500)")
 	fmt.Println("  --format            Format source code and print to stdout")
@@ -706,6 +708,7 @@ func printHelp() {
 	fmt.Println("  lunar main.lunar -o output.lua")
 	fmt.Println("  lunar main.lunar --no-typecheck")
 	fmt.Println("  lunar main.lunar --source-map")
+	fmt.Println("  lunar main.lunar --target luajit")
 	fmt.Println("  lunar main.lunar --watch")
 	fmt.Println("  lunar main.lunar --bundle --run")
 	fmt.Println("  lunar main.lunar --bundle --watch --run")

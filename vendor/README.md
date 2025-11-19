@@ -58,7 +58,7 @@ println(parsed.key)  -- value
 
 ### http - HTTP Client
 
-HTTP client built on LuaSocket. Requires `luarocks install luasocket`.
+HTTP client using curl (no external dependencies required).
 
 ```lunar
 import { get, post } from "vendor/http"
@@ -75,17 +75,20 @@ local response = post("https://api.example.com/submit", "data=value")
 - `post(url, body, options?) -> Response` - POST request
 - `put(url, body, options?) -> Response` - PUT request
 - `delete(url, options?) -> Response` - DELETE request
+- `head(url, options?) -> Response` - HEAD request
+- `patch(url, body, options?) -> Response` - PATCH request
 - `request(method, url, options?) -> Response` - Generic request
+- `json(method, url, data?, options?) -> Response` - JSON request helper
 - `encodeURI(str) -> string` - URL encode
 - `decodeURI(str) -> string` - URL decode
-- `parseURL(url) -> table` - Parse URL components
 
 **Response Object:**
 ```lunar
 {
     status: number,
     body: string,
-    headers: table
+    headers: table,
+    error: string?
 }
 ```
 

@@ -1,27 +1,29 @@
 -- Lunar HTTP Client Library
--- A simple HTTP client built on LuaSocket
+-- Uses curl for HTTP requests (no external dependencies)
 
 local http = {}
 
--- Try to load LuaSocket
-local socket_http, ltn12, url_parser
-local hasSocket = pcall(function()
-    socket_http = require("socket.http")
-    ltn12 = require("ltn12")
-    url_parser = require("socket.url")
-end)
+-- Check if curl is available
+local function hasCurl()
+    local handle = io.popen("curl --version 2>/dev/null")
+    if handle then
+        local result = handle:read("*a")
+        handle:close()
+        return result and #result > 0
+    end
+    return false
+end
 
-if not hasSocket then
-    -- Provide stub functions with helpful error
-    local function noSocket()
-        error("HTTP library requires LuaSocket. Install with: luarocks install luasocket")
+if not hasCurl() then
+    local function noCurl()
+        error("HTTP library requires curl. Please install curl.")
     end
 
-    http.get = noSocket
-    http.post = noSocket
-    http.put = noSocket
-    http.delete = noSocket
-    http.request = noSocket
+    http.get = noCurl
+    http.post = noCurl
+    http.put = noCurl
+    http.delete = noCurl
+    http.request = noCurl
 
     return http
 end
@@ -47,41 +49,72 @@ function http.decodeURI(str)
     return str
 end
 
--- Parse a URL into components
-function http.parseURL(url)
-    return url_parser.parse(url)
+-- Escape string for shell
+local function shellEscape(str)
+    return "'" .. string.gsub(str, "'", "'\\''") .. "'"
 end
 
--- Generic HTTP request
+-- Generic HTTP request using curl
 function http.request(method, url, options)
     options = options or {}
 
-    local responseBody = {}
-    local requestBody = options.body
+    -- Build curl command
+    local cmd = "curl -s -w '\\n%{http_code}'"
 
-    local requestHeaders = options.headers or {}
+    -- Method
+    cmd = cmd .. " -X " .. method
 
-    -- Set content length for body
-    if requestBody then
-        requestHeaders["Content-Length"] = #requestBody
-        if not requestHeaders["Content-Type"] then
-            requestHeaders["Content-Type"] = "application/x-www-form-urlencoded"
-        end
+    -- Timeout
+    local timeout = options.timeout or 30
+    cmd = cmd .. " --max-time " .. timeout
+
+    -- Headers
+    local headers = options.headers or {}
+    for key, value in pairs(headers) do
+        cmd = cmd .. " -H " .. shellEscape(key .. ": " .. value)
     end
 
-    local response, status, headers = socket_http.request({
-        url = url,
-        method = method,
-        headers = requestHeaders,
-        source = requestBody and ltn12.source.string(requestBody) or nil,
-        sink = ltn12.sink.table(responseBody),
-        timeout = options.timeout or 30
-    })
+    -- Body
+    if options.body then
+        -- Set default content type if not specified
+        if not headers["Content-Type"] and not headers["content-type"] then
+            cmd = cmd .. " -H 'Content-Type: application/x-www-form-urlencoded'"
+        end
+        cmd = cmd .. " -d " .. shellEscape(options.body)
+    end
+
+    -- URL
+    cmd = cmd .. " " .. shellEscape(url)
+
+    -- Execute
+    local handle = io.popen(cmd .. " 2>/dev/null")
+    if not handle then
+        return {
+            status = 0,
+            body = "",
+            headers = {},
+            error = "Failed to execute curl"
+        }
+    end
+
+    local output = handle:read("*a")
+    handle:close()
+
+    -- Parse response - status code is on the last line
+    local body, status = "", 0
+    local lastNewline = output:match(".*\n()")
+    if lastNewline then
+        body = output:sub(1, lastNewline - 2)  -- Remove trailing newline and status
+        status = tonumber(output:sub(lastNewline)) or 0
+    else
+        -- No newline found, entire output might be status code
+        status = tonumber(output) or 0
+    end
 
     return {
         status = status,
-        body = table.concat(responseBody),
-        headers = headers or {}
+        body = body,
+        headers = {}  -- curl -s doesn't return headers by default
     }
 end
 
@@ -107,6 +140,36 @@ end
 -- DELETE request
 function http.delete(url, options)
     return http.request("DELETE", url, options)
+end
+
+-- HEAD request
+function http.head(url, options)
+    return http.request("HEAD", url, options)
+end
+
+-- PATCH request
+function http.patch(url, body, options)
+    options = options or {}
+    options.body = body
+    return http.request("PATCH", url, options)
+end
+
+-- Helper to make JSON requests
+function http.json(method, url, data, options)
+    options = options or {}
+    options.headers = options.headers or {}
+    options.headers["Content-Type"] = "application/json"
+    options.headers["Accept"] = "application/json"
+
+    if data and type(data) == "table" then
+        -- Simple JSON encoding for tables
+        local json = require("vendor/json") or { encode = function(t) return tostring(t) end }
+        options.body = json.encode(data)
+    elseif data then
+        options.body = data
+    end
+
+    return http.request(method, url, options)
 end
 
 return http

@@ -243,6 +243,10 @@ func (b *Bundler) resolveModule(importPath, fromFile string) (string, string, er
 	resolvedPath := b.config.ResolvePath(importPath, fromDir)
 	if resolvedPath != importPath {
 		// Path was aliased, resolve from base directory
+		// Ensure the path is relative
+		if !strings.HasPrefix(resolvedPath, "./") && !strings.HasPrefix(resolvedPath, "../") {
+			resolvedPath = "./" + resolvedPath
+		}
 		importPath = resolvedPath
 		fromDir = b.baseDir
 	}

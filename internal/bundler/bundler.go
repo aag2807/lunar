@@ -16,12 +16,13 @@ import (
 
 // Module represents a parsed Lunar module
 type Module struct {
-	Path       string          // Resolved file path
-	ModuleID   string          // Module identifier for require()
-	Source     string          // Source code
-	Statements []ast.Statement // Parsed AST
-	Imports    []string        // Module IDs this module depends on
-	Exports    []string        // Exported names
+	Path        string          // Resolved file path
+	ModuleID    string          // Module identifier for require()
+	Source      string          // Source code
+	Statements  []ast.Statement // Parsed AST
+	Imports     []string        // Module IDs this module depends on
+	Exports     []string        // Exported names
+	UsedExports map[string]bool // Exports that are actually imported (for tree shaking)
 }
 
 // Bundler handles bundling multiple Lunar files into a single output
@@ -94,8 +95,46 @@ func (b *Bundler) Bundle() (string, error) {
 		}
 	}
 
+	// Analyze used exports for tree shaking
+	if b.config.CompilerOptions.TreeShake {
+		b.analyzeUsedExports()
+	}
+
 	// Generate bundled output
 	return b.generateBundle(entryModuleID), nil
+}
+
+// analyzeUsedExports marks which exports are actually used by analyzing imports
+func (b *Bundler) analyzeUsedExports() {
+	// Initialize UsedExports maps
+	for _, module := range b.modules {
+		module.UsedExports = make(map[string]bool)
+	}
+
+	// Analyze each module's imports
+	for _, module := range b.modules {
+		for _, stmt := range module.Statements {
+			if importStmt, ok := stmt.(*ast.ImportStatement); ok {
+				// Find the target module
+				depModule := b.findModuleByImport(importStmt.Module, module.Path)
+				if depModule == nil {
+					continue
+				}
+
+				if importStmt.IsWildcard {
+					// Wildcard import uses all exports
+					for _, export := range depModule.Exports {
+						depModule.UsedExports[export] = true
+					}
+				} else {
+					// Named imports - mark specific exports as used
+					for _, name := range importStmt.Names {
+						depModule.UsedExports[name.Value] = true
+					}
+				}
+			}
+		}
+	}
 }
 
 // loadModule loads and parses a module, recursively loading its dependencies
@@ -269,17 +308,27 @@ func (b *Bundler) topologicalSort() error {
 	visited := make(map[string]bool)
 	inStack := make(map[string]bool)
 	var order []string
+	var path []string // Track the current path for better error messages
 
 	var visit func(moduleID string) error
 	visit = func(moduleID string) error {
 		if inStack[moduleID] {
-			return fmt.Errorf("circular dependency detected involving %s", moduleID)
+			// Build circular dependency chain
+			cycle := []string{moduleID}
+			for i := len(path) - 1; i >= 0; i-- {
+				cycle = append([]string{path[i]}, cycle...)
+				if path[i] == moduleID {
+					break
+				}
+			}
+			return fmt.Errorf("circular dependency detected:\n  %s", strings.Join(cycle, " -> "))
 		}
 		if visited[moduleID] {
 			return nil
 		}
 
 		inStack[moduleID] = true
+		path = append(path, moduleID)
 		module := b.modules[moduleID]
 		if module != nil {
 			for _, dep := range module.Imports {
@@ -291,6 +340,7 @@ func (b *Bundler) topologicalSort() error {
 				}
 			}
 		}
+		path = path[:len(path)-1]
 		inStack[moduleID] = false
 		visited[moduleID] = true
 		order = append(order, moduleID)
@@ -437,6 +487,28 @@ func (b *Bundler) generateModuleWrapper(module *Module) string {
 				}
 			}
 			continue
+		}
+		// Tree shaking: skip unused exports
+		if b.config.CompilerOptions.TreeShake && module.UsedExports != nil {
+			if exportStmt, ok := stmt.(*ast.ExportStatement); ok {
+				var exportName string
+				switch s := exportStmt.Statement.(type) {
+				case *ast.VariableDeclaration:
+					if len(s.Names) > 0 {
+						exportName = s.Names[0].Value
+					}
+				case *ast.FunctionDeclaration:
+					exportName = s.Name.Value
+				case *ast.ClassDeclaration:
+					exportName = s.Name.Value
+				case *ast.EnumDeclaration:
+					exportName = s.Name.Value
+				}
+				if exportName != "" && !module.UsedExports[exportName] {
+					// Skip unused export
+					continue
+				}
+			}
 		}
 		moduleStatements = append(moduleStatements, stmt)
 	}

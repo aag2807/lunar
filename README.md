@@ -414,6 +414,7 @@ lunar/
 │   ├── types/          # Type checking
 │   ├── codegen/        # Lua code generation
 │   ├── bundler/        # Module bundler
+│   ├── config/         # Configuration loader
 │   ├── ast/            # AST definitions
 │   ├── lsp/            # LSP implementation
 │   ├── formatter/      # Code formatter
@@ -455,19 +456,62 @@ lunar/
 - [x] Language Server Protocol (LSP) implementation
 - [x] Neovim plugin
 
-### v1.4 (Current) ✅
+### v1.4 ✅
 - [x] Webpack-like bundler (`--bundle`) for multi-file projects
 - [x] Run mode (`--run`) to execute after compilation
 - [x] Watch mode with bundling and auto-run
 - [x] Topological sort for correct dependency order
 - [x] Module system with internal `__require` for bundled code
 
+### v1.5 (Current) ✅
+- [x] Watch all dependencies (not just entry file)
+- [x] Project configuration via `lunar.config.json`
+- [x] Path aliases (`@/utils` -> `src/utils`)
+- [x] Index file resolution (`./utils` -> `./utils/index.lunar`)
+- [x] Auto-create output directories
+
 ### v2.0 (Future)
+- [ ] Tree shaking (remove unused exports)
+- [ ] VS Code extension
 - [ ] Package manager integration
 - [ ] Incremental compilation
 - [ ] More LSP features (find references, rename, code actions)
-- [ ] VS Code extension
 - [ ] Performance optimizations
+
+## Configuration
+
+Lunar supports project configuration via `lunar.config.json`:
+
+```json
+{
+  "compilerOptions": {
+    "strict": false,
+    "noTypeCheck": false,
+    "sourceMap": false,
+    "bundle": true,
+    "baseUrl": ".",
+    "paths": {
+      "@utils": "./src/utils",
+      "@/*": "./src/*"
+    }
+  },
+  "outDir": "dist",
+  "outFile": "dist/bundle.lua",
+  "include": ["**/*.lunar"],
+  "exclude": ["node_modules"]
+}
+```
+
+### Configuration Options
+
+| Option | Description |
+|--------|-------------|
+| `compilerOptions.bundle` | Enable bundling by default |
+| `compilerOptions.sourceMap` | Generate source maps |
+| `compilerOptions.paths` | Path aliases for imports |
+| `compilerOptions.baseUrl` | Base directory for path resolution |
+| `outDir` | Output directory for compiled files |
+| `outFile` | Single output file (for bundling) |
 
 ## IDE Integration
 

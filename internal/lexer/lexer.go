@@ -142,7 +142,11 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(RBRACE, l.ch, l.line, l.column)
 	case '"':
 		tok.Type = STRING
-		tok.Literal = l.readString()
+		tok.Literal = l.readString('"')
+		return tok
+	case '\'':
+		tok.Type = STRING
+		tok.Literal = l.readString('\'')
 		return tok
 	case '`':
 		tok.Type = TEMPLATE_STRING
@@ -244,7 +248,7 @@ func (l *Lexer) readNumber() string {
 	return l.input[position:l.position]
 }
 
-func (l *Lexer) readString() string {
+func (l *Lexer) readString(delimiter byte) string {
 	var result []byte
 
 	for {
@@ -259,6 +263,8 @@ func (l *Lexer) readString() string {
 				result = append(result, '\t')
 			case '"':
 				result = append(result, '"')
+			case '\'':
+				result = append(result, '\'')
 			case '\\':
 				result = append(result, '\\')
 			default:
@@ -267,7 +273,7 @@ func (l *Lexer) readString() string {
 			continue
 		}
 
-		if l.ch == '"' {
+		if l.ch == delimiter {
 			l.readChar()
 			break
 		}

@@ -1,0 +1,20 @@
+-- Format library declarations for Lunar
+-- Usage: import { printf, sprintf, println } from "vendor/fmt"
+
+-- Print formatted string to stdout
+declare function printf(format: string, ...: any): void end
+
+-- Return formatted string
+declare function sprintf(format: string, ...: any): string end
+
+-- Print with newline
+declare function println(...: any): void end
+
+-- Print without newline
+declare function print(...: any): void end
+
+-- Format a value for debugging
+declare function inspect(value: any, depth: number?): string end
+
+-- Error formatting
+declare function errorf(format: string, ...: any): void end

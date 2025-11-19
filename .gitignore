@@ -6,6 +6,7 @@
 *.lua
 !examples/*.lua.example
 !editors/**/*.lua
+!vendor/**/*.lua
 
 # Test files (root directory only)
 /*test*.lunar

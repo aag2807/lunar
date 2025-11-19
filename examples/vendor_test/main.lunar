@@ -1,0 +1,19 @@
+-- Test vendor library imports
+import { printf, println, inspect } from "vendor/fmt"
+import { encode, decode } from "vendor/json"
+
+-- Test JSON encoding/decoding
+local jsonStr = encode({ name = "Lunar", version = 1 })
+printf("Encoded JSON: %s\n", jsonStr)
+
+local decoded = decode("{\"language\":\"Lunar\",\"typed\":true}")
+printf("Decoded language: %s\n", decoded.language)
+
+-- Test format library
+println("Testing println with multiple args")
+
+local testData = { a = 1, b = 2 }
+local inspected = inspect(testData)
+printf("Inspected: %s\n", inspected)
+
+println("Vendor library test complete!")

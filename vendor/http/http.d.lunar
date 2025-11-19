@@ -1,0 +1,35 @@
+-- HTTP client library declarations for Lunar
+-- Usage: import { get, post, request } from "vendor/http"
+-- Requires: LuaSocket (luarocks install luasocket)
+
+declare interface HttpResponse {
+    status: number
+    body: string
+    headers: table
+}
+
+declare interface HttpOptions {
+    headers: table?
+    timeout: number?
+    body: string?
+}
+
+-- Simple GET request
+declare function get(url: string, options: HttpOptions?): HttpResponse end
+
+-- Simple POST request
+declare function post(url: string, body: string, options: HttpOptions?): HttpResponse end
+
+-- PUT request
+declare function put(url: string, body: string, options: HttpOptions?): HttpResponse end
+
+-- DELETE request
+declare function delete(url: string, options: HttpOptions?): HttpResponse end
+
+-- Generic request
+declare function request(method: string, url: string, options: HttpOptions?): HttpResponse end
+
+-- URL utilities
+declare function encodeURI(str: string): string end
+declare function decodeURI(str: string): string end
+declare function parseURL(url: string): table end

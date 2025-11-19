@@ -1,0 +1,44 @@
+-- Testing library declarations for Lunar
+-- Usage: import { describe, it, expect } from "vendor/testing"
+
+declare interface TestContext {
+    name: string
+    passed: number
+    failed: number
+    errors: string[]
+}
+
+declare interface Expectation<T> {
+    toBe: function(expected: T): void
+    toEqual: function(expected: T): void
+    toBeTruthy: function(): void
+    toBeFalsy: function(): void
+    toBeNil: function(): void
+    toBeGreaterThan: function(value: number): void
+    toBeLessThan: function(value: number): void
+    toContain: function(value: any): void
+    toThrow: function(): void
+}
+
+-- Test organization
+declare function describe(name: string, fn: function(): void): void end
+declare function it(name: string, fn: function(): void): void end
+declare function test(name: string, fn: function(): void): void end
+
+-- Assertions
+declare function expect<T>(value: T): Expectation<T> end
+declare function assert(condition: boolean, message: string?): void end
+declare function assertEqual<T>(actual: T, expected: T, message: string?): void end
+declare function assertNil(value: any, message: string?): void end
+declare function assertNotNil(value: any, message: string?): void end
+declare function assertError(fn: function(): void, message: string?): void end
+
+-- Test lifecycle
+declare function beforeEach(fn: function(): void): void end
+declare function afterEach(fn: function(): void): void end
+declare function beforeAll(fn: function(): void): void end
+declare function afterAll(fn: function(): void): void end
+
+-- Test runner
+declare function runTests(): TestContext end
+declare function printResults(ctx: TestContext): void end

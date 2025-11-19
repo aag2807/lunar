@@ -368,7 +368,7 @@ func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool) er
 
 	// Check for parser errors
 	if len(p.Errors()) > 0 {
-		return formatParserErrors(inputFile, p.Errors())
+		return formatParserErrors(inputFile, string(source), p.Errors())
 	}
 
 	// Type Checker: Validate types (if enabled)
@@ -441,19 +441,56 @@ func parseDeclarationFile(filename string) ([]ast.Statement, error) {
 	statements := p.Parse()
 
 	if len(p.Errors()) > 0 {
-		return nil, formatParserErrors(filename, p.Errors())
+		return nil, formatParserErrors(filename, string(source), p.Errors())
 	}
 
 	return statements, nil
 }
 
-// formatParserErrors formats parser errors for display
-func formatParserErrors(filename string, errors []string) error {
+// formatParserErrors formats parser errors for display with source context
+func formatParserErrors(filename string, source string, errors []*parser.ParseError) error {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("\n%s: Parse errors:\n", filename))
-	for _, msg := range errors {
-		sb.WriteString(fmt.Sprintf("  %s\n", msg))
+	sb.WriteString(fmt.Sprintf("\n%s: Parse errors found:\n\n", filename))
+
+	lines := strings.Split(source, "\n")
+
+	for i, err := range errors {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+
+		// Error location header
+		sb.WriteString(fmt.Sprintf("  Error %d: %s:%d:%d\n", i+1, filename, err.Line, err.Column))
+		sb.WriteString(fmt.Sprintf("  %s\n\n", err.Message))
+
+		// Show source context (line before, error line, line after)
+		startLine := err.Line - 2
+		endLine := err.Line + 1
+		if startLine < 1 {
+			startLine = 1
+		}
+		if endLine > len(lines) {
+			endLine = len(lines)
+		}
+
+		for lineNum := startLine; lineNum <= endLine; lineNum++ {
+			lineContent := lines[lineNum-1]
+
+			// Highlight the error line
+			if lineNum == err.Line {
+				sb.WriteString(fmt.Sprintf("  %4d | %s\n", lineNum, lineContent))
+
+				// Add caret pointing to error column
+				if err.Column > 0 && err.Column <= len(lineContent)+1 {
+					pointer := strings.Repeat(" ", err.Column-1) + "^"
+					sb.WriteString(fmt.Sprintf("       | %s\n", pointer))
+				}
+			} else {
+				sb.WriteString(fmt.Sprintf("  %4d | %s\n", lineNum, lineContent))
+			}
+		}
 	}
+
 	return fmt.Errorf("%s", sb.String())
 }
 
@@ -518,7 +555,7 @@ func formatFile(inputFile string, writeBack bool) error {
 	statements := p.Parse()
 
 	if len(p.Errors()) > 0 {
-		return fmt.Errorf("parse errors:\n%s", strings.Join(p.Errors(), "\n"))
+		return formatParserErrors(inputFile, string(source), p.Errors())
 	}
 
 	// Format
@@ -756,7 +793,7 @@ func runREPL() {
 		if len(p.Errors()) > 0 {
 			fmt.Println("Parse errors:")
 			for _, err := range p.Errors() {
-				fmt.Printf("  %s\n", err)
+				fmt.Printf("  Line %d, Col %d: %s\n", err.Line, err.Column, err.Message)
 			}
 			continue
 		}

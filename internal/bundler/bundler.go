@@ -216,7 +216,11 @@ func (b *Bundler) parseFile(filePath string) ([]ast.Statement, error) {
 	statements := p.Parse()
 
 	if len(p.Errors()) > 0 {
-		return nil, fmt.Errorf("parse errors in %s:\n%s", filePath, strings.Join(p.Errors(), "\n"))
+		var errMsgs []string
+		for _, err := range p.Errors() {
+			errMsgs = append(errMsgs, fmt.Sprintf("Line %d, Col %d: %s", err.Line, err.Column, err.Message))
+		}
+		return nil, fmt.Errorf("parse errors in %s:\n%s", filePath, strings.Join(errMsgs, "\n"))
 	}
 
 	return statements, nil

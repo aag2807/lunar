@@ -525,7 +525,11 @@ func LintSource(source string) ([]Issue, error) {
 	statements := p.Parse()
 
 	if len(p.Errors()) > 0 {
-		return nil, fmt.Errorf("parse errors:\n%s", strings.Join(p.Errors(), "\n"))
+		var errMsgs []string
+		for _, err := range p.Errors() {
+			errMsgs = append(errMsgs, err.Error())
+		}
+		return nil, fmt.Errorf("parse errors:\n%s", strings.Join(errMsgs, "\n"))
 	}
 
 	linter := New(DefaultOptions())

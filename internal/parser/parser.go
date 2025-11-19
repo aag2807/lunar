@@ -55,16 +55,25 @@ type Parser struct {
 	curToken  lexer.Token
 	peekToken lexer.Token
 
-	errors []string
+	errors []*ParseError
 
 	prefixParseFns map[lexer.TokenType]prefixParseFn
 	infixParseFns  map[lexer.TokenType]infixParseFn
 }
 
+// addError adds a parse error with location information
+func (p *Parser) addError(message string, token lexer.Token) {
+	p.errors = append(p.errors, &ParseError{
+		Message: message,
+		Line:    token.Line,
+		Column:  token.Column,
+	})
+}
+
 func New(l *lexer.Lexer) *Parser {
 	p := &Parser{
 		l:      l,
-		errors: []string{},
+		errors: []*ParseError{},
 	}
 
 	//register prefix parse functions
@@ -145,7 +154,7 @@ func (p *Parser) parseNumberLiteral() ast.Expression {
 	value, err := strconv.ParseFloat(p.curToken.Literal, 64)
 	if err != nil {
 		msg := fmt.Sprintf("could not parse %q as number", p.curToken.Literal)
-		p.errors = append(p.errors, msg)
+		p.addError(msg, p.curToken)
 		return nil
 	}
 
@@ -200,7 +209,7 @@ func (p *Parser) parseTemplateLiteral() ast.Expression {
 
 			if len(exprParser.Errors()) > 0 {
 				for _, err := range exprParser.Errors() {
-					p.errors = append(p.errors, "Template expression error: "+err)
+					p.addError("Template expression error: "+err.Message, token)
 				}
 				return nil
 			}
@@ -483,7 +492,7 @@ func (p *Parser) parseDotExpression(left ast.Expression) ast.Expression {
 
 func (p *Parser) peekError(t lexer.TokenType) {
 	msg := fmt.Sprintf("expected next token to be %s, got %s instead", t, p.peekToken.Type)
-	p.errors = append(p.errors, msg)
+	p.addError(msg, p.peekToken)
 }
 
 func (p *Parser) peekPrecedence() int {
@@ -504,10 +513,10 @@ func (p *Parser) curPrecedence() int {
 
 func (p *Parser) noPrefixParseFnError(t lexer.TokenType) {
 	msg := fmt.Sprintf("no prefix parse function for %s found", t)
-	p.errors = append(p.errors, msg)
+	p.addError(msg, p.curToken)
 }
 
-func (p *Parser) Errors() []string {
+func (p *Parser) Errors() []*ParseError {
 	return p.errors
 }
 
@@ -706,7 +715,7 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 		p.nextToken() // consume comma, now on next identifier
 
 		if !p.curTokenIs(lexer.IDENT) {
-			p.errors = append(p.errors, fmt.Sprintf("expected identifier after comma, got %s", p.curToken.Type))
+			p.addError(fmt.Sprintf("expected identifier after comma, got %s", p.curToken.Type), p.curToken)
 			return nil
 		}
 
@@ -2022,7 +2031,7 @@ func (p *Parser) parseForStatement() *ast.ForStatement {
 		}
 	} else {
 		msg := fmt.Sprintf("expected 'in' or '=' after for variable, got %s", p.peekToken.Type)
-		p.errors = append(p.errors, msg)
+		p.addError(msg, p.peekToken)
 		return nil
 	}
 
@@ -2130,7 +2139,7 @@ func (p *Parser) parseAbstractClassDeclaration() *ast.ClassDeclaration {
 
 	// Expect 'class' keyword
 	if !p.curTokenIs(lexer.CLASS) {
-		p.errors = append(p.errors, fmt.Sprintf("expected 'class' after 'abstract', got %s", p.curToken.Type))
+		p.addError(fmt.Sprintf("expected 'class' after 'abstract', got %s", p.curToken.Type), p.curToken)
 		return nil
 	}
 
@@ -2545,7 +2554,7 @@ func (p *Parser) parseIndexSignature() *ast.IndexSignatureDeclaration {
 
 	if !p.curTokenIsIdentOrContextual() {
 		msg := fmt.Sprintf("expected identifier for index signature key name, got %s instead", p.curToken.Type)
-		p.errors = append(p.errors, msg)
+		p.addError(msg, p.curToken)
 		return nil
 	}
 
@@ -2711,7 +2720,7 @@ func (p *Parser) parseImportStatement() *ast.ImportStatement {
 		}
 
 		if !p.curTokenIs(lexer.RBRACE) {
-			p.errors = append(p.errors, "expected '}' after import names")
+			p.addError("expected '}' after import names", p.curToken)
 			return nil
 		}
 
@@ -2720,7 +2729,7 @@ func (p *Parser) parseImportStatement() *ast.ImportStatement {
 
 	// Expect 'from' keyword
 	if !p.curTokenIs(lexer.FROM) {
-		p.errors = append(p.errors, "expected 'from' after import statement")
+		p.addError("expected 'from' after import statement", p.curToken)
 		return nil
 	}
 
@@ -2728,7 +2737,7 @@ func (p *Parser) parseImportStatement() *ast.ImportStatement {
 
 	// Expect string literal for module path
 	if !p.curTokenIs(lexer.STRING) {
-		p.errors = append(p.errors, "expected string literal for module path")
+		p.addError("expected string literal for module path", p.curToken)
 		return nil
 	}
 
@@ -2786,7 +2795,7 @@ func (p *Parser) parseDeclareStatement() *ast.DeclareStatement {
 	case lexer.TYPE:
 		declareStmt.Declaration = p.parseTypeDeclaration()
 	default:
-		p.errors = append(p.errors, fmt.Sprintf("expected declaration after 'declare', got %s", p.curToken.Type))
+		p.addError(fmt.Sprintf("expected declaration after 'declare', got %s", p.curToken.Type), p.curToken)
 		return nil
 	}
 
@@ -2815,7 +2824,7 @@ func (p *Parser) parseGenericParameters() []*ast.Identifier {
 	}
 
 	if !p.curTokenIs(lexer.GT) {
-		p.errors = append(p.errors, "expected '>' after generic parameters")
+		p.addError("expected '>' after generic parameters", p.curToken)
 		return nil
 	}
 
@@ -2884,7 +2893,7 @@ func (p *Parser) parseDecoratedStatement() ast.Statement {
 		}
 		return fn
 	default:
-		p.errors = append(p.errors, fmt.Sprintf("decorators can only be applied to classes and functions, got %s", p.curToken.Type))
+		p.addError(fmt.Sprintf("decorators can only be applied to classes and functions, got %s", p.curToken.Type), p.curToken)
 		return nil
 	}
 }

@@ -146,6 +146,12 @@ func (l *Lexer) NextToken() Token {
 	case ')':
 		tok = newToken(RPAREN, l.ch, l.line, l.column)
 	case '[':
+		// Check for long string [[...]]
+		if l.peekChar() == '[' || l.peekChar() == '=' {
+			tok.Type = STRING
+			tok.Literal = l.readLongString()
+			return tok
+		}
 		tok = newToken(LBRACKET, l.ch, l.line, l.column)
 	case ']':
 		tok = newToken(RBRACKET, l.ch, l.line, l.column)
@@ -274,12 +280,44 @@ func (l *Lexer) readString(delimiter byte) string {
 				result = append(result, '\n')
 			case 't':
 				result = append(result, '\t')
+			case 'r':
+				result = append(result, '\r')
+			case 'b':
+				result = append(result, '\b')
+			case 'f':
+				result = append(result, '\f')
+			case 'v':
+				result = append(result, '\v')
+			case '0':
+				result = append(result, '\x00')
 			case '"':
 				result = append(result, '"')
 			case '\'':
 				result = append(result, '\'')
 			case '\\':
 				result = append(result, '\\')
+			case 'x':
+				// Hexadecimal escape: \xHH
+				hex := l.readHexEscape(2)
+				if hex != "" {
+					result = append(result, byte(l.parseHex(hex)))
+				}
+			case 'u':
+				// Unicode escape: \uHHHH or \u{HHHHHH}
+				if l.peekChar() == '{' {
+					l.readChar() // consume '{'
+					hex := l.readUntil('}')
+					if hex != "" && len(hex) <= 6 {
+						codePoint := l.parseHex(hex)
+						result = append(result, []byte(string(rune(codePoint)))...)
+					}
+				} else {
+					hex := l.readHexEscape(4)
+					if hex != "" {
+						codePoint := l.parseHex(hex)
+						result = append(result, []byte(string(rune(codePoint)))...)
+					}
+				}
 			default:
 				result = append(result, l.ch)
 			}
@@ -313,6 +351,16 @@ func (l *Lexer) readTemplateString() string {
 				result = append(result, '\n')
 			case 't':
 				result = append(result, '\t')
+			case 'r':
+				result = append(result, '\r')
+			case 'b':
+				result = append(result, '\b')
+			case 'f':
+				result = append(result, '\f')
+			case 'v':
+				result = append(result, '\v')
+			case '0':
+				result = append(result, '\x00')
 			case '`':
 				result = append(result, '`')
 			case '\\':
@@ -320,6 +368,28 @@ func (l *Lexer) readTemplateString() string {
 			case '$':
 				// Allow escaping ${} in templates
 				result = append(result, '$')
+			case 'x':
+				// Hexadecimal escape: \xHH
+				hex := l.readHexEscape(2)
+				if hex != "" {
+					result = append(result, byte(l.parseHex(hex)))
+				}
+			case 'u':
+				// Unicode escape: \uHHHH or \u{HHHHHH}
+				if l.peekChar() == '{' {
+					l.readChar() // consume '{'
+					hex := l.readUntil('}')
+					if hex != "" && len(hex) <= 6 {
+						codePoint := l.parseHex(hex)
+						result = append(result, []byte(string(rune(codePoint)))...)
+					}
+				} else {
+					hex := l.readHexEscape(4)
+					if hex != "" {
+						codePoint := l.parseHex(hex)
+						result = append(result, []byte(string(rune(codePoint)))...)
+					}
+				}
 			default:
 				result = append(result, l.ch)
 			}
@@ -336,6 +406,70 @@ func (l *Lexer) readTemplateString() string {
 		if l.ch != 0 {
 			result = append(result, l.ch)
 		}
+	}
+
+	return string(result)
+}
+
+// readLongString reads Lua-style long strings: [[...]] or [=[...]=]
+func (l *Lexer) readLongString() string {
+	// Count opening '=' characters
+	equalCount := 0
+	l.readChar() // skip initial '['
+	for l.ch == '=' {
+		equalCount++
+		l.readChar()
+	}
+
+	// Should now be at second '['
+	if l.ch != '[' {
+		// Invalid long string syntax, return empty
+		return ""
+	}
+
+	var result []byte
+
+	// Read content until we find the matching closing delimiter
+	for {
+		l.readChar()
+
+		if l.ch == 0 {
+			// End of input
+			break
+		}
+
+		// Check for potential closing delimiter
+		if l.ch == ']' {
+			// Save position in case this isn't the closing delimiter
+			savedPos := l.position
+			savedReadPos := l.readPosition
+			savedCh := l.ch
+			savedLine := l.line
+			savedColumn := l.column
+
+			// Check if we have matching '=' characters
+			matchCount := 0
+			l.readChar()
+			for l.ch == '=' && matchCount < equalCount {
+				matchCount++
+				l.readChar()
+			}
+
+			// If we found the right number of '=' and a closing ']', we're done
+			if matchCount == equalCount && l.ch == ']' {
+				l.readChar() // consume final ']'
+				break
+			}
+
+			// Not the closing delimiter, restore position and add ']' to result
+			l.position = savedPos
+			l.readPosition = savedReadPos
+			l.ch = savedCh
+			l.line = savedLine
+			l.column = savedColumn
+		}
+
+		result = append(result, l.ch)
 	}
 
 	return string(result)
@@ -393,4 +527,51 @@ func (l *Lexer) RestoreState(state LexerState) {
 	l.ch = state.ch
 	l.line = state.line
 	l.column = state.column
+}
+
+// readHexEscape reads n hexadecimal digits for escape sequences
+func (l *Lexer) readHexEscape(n int) string {
+	var result []byte
+	for i := 0; i < n; i++ {
+		l.readChar()
+		if !isHexDigit(l.ch) {
+			return ""
+		}
+		result = append(result, l.ch)
+	}
+	return string(result)
+}
+
+// readUntil reads until the specified delimiter
+func (l *Lexer) readUntil(delimiter byte) string {
+	var result []byte
+	for {
+		l.readChar()
+		if l.ch == delimiter || l.ch == 0 {
+			break
+		}
+		result = append(result, l.ch)
+	}
+	return string(result)
+}
+
+// parseHex converts a hexadecimal string to an integer
+func (l *Lexer) parseHex(hex string) int {
+	result := 0
+	for _, ch := range hex {
+		result *= 16
+		if ch >= '0' && ch <= '9' {
+			result += int(ch - '0')
+		} else if ch >= 'a' && ch <= 'f' {
+			result += int(ch - 'a' + 10)
+		} else if ch >= 'A' && ch <= 'F' {
+			result += int(ch - 'A' + 10)
+		}
+	}
+	return result
+}
+
+// isHexDigit checks if a character is a hexadecimal digit
+func isHexDigit(ch byte) bool {
+	return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
 }

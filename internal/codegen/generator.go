@@ -946,7 +946,7 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 	case *ast.NumberLiteral:
 		return node.Token.Literal
 	case *ast.StringLiteral:
-		return fmt.Sprintf("\"%s\"", node.Value)
+		return fmt.Sprintf("\"%s\"", g.escapeLuaString(node.Value))
 	case *ast.TemplateLiteral:
 		return g.generateTemplateLiteral(node)
 	case *ast.BooleanLiteral:
@@ -992,8 +992,36 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 		}
 	}
 
-	// If there are spread expressions in array values, we need special handling
-	if hasSpread {
+	// If we have key-value pairs AND spread expressions, treat spreads as object spreads
+	// Example: {...obj1, key = val, ...obj2}
+	if len(node.Pairs) > 0 && hasSpread {
+		var output strings.Builder
+		output.WriteString("(function() local __temp = {}; ")
+
+		// First, merge all spread expressions (they spread key-value pairs)
+		for _, val := range node.Values {
+			if spread, ok := val.(*ast.SpreadExpression); ok {
+				spreadValue := g.generateExpression(spread.Value)
+				output.WriteString(fmt.Sprintf("for __k, __v in pairs(%s) do __temp[__k] = __v end; ", spreadValue))
+			} else {
+				// Non-spread values in mixed context are added as array elements
+				output.WriteString(fmt.Sprintf("table.insert(__temp, %s); ", g.generateExpression(val)))
+			}
+		}
+
+		// Then add explicit key-value pairs (they can override spread values)
+		for key, val := range node.Pairs {
+			keyStr := g.generateExpression(key)
+			valStr := g.generateExpression(val)
+			output.WriteString(fmt.Sprintf("__temp[%s] = %s; ", keyStr, valStr))
+		}
+
+		output.WriteString("return __temp end)()")
+		return output.String()
+	}
+
+	// If there are spread expressions in array-only context, treat as array spread
+	if hasSpread && len(node.Pairs) == 0 {
 		var output strings.Builder
 		output.WriteString("(function() local __temp = {}; ")
 
@@ -1214,14 +1242,14 @@ func (g *Generator) generateTemplateLiteral(node *ast.TemplateLiteral) string {
 
 	if len(node.Parts) == 1 && len(node.Expressions) == 0 {
 		// No interpolation, just a plain string
-		return fmt.Sprintf("\"%s\"", node.Parts[0])
+		return fmt.Sprintf("\"%s\"", g.escapeLuaString(node.Parts[0]))
 	}
 
 	var parts []string
 	for i, part := range node.Parts {
 		// Add the string part if it's not empty
 		if part != "" {
-			parts = append(parts, fmt.Sprintf("\"%s\"", part))
+			parts = append(parts, fmt.Sprintf("\"%s\"", g.escapeLuaString(part)))
 		}
 
 		// Add the expression (converted to string) if there's one at this position
@@ -1479,4 +1507,34 @@ func getOperatorPrecedence(op string) int {
 	default:
 		return 0
 	}
+}
+
+// escapeLuaString escapes special characters in a string for Lua output
+func (g *Generator) escapeLuaString(s string) string {
+	var result strings.Builder
+	for _, ch := range s {
+		switch ch {
+		case '\n':
+			result.WriteString("\\n")
+		case '\t':
+			result.WriteString("\\t")
+		case '\r':
+			result.WriteString("\\r")
+		case '\b':
+			result.WriteString("\\b")
+		case '\f':
+			result.WriteString("\\f")
+		case '\v':
+			result.WriteString("\\v")
+		case '\x00':
+			result.WriteString("\\0")
+		case '"':
+			result.WriteString("\\\"")
+		case '\\':
+			result.WriteString("\\\\")
+		default:
+			result.WriteRune(ch)
+		}
+	}
+	return result.String()
 }

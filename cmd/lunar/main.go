@@ -43,6 +43,7 @@ func main() {
 	runMode := flag.Bool("run", false, "Run the compiled Lua file after compilation")
 	testMode := flag.Bool("test", false, "Run tests in the specified directory")
 	testFilter := flag.String("filter", "", "Run only tests matching this pattern (regex)")
+	testWatch := flag.Bool("test-watch", false, "Watch test files and re-run on changes")
 	docsMode := flag.Bool("docs", false, "Generate documentation for source files")
 	docsOutput := flag.String("docs-output", "", "Output directory for generated docs (default: ./docs)")
 	targetLua := flag.String("target", "", "Target Lua version: lua51, lua52, lua53, lua54, luajit")
@@ -105,9 +106,18 @@ func main() {
 
 	// Handle test mode
 	if *testMode {
-		if err := runTests(inputFile, *testFilter); err != nil {
-			fmt.Fprintf(os.Stderr, "Tests failed: %v\n", err)
-			os.Exit(1)
+		if *testWatch {
+			// Watch mode: run tests continuously on file changes
+			if err := watchTests(inputFile, *testFilter); err != nil {
+				fmt.Fprintf(os.Stderr, "Watch mode failed: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			// Regular mode: run tests once
+			if err := runTests(inputFile, *testFilter); err != nil {
+				fmt.Fprintf(os.Stderr, "Tests failed: %v\n", err)
+				os.Exit(1)
+			}
 		}
 		os.Exit(0)
 	}
@@ -712,6 +722,7 @@ func printHelp() {
 	fmt.Println("  --run               Run the compiled Lua file after compilation")
 	fmt.Println("  --test              Run tests in directory (*_test.lunar files)")
 	fmt.Println("  --filter <pattern>  Run only tests matching pattern (with --test)")
+	fmt.Println("  --test-watch        Watch test files and re-run on changes")
 	fmt.Println("  --docs              Generate documentation for source files")
 	fmt.Println("  --docs-output <dir> Output directory for docs (default: ./docs)")
 	fmt.Println("  --config <file>     Path to lunar.config.json")
@@ -730,6 +741,7 @@ func printHelp() {
 	fmt.Println("  lunar main.lunar --bundle --watch --run")
 	fmt.Println("  lunar --test ./tests")
 	fmt.Println("  lunar --test ./tests --filter \"Math\"")
+	fmt.Println("  lunar --test ./tests --test-watch")
 	fmt.Println("  lunar --docs ./src")
 	fmt.Println("  lunar --docs ./src --docs-output ./api-docs")
 	fmt.Println("  lunar --repl")
@@ -751,6 +763,12 @@ func runREPL() {
 	allStatements := []ast.Statement{}
 	checker := types.NewChecker()
 
+	// Command history
+	history := []string{}
+	historyFile := filepath.Join(os.TempDir(), ".lunar_history")
+	loadREPLHistory(&history, historyFile)
+	defer saveREPLHistory(history, historyFile)
+
 	for {
 		// Print prompt
 		if nestingLevel > 0 {
@@ -769,7 +787,8 @@ func runREPL() {
 
 		// Handle special commands (only at top level)
 		if nestingLevel == 0 {
-			switch strings.TrimSpace(line) {
+			trimmed := strings.TrimSpace(line)
+			switch trimmed {
 			case "exit", "quit":
 				fmt.Println("Goodbye!")
 				return
@@ -783,6 +802,20 @@ func runREPL() {
 				continue
 			case "context":
 				fmt.Printf("Accumulated %d statements\n", len(allStatements))
+				continue
+			case "history":
+				if len(history) == 0 {
+					fmt.Println("No command history")
+				} else {
+					fmt.Println("Command history:")
+					start := 0
+					if len(history) > 20 {
+						start = len(history) - 20
+					}
+					for i := start; i < len(history); i++ {
+						fmt.Printf("  %d: %s\n", i+1, history[i])
+					}
+				}
 				continue
 			}
 		}
@@ -854,6 +887,16 @@ func runREPL() {
 
 		// Accumulate successful statements
 		allStatements = append(allStatements, statements...)
+
+		// Add to history
+		trimmedInput := strings.TrimSpace(input)
+		if trimmedInput != "" {
+			history = append(history, trimmedInput)
+			// Keep history limited to last 1000 entries
+			if len(history) > 1000 {
+				history = history[len(history)-1000:]
+			}
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -865,6 +908,7 @@ func runREPL() {
 func printREPLHelp() {
 	fmt.Println("REPL Commands:")
 	fmt.Println("  help     - Show this help")
+	fmt.Println("  history  - Show command history")
 	fmt.Println("  clear    - Clear accumulated context")
 	fmt.Println("  context  - Show number of accumulated statements")
 	fmt.Println("  exit     - Exit the REPL (or 'quit')")
@@ -878,6 +922,26 @@ func printREPLHelp() {
 	fmt.Println("  >>> function add(a: number, b: number): number")
 	fmt.Println("  ...   return a + b")
 	fmt.Println("  ... end")
+}
+
+// loadREPLHistory loads command history from file
+func loadREPLHistory(history *[]string, filename string) {
+	data, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return // File doesn't exist yet, that's ok
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			*history = append(*history, line)
+		}
+	}
+}
+
+// saveREPLHistory saves command history to file
+func saveREPLHistory(history []string, filename string) {
+	content := strings.Join(history, "\n")
+	ioutil.WriteFile(filename, []byte(content), 0644)
 }
 
 // runTests discovers and runs all test files in a directory
@@ -985,6 +1049,112 @@ func runTests(path string, filter string) error {
 			return fmt.Errorf("tests failed with exit code %d", exitErr.ExitCode())
 		}
 		return fmt.Errorf("failed to run tests: %w", err)
+	}
+
+	return nil
+}
+
+// watchTests watches test files and re-runs tests on changes
+func watchTests(path string, filter string) error {
+	fmt.Println("🔍 Watch mode: Monitoring for changes...")
+	fmt.Println("Press Ctrl+C to exit\n")
+
+	// Get initial file timestamps
+	fileTimestamps := make(map[string]time.Time)
+
+	// Determine directory to watch
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("cannot access path: %w", err)
+	}
+
+	var watchDir string
+	if info.IsDir() {
+		watchDir = path
+	} else {
+		watchDir = filepath.Dir(path)
+	}
+
+	// Function to get all .lunar files
+	getLunarFiles := func() (map[string]time.Time, error) {
+		timestamps := make(map[string]time.Time)
+		err := filepath.Walk(watchDir, func(filePath string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() && strings.HasSuffix(filePath, ".lunar") {
+				timestamps[filePath] = info.ModTime()
+			}
+			return nil
+		})
+		return timestamps, err
+	}
+
+	// Get initial timestamps
+	fileTimestamps, err = getLunarFiles()
+	if err != nil {
+		return fmt.Errorf("failed to scan directory: %w", err)
+	}
+
+	// Run tests initially
+	fmt.Println("Running initial test suite...")
+	if err := runTests(path, filter); err != nil {
+		fmt.Fprintf(os.Stderr, "\n❌ Tests failed: %v\n", err)
+	}
+	fmt.Println("\n👀 Watching for changes...")
+
+	// Watch loop
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		// Check for file changes
+		currentTimestamps, err := getLunarFiles()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error scanning directory: %v\n", err)
+			continue
+		}
+
+		// Check for changes
+		changed := false
+		changedFiles := []string{}
+
+		// Check for modified or new files
+		for file, modTime := range currentTimestamps {
+			if oldTime, exists := fileTimestamps[file]; !exists || modTime.After(oldTime) {
+				changed = true
+				changedFiles = append(changedFiles, filepath.Base(file))
+			}
+		}
+
+		// Check for deleted files
+		for file := range fileTimestamps {
+			if _, exists := currentTimestamps[file]; !exists {
+				changed = true
+				changedFiles = append(changedFiles, filepath.Base(file)+" (deleted)")
+			}
+		}
+
+		if changed {
+			// Clear screen
+			fmt.Print("\033[2J\033[H")
+
+			fmt.Println("🔄 Changes detected:")
+			for _, file := range changedFiles {
+				fmt.Printf("   - %s\n", file)
+			}
+			fmt.Println("\nRe-running tests...\n")
+
+			// Update timestamps
+			fileTimestamps = currentTimestamps
+
+			// Re-run tests
+			if err := runTests(path, filter); err != nil {
+				fmt.Fprintf(os.Stderr, "\n❌ Tests failed: %v\n", err)
+			}
+
+			fmt.Println("\n👀 Watching for changes...")
+		}
 	}
 
 	return nil

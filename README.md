@@ -47,12 +47,19 @@ end
 ### Developer Experience
 ✅ **Bundler** - Bundle all dependencies into a single file with `--bundle`
 ✅ **Run Mode** - Compile and execute with `--run`
+✅ **Test Runner** - Discover and run tests with `--test`
+✅ **Watch Mode** - Auto-recompile on file changes with `--watch`
 ✅ **Language Server Protocol (LSP)** - Full IDE integration with diagnostics, hover, completions
-✅ **Neovim Plugin** - Ready-to-use editor integration
+✅ **VS Code Extension** - Editor integration with syntax highlighting and LSP
 ✅ **Code Formatter** - Automatic code formatting with `--format`
 ✅ **Linter** - Best practices checking with `--lint`
 ✅ **Source Maps** - Debug with original Lunar source line numbers (Source Map v3)
-✅ **Excellent Error Messages** - Clear, helpful errors with "Did you mean?" suggestions
+✅ **Excellent Error Messages** - Clear, helpful errors with source context
+
+### Lua Targets
+✅ **Multi-Target Support** - Compile for Lua 5.1, 5.2, 5.3, 5.4, or LuaJIT
+✅ **Automatic Compatibility** - Integer division (`//`) converts to `math.floor()` for older Lua
+✅ **Tree Shaking** - Remove unused exports from bundles
 
 ### Lua Compatibility
 ✅ **Context-Aware Keywords** - `string`, `table`, `type` work as both types and identifiers
@@ -154,6 +161,11 @@ lunar --source-map input.lunar
 # Specify output file
 lunar -o output.lua input.lunar
 
+# Target specific Lua version (default: lua53)
+lunar --target luajit input.lunar
+lunar --target lua51 input.lunar
+lunar --target lua54 input.lunar
+
 # Bundle all dependencies into a single file
 lunar --bundle main.lunar
 
@@ -166,6 +178,9 @@ lunar --bundle --watch --run main.lunar
 # Compile and run (without bundling)
 lunar --run input.lunar
 
+# Run tests in a directory
+lunar --test ./tests
+
 # Format code (print to stdout)
 lunar --format input.lunar
 
@@ -176,7 +191,7 @@ lunar --format-write input.lunar
 lunar --lint input.lunar
 
 # Combine options (note: flags must come before filename)
-lunar --source-map -o output.lua input.lunar
+lunar --source-map --target luajit -o output.lua input.lunar
 
 # Show version
 lunar --version
@@ -390,15 +405,51 @@ test.lunar: Type errors found:
 
 ## Standard Library Support
 
-Lunar includes type declarations for Lua 5.1 standard library:
+Lunar includes complete type declarations for Lua 5.1 standard library:
 
-- ✅ **lua.d.lunar** - Core globals (print, tostring, tonumber, etc.)
+- ✅ **lua.d.lunar** - Core globals (print, tostring, tonumber, pcall, etc.)
 - ✅ **math.d.lunar** - Math functions (sin, cos, random, floor, etc.)
+- ✅ **string.d.lunar** - String manipulation (find, match, format, etc.)
+- ✅ **table.d.lunar** - Table functions (insert, remove, sort, concat)
 - ✅ **io.d.lunar** - File I/O (open, read, write, etc.)
 - ✅ **os.d.lunar** - OS facilities (time, execute, date, etc.)
-- ⚠️ **string/table** - Currently limited due to keyword conflicts (v1.1)
+- ✅ **coroutine.d.lunar** - Coroutine support (create, resume, yield)
+- ✅ **debug.d.lunar** - Debug facilities (getinfo, traceback, etc.)
+- ✅ **package.d.lunar** - Module loading (path, loaded, etc.)
 
-Simply copy the declarations to your project directory for automatic type checking!
+### Built-in Vendor Libraries
+
+Lunar includes ready-to-use vendor libraries:
+
+```lunar
+-- Testing framework
+import { describe, it, expect, runTests } from "vendor/testing"
+
+describe("Math", function()
+    it("should add numbers", function()
+        expect(1 + 1).toBe(2)
+    end)
+end)
+
+runTests()
+```
+
+```lunar
+-- JSON parsing/encoding
+import { encode, decode } from "vendor/json"
+
+local data = { name = "Lunar", version = "1.5" }
+local json_str: string = encode(data)
+local parsed: any = decode(json_str)
+```
+
+```lunar
+-- HTTP requests (requires curl)
+import { get, post } from "vendor/http"
+
+local response: any = get("https://api.example.com/data")
+print(response.body)
+```
 
 ## Project Structure
 
@@ -469,14 +520,22 @@ lunar/
 - [x] Path aliases (`@/utils` -> `src/utils`)
 - [x] Index file resolution (`./utils` -> `./utils/index.lunar`)
 - [x] Auto-create output directories
+- [x] Tree shaking (remove unused exports)
+- [x] Built-in vendor libraries (testing, json, http)
+- [x] Test runner (`--test` for discovering and running tests)
+- [x] Multi-target support (`--target lua51/lua52/lua53/lua54/luajit`)
+- [x] LuaJIT/Lua 5.1 compatibility (auto-convert `//` to `math.floor`)
+- [x] Variadic function support in type system
+- [x] VS Code extension
 
 ### v2.0 (Future)
-- [ ] Tree shaking (remove unused exports)
-- [ ] VS Code extension
+- [ ] Optional parameters (`param?: type`)
+- [ ] Bitwise operators for Lua 5.1/LuaJIT
 - [ ] Package manager integration
 - [ ] Incremental compilation
 - [ ] More LSP features (find references, rename, code actions)
 - [ ] Performance optimizations
+- [ ] REPL improvements (auto-completion, history)
 
 ## Configuration
 
@@ -489,6 +548,8 @@ Lunar supports project configuration via `lunar.config.json`:
     "noTypeCheck": false,
     "sourceMap": false,
     "bundle": true,
+    "treeShake": true,
+    "target": "lua53",
     "baseUrl": ".",
     "paths": {
       "@utils": "./src/utils",
@@ -506,7 +567,9 @@ Lunar supports project configuration via `lunar.config.json`:
 
 | Option | Description |
 |--------|-------------|
+| `compilerOptions.target` | Target Lua version: `lua51`, `lua52`, `lua53`, `lua54`, `luajit` |
 | `compilerOptions.bundle` | Enable bundling by default |
+| `compilerOptions.treeShake` | Remove unused exports from bundles |
 | `compilerOptions.sourceMap` | Generate source maps |
 | `compilerOptions.paths` | Path aliases for imports |
 | `compilerOptions.baseUrl` | Base directory for path resolution |

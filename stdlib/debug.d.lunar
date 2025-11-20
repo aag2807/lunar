@@ -1,72 +1,49 @@
 -- Lua 5.1 Debug Library Type Declarations
 -- This file provides type definitions for Lua's debug/introspection functions
 
--- Debug info table structure returned by getinfo
-declare type DebugInfo {
-    source: string | nil
-    short_src: string | nil
-    linedefined: number | nil
-    lastlinedefined: number | nil
-    what: string | nil
-    currentline: number | nil
-    name: string | nil
-    namewhat: string | nil
-    nups: number | nil
-    func: function | nil
-}
-
--- Hook function type
-declare type HookFunction function(event: string, line: number | nil): void
-
 -- Debug module interface
-declare interface Debug {
-    -- Enters interactive mode and runs each string typed by the user
+declare interface Debug
+    -- Enters interactive mode
     debug: function(): void
 
     -- Returns the environment of object o
-    getfenv: function(o: any): table<string, any> | nil
+    getfenv: function(o: any): any
 
-    -- Returns the current hook settings: hook function, mask, and count
-    gethook: function(thread: thread | nil): HookFunction | nil
+    -- Returns the current hook settings
+    gethook: function(): any
 
     -- Returns a table with information about a function
-    -- what parameter: "n" (name), "S" (source), "l" (line), "u" (upvalues), "f" (func)
-    getinfo: function(thread: thread | any, f: function | number, what: string | nil): DebugInfo | nil
+    getinfo: function(f: any, what: string): any
 
-    -- Returns the name and value of a local variable at the given level
-    getlocal: function(thread: thread | number, level: number, local: number): string | nil
+    -- Returns the name and value of a local variable
+    getlocal: function(level: number, local_index: number): any
 
-    -- Returns the metatable of the given object, or nil
-    getmetatable: function(object: any): table<any, any> | nil
+    -- Returns the metatable of the given object
+    getmetatable: function(object: any): any
 
     -- Returns the registry table
-    getregistry: function(): table<any, any>
+    getregistry: function(): any
 
-    -- Returns the name and value of the upvalue with index up of function func
-    getupvalue: function(func: function, up: number): string | nil
+    -- Returns the name and value of an upvalue
+    getupvalue: function(func: any, up: number): any
 
-    -- Sets the environment of the given object to the given table
-    setfenv: function(object: any, env: table<string, any>): any
+    -- Sets the environment of the given object
+    setfenv: function(object: any, env: any): any
 
     -- Sets the given function as a hook
-    -- mask: string containing "c" (call), "r" (return), "l" (line)
-    -- count: when different from zero, hook is called after every count instructions
-    sethook: function(thread: thread | HookFunction, hook: HookFunction | string, mask: string | number, count: number | nil): void
+    sethook: function(hook: any, mask: string, count: number): void
 
-    -- Assigns the value to the local variable at the given level
-    setlocal: function(thread: thread | number, level: number, local: number, value: any): string | nil
+    -- Assigns a value to a local variable
+    setlocal: function(level: number, local_index: number, value: any): string
 
-    -- Sets the metatable for the given object to the given table
-    setmetatable: function(object: any, meta: table<any, any> | nil): any
+    -- Sets the metatable for the given object
+    setmetatable: function(object: any, meta: any): any
 
-    -- Assigns the value to the upvalue with index up of function func
-    setupvalue: function(func: function, up: number, value: any): string | nil
+    -- Assigns a value to an upvalue
+    setupvalue: function(func: any, up: number, value: any): string
 
     -- Returns a string with a traceback of the call stack
-    -- message is appended at the beginning of the traceback
-    -- level specifies at which level to start the traceback (default is 1)
-    traceback: function(thread: thread | string | nil, message: string | number | nil, level: number | nil): string
-}
+    traceback: function(...args: any): string
 end
 
 -- Global debug table

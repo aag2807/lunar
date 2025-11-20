@@ -1054,6 +1054,20 @@ func (g *Generator) generatePrefixExpression(node *ast.PrefixExpression) string 
 		operator = "not"
 	}
 
+	// Handle bitwise NOT (~) for Lua 5.1/5.2/LuaJIT compatibility
+	if operator == "~" {
+		if g.target == "lua53" || g.target == "lua54" {
+			// Lua 5.3+ supports ~ natively
+			return fmt.Sprintf("~%s", right)
+		} else if g.target == "lua52" {
+			// Lua 5.2 uses bit32 library
+			return fmt.Sprintf("bit32.bnot(%s)", right)
+		} else {
+			// LuaJIT and Lua 5.1 use bit library
+			return fmt.Sprintf("bit.bnot(%s)", right)
+		}
+	}
+
 	// Only add parentheses if the right side is a complex expression
 	if needsParentheses(node.Right) {
 		return fmt.Sprintf("%s (%s)", operator, right)
@@ -1081,6 +1095,34 @@ func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
 		}
 		// Lua 5.3+ supports // natively
 		return fmt.Sprintf("%s // %s", left, right)
+	}
+
+	// Handle bitwise operators for Lua 5.1/5.2/LuaJIT compatibility
+	bitwiseOp := ""
+	switch operator {
+	case "&":
+		bitwiseOp = "band"
+	case "|":
+		bitwiseOp = "bor"
+	case "^":
+		bitwiseOp = "bxor"
+	case "<<":
+		bitwiseOp = "lshift"
+	case ">>":
+		bitwiseOp = "rshift"
+	}
+
+	if bitwiseOp != "" {
+		if g.target == "lua53" || g.target == "lua54" {
+			// Lua 5.3+ supports bitwise operators natively
+			return fmt.Sprintf("%s %s %s", left, operator, right)
+		} else if g.target == "lua52" {
+			// Lua 5.2 uses bit32 library
+			return fmt.Sprintf("bit32.%s(%s, %s)", bitwiseOp, left, right)
+		} else {
+			// LuaJIT and Lua 5.1 use bit library
+			return fmt.Sprintf("bit.%s(%s, %s)", bitwiseOp, left, right)
+		}
 	}
 
 	// Convert operators to Lua equivalents

@@ -54,7 +54,7 @@ func (l *Lexer) NextToken() Token {
 			l.readChar()
 			tok = Token{Type: NOT_EQ_LUA, Literal: "~=", Line: l.line, Column: l.column}
 		} else {
-			tok = newToken(ILLEGAL, l.ch, l.line, l.column)
+			tok = newToken(TILDE, l.ch, l.line, l.column)
 		}
 	case '!':
 		if l.peekChar() == '=' {
@@ -86,14 +86,20 @@ func (l *Lexer) NextToken() Token {
 	case '|':
 		tok = newToken(PIPE, l.ch, l.line, l.column)
 	case '<':
-		if l.peekChar() == '=' {
+		if l.peekChar() == '<' {
+			l.readChar()
+			tok = Token{Type: LEFT_SHIFT, Literal: "<<", Line: l.line, Column: l.column}
+		} else if l.peekChar() == '=' {
 			l.readChar()
 			tok = Token{Type: LT_EQ, Literal: "<=", Line: l.line, Column: l.column}
 		} else {
 			tok = newToken(LT, l.ch, l.line, l.column)
 		}
 	case '>':
-		if l.peekChar() == '=' {
+		if l.peekChar() == '>' {
+			l.readChar()
+			tok = Token{Type: RIGHT_SHIFT, Literal: ">>", Line: l.line, Column: l.column}
+		} else if l.peekChar() == '=' {
 			l.readChar()
 			tok = Token{Type: GT_EQ, Literal: ">=", Line: l.line, Column: l.column}
 		} else {
@@ -114,6 +120,8 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(HASH, l.ch, l.line, l.column)
 	case '&':
 		tok = newToken(AMPERSAND, l.ch, l.line, l.column)
+	case '^':
+		tok = newToken(CARET, l.ch, l.line, l.column)
 	case '@':
 		tok = newToken(AT, l.ch, l.line, l.column)
 	case '.':

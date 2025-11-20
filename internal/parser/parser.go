@@ -9,23 +9,30 @@ import (
 )
 
 const (
-	_ int = iota
+	_            int = iota
 	LOWEST
-	OR_PREC     // or
-	AND_PREC    // and
-	EQUALS      // ==
-	LESSGREATER // > OR <
-	SUM         // +
-	PRODUCT     // * / %
-	PREFIX      // -X OR !X OR not
-	DOT         // foo.bar
-	CALL        // function(x)
+	OR_PREC      // or
+	BITWISE_OR   // |
+	BITWISE_XOR  // ^
+	BITWISE_AND  // &
+	AND_PREC     // and
+	EQUALS       // ==
+	LESSGREATER  // > OR <
+	SHIFT        // << >>
+	SUM          // +
+	PRODUCT      // * / %
+	PREFIX       // -X OR !X OR not OR ~X
+	DOT          // foo.bar
+	CALL         // function(x)
 )
 
 var precedences = map[lexer.TokenType]int{
 	lexer.AS:               PREFIX,  // type assertions have same precedence as prefix operators
 	lexer.NULLISH_COALESCE: OR_PREC, // ?? has same precedence as ||
 	lexer.OR:               OR_PREC,
+	lexer.PIPE:             BITWISE_OR,
+	lexer.CARET:            BITWISE_XOR,
+	lexer.AMPERSAND:        BITWISE_AND,
 	lexer.AND:              AND_PREC,
 	lexer.EQ:               EQUALS,
 	lexer.NOT_EQ:           EQUALS,
@@ -34,6 +41,8 @@ var precedences = map[lexer.TokenType]int{
 	lexer.GT:               LESSGREATER,
 	lexer.LT_EQ:            LESSGREATER,
 	lexer.GT_EQ:            LESSGREATER,
+	lexer.LEFT_SHIFT:       SHIFT,
+	lexer.RIGHT_SHIFT:      SHIFT,
 	lexer.PLUS:             SUM,
 	lexer.MINUS:            SUM,
 	lexer.ASTERISK:         PRODUCT,
@@ -96,6 +105,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.MINUS, p.parsePrefixExpression)
 	p.registerPrefix(lexer.HASH, p.parsePrefixExpression)
 	p.registerPrefix(lexer.NOT, p.parsePrefixExpression)
+	p.registerPrefix(lexer.TILDE, p.parsePrefixExpression)
 	p.registerPrefix(lexer.LPAREN, p.parseGroupedExpression)
 	p.registerPrefix(lexer.LBRACE, p.parseTableLiteral)
 	p.registerPrefix(lexer.FUNCTION, p.parseFunctionExpression)
@@ -117,6 +127,11 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.GT, p.parseInfixExpression)
 	p.registerInfix(lexer.LT_EQ, p.parseInfixExpression)
 	p.registerInfix(lexer.GT_EQ, p.parseInfixExpression)
+	p.registerInfix(lexer.LEFT_SHIFT, p.parseInfixExpression)
+	p.registerInfix(lexer.RIGHT_SHIFT, p.parseInfixExpression)
+	p.registerInfix(lexer.AMPERSAND, p.parseInfixExpression)
+	p.registerInfix(lexer.PIPE, p.parseInfixExpression)
+	p.registerInfix(lexer.CARET, p.parseInfixExpression)
 	p.registerInfix(lexer.AND, p.parseInfixExpression)
 	p.registerInfix(lexer.OR, p.parseInfixExpression)
 	p.registerInfix(lexer.LBRACKET, p.parseIndexExpression)
@@ -137,6 +152,26 @@ func New(l *lexer.Lexer) *Parser {
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
 	p.peekToken = p.l.NextToken()
+}
+
+// expectPeekGT expects a GT token or splits RIGHT_SHIFT for nested generics
+func (p *Parser) expectPeekGT() bool {
+	if p.peekTokenIs(lexer.GT) {
+		p.nextToken()
+		return true
+	}
+
+	// Handle >> as two > tokens for nested generics like Box<Box<T>>
+	if p.peekTokenIs(lexer.RIGHT_SHIFT) {
+		p.nextToken() // move to >>
+		// Split >> into two > tokens
+		p.curToken = lexer.Token{Type: lexer.GT, Literal: ">", Line: p.curToken.Line, Column: p.curToken.Column}
+		p.peekToken = lexer.Token{Type: lexer.GT, Literal: ">", Line: p.curToken.Line, Column: p.curToken.Column + 1}
+		return true
+	}
+
+	p.peekError(lexer.GT)
+	return false
 }
 
 func (p *Parser) parseIdentifier() ast.Expression {
@@ -623,13 +658,22 @@ func (p *Parser) tryParseGenericType(baseExpr ast.Expression) ast.Expression {
 		typeArgs = append(typeArgs, arg)
 	}
 
-	// Must end with '>'
-	if !p.peekTokenIs(lexer.GT) {
+	// Must end with '>' (or >> which we split for nested generics)
+	if !p.peekTokenIs(lexer.GT) && !p.peekTokenIs(lexer.RIGHT_SHIFT) {
 		p.curToken = startToken
 		p.peekToken = startPeek
 		return nil
 	}
-	p.nextToken() // consume '>'
+
+	// Handle >> as two > tokens for nested generics like Box<Box<T>>
+	if p.peekTokenIs(lexer.RIGHT_SHIFT) {
+		p.nextToken() // move to >>
+		// Split >> into two > tokens: consume first >, keep second for next iteration
+		p.curToken = lexer.Token{Type: lexer.GT, Literal: ">", Line: p.curToken.Line, Column: p.curToken.Column}
+		p.peekToken = lexer.Token{Type: lexer.GT, Literal: ">", Line: p.curToken.Line, Column: p.curToken.Column + 1}
+	} else {
+		p.nextToken() // consume '>'
+	}
 
 	// Successfully parsed generic type
 	token := startToken
@@ -1016,7 +1060,7 @@ func (p *Parser) parseTypeSuffix(baseType ast.Expression) ast.Expression {
 				typeArgs = append(typeArgs, p.parseType())
 			}
 
-			if !p.expectPeek(lexer.GT) {
+			if !p.expectPeekGT() {
 				return nil
 			}
 
@@ -1229,7 +1273,7 @@ func (p *Parser) parseSimpleTypeWithSuffixes(skipOptional bool) ast.Expression {
 				typeArgs = append(typeArgs, p.parseType())
 			}
 
-			if !p.expectPeek(lexer.GT) {
+			if !p.expectPeekGT() {
 				return nil
 			}
 
@@ -1370,7 +1414,7 @@ func (p *Parser) parseNonUnionIntersectionType(skipOptional bool) ast.Expression
 				typeArgs = append(typeArgs, p.parseType())
 			}
 
-			if !p.expectPeek(lexer.GT) {
+			if !p.expectPeekGT() {
 				return nil
 			}
 
@@ -1415,7 +1459,7 @@ func (p *Parser) parseTableType() ast.Expression {
 	valueType := p.parseType()
 
 	// Expect '>'
-	if !p.expectPeek(lexer.GT) {
+	if !p.expectPeekGT() {
 		return nil
 	}
 

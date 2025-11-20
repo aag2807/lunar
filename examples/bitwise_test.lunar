@@ -1,0 +1,31 @@
+-- Test bitwise operators for different Lua targets
+local a: number = 12   -- 0b1100
+local b: number = 10   -- 0b1010
+
+-- Bitwise AND
+local and_result: number = a & b  -- 0b1000 = 8
+print("12 & 10 =", and_result)
+
+-- Bitwise OR
+local or_result: number = a | b   -- 0b1110 = 14
+print("12 | 10 =", or_result)
+
+-- Bitwise XOR
+local xor_result: number = a ^ b  -- 0b0110 = 6
+print("12 ^ 10 =", xor_result)
+
+-- Bitwise NOT
+local not_result: number = ~a     -- depends on integer size
+print("~12 =", not_result)
+
+-- Left shift
+local lshift_result: number = a << 2  -- 0b110000 = 48
+print("12 << 2 =", lshift_result)
+
+-- Right shift
+local rshift_result: number = a >> 2  -- 0b0011 = 3
+print("12 >> 2 =", rshift_result)
+
+-- Complex expression
+local complex: number = (a & b) | (a ^ b)
+print("(12 & 10) | (12 ^ 10) =", complex)

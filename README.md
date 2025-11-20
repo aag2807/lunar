@@ -40,6 +40,11 @@ end
 ✅ **Enums** - Type-safe enumeration values
 ✅ **Generics** - Write reusable, type-safe code
 ✅ **Union Types** - Flexible type combinations (`string | number`)
+✅ **Intersection Types** - Combine multiple types (`T1 & T2`)
+✅ **Optional Parameters** - Optional function parameters (`param: Type?`)
+✅ **Multiple Return Values** - Tuple types for multi-value returns (`(boolean, string)`)
+✅ **Advanced Types** - Mapped types, conditional types, template literal types
+✅ **Type Guards** - Runtime type checking (`value is Type`)
 ✅ **Method Overloading** - Multiple function signatures with automatic resolution
 ✅ **Constructor Parameter Properties** - TypeScript-style shorthand for class properties
 ✅ **Readonly Properties** - Immutable properties that can only be set in constructors
@@ -49,8 +54,9 @@ end
 ✅ **Run Mode** - Compile and execute with `--run`
 ✅ **Test Runner** - Discover and run tests with `--test`
 ✅ **Watch Mode** - Auto-recompile on file changes with `--watch`
-✅ **Language Server Protocol (LSP)** - Full IDE integration with diagnostics, hover, completions
-✅ **VS Code Extension** - Editor integration with syntax highlighting and LSP
+✅ **REPL** - Interactive mode for rapid prototyping with `--repl`
+✅ **Language Server Protocol (LSP)** - Full IDE integration with diagnostics, hover, completions, go-to-definition
+✅ **Editor Integrations** - VS Code extension and Neovim plugin included
 ✅ **Code Formatter** - Automatic code formatting with `--format`
 ✅ **Linter** - Best practices checking with `--lint`
 ✅ **Source Maps** - Debug with original Lunar source line numbers (Source Map v3)
@@ -65,7 +71,8 @@ end
 ### Lua Compatibility
 ✅ **Context-Aware Keywords** - `string`, `table`, `type` work as both types and identifiers
 ✅ **Declaration Files** - Type definitions for existing Lua libraries (`.d.lunar`)
-✅ **Complete Standard Library Types** - Full type coverage including `string.*` and `table.*`
+✅ **Complete Standard Library Types** - Full type coverage for all Lua stdlib modules
+✅ **Vendor Libraries** - Built-in libraries for testing, JSON, HTTP, and formatting
 ✅ **Clean Lua Output** - Generates readable, efficient Lua code
 ✅ **100% Lua Compatible** - Use any Lua library seamlessly
 
@@ -194,11 +201,37 @@ lunar --lint input.lunar
 # Combine options (note: flags must come before filename)
 lunar --source-map --target luajit -o output.lua input.lunar
 
+# Start interactive REPL
+lunar --repl
+
 # Show version
 lunar --version
 
 # Show help
 lunar --help
+```
+
+### REPL Mode
+
+Lunar includes an interactive REPL for rapid prototyping and experimentation:
+
+```bash
+lunar --repl
+```
+
+```
+Lunar REPL - Interactive Mode
+Version 1.5.0
+Type 'exit' or 'quit' to exit, 'help' for commands
+
+>>> local x: number = 42
+>>> print(x * 2)
+84
+>>> function greet(name: string): string
+...     return "Hello, " .. name
+... end
+>>> greet("Lunar")
+Hello, Lunar
 ```
 
 ## Documentation
@@ -290,6 +323,40 @@ end
 
 local sum: number = add(1, 2)      -- Returns 3
 local concat: string = add("a", "b")  -- Returns "ab"
+```
+
+### Optional Parameters
+
+```lunar
+-- Optional parameters use Type? syntax
+function greet(name: string, title: string?): string
+    if title ~= nil then
+        return "Hello, " .. title .. " " .. name
+    else
+        return "Hello, " .. name
+    end
+end
+
+print(greet("Alice", nil))      -- "Hello, Alice"
+print(greet("Bob", "Dr."))      -- "Hello, Dr. Bob"
+```
+
+### Multiple Return Values
+
+```lunar
+-- Functions can return tuples
+function divide(a: number, b: number): (boolean, number | string)
+    if b == 0 then
+        return false, "Division by zero"
+    end
+    return true, a / b
+end
+
+local success: boolean, result: number | string = divide(10, 2)
+print(success, result)  -- true, 5
+
+local success2: boolean, error: number | string = divide(10, 0)
+print(success2, error)  -- false, "Division by zero"
 ```
 
 ### Constructor Parameter Properties
@@ -443,37 +510,55 @@ Lunar includes complete type declarations for Lua 5.1 standard library:
 
 ### Built-in Vendor Libraries
 
-Lunar includes ready-to-use vendor libraries:
+Lunar includes ready-to-use vendor libraries for common tasks:
 
 ```lunar
--- Testing framework
-import { describe, it, expect, runTests } from "vendor/testing"
+-- Testing framework (BDD-style with assertions)
+import { describe, it, expect } from "vendor/testing"
 
-describe("Math", function()
-    it("should add numbers", function()
+describe("Math operations", function()
+    it("should add numbers correctly", function()
         expect(1 + 1).toBe(2)
+        expect(10).toBeGreaterThan(5)
     end)
 end)
-
-runTests()
 ```
 
 ```lunar
--- JSON parsing/encoding
+-- JSON encoding/decoding
 import { encode, decode } from "vendor/json"
 
 local data = { name = "Lunar", version = "1.5" }
 local json_str: string = encode(data)
 local parsed: any = decode(json_str)
+print(parsed.name)  -- "Lunar"
 ```
 
 ```lunar
--- HTTP requests (requires curl)
-import { get, post } from "vendor/http"
+-- HTTP client (uses curl, no external dependencies)
+import { get, post, json } from "vendor/http"
 
-local response: any = get("https://api.example.com/data")
+local response: HttpResponse = get("https://api.example.com/data")
+print(response.status)  -- 200
 print(response.body)
+
+-- JSON request helper
+local data = { user = "alice" }
+local response = json("POST", "https://api.example.com/users", data)
 ```
+
+```lunar
+-- Formatting and output utilities
+import { printf, sprintf, inspect } from "vendor/fmt"
+
+printf("Hello %s!\n", "World")
+local msg: string = sprintf("Result: %d", 42)
+
+local data = { x = 1, y = 2 }
+print(inspect(data))  -- Pretty-printed table
+```
+
+See [vendor/README.md](vendor/README.md) for complete documentation.
 
 ## Project Structure
 
@@ -545,21 +630,27 @@ lunar/
 - [x] Index file resolution (`./utils` -> `./utils/index.lunar`)
 - [x] Auto-create output directories
 - [x] Tree shaking (remove unused exports)
-- [x] Built-in vendor libraries (testing, json, http)
+- [x] Built-in vendor libraries (testing, json, http, fmt)
 - [x] Test runner (`--test` for discovering and running tests)
 - [x] Multi-target support (`--target lua51/lua52/lua53/lua54/luajit`)
 - [x] Integer division compatibility (auto-convert `//` to `math.floor`)
 - [x] Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`) with target-specific conversion
 - [x] Variadic function support in type system
-- [x] VS Code extension
+- [x] Optional parameters (`param: Type?`)
+- [x] Multiple return values with tuple types
+- [x] REPL (interactive mode)
+- [x] Advanced type features (mapped, conditional, template literal types)
+- [x] VS Code extension and Neovim plugin
 
 ### v2.0 (Future)
-- [ ] Optional parameters (`param?: type`)
+- [ ] Null coalescing assignment (`??=`)
+- [ ] Better test runner (colored output, filtering, coverage)
+- [ ] More LSP features (find references, rename, code actions, inlay hints)
+- [ ] Documentation generator (`--docs` flag)
 - [ ] Package manager integration
 - [ ] Incremental compilation
-- [ ] More LSP features (find references, rename, code actions)
-- [ ] Performance optimizations
-- [ ] REPL improvements (auto-completion, history)
+- [ ] Performance optimizations (dead code elimination, minification)
+- [ ] REPL improvements (LSP-powered auto-completion, persistent history)
 
 ## Configuration
 
@@ -604,15 +695,19 @@ Lunar supports project configuration via `lunar.config.json`:
 
 Lunar includes a full Language Server Protocol (LSP) implementation for IDE integration.
 
-### Current Features
-- Real-time diagnostics (type errors, parse errors)
-- Go to definition
-- Hover type information
-- Auto-completion (variables, functions, classes, keywords)
+### Current LSP Features
+- ✅ Real-time diagnostics (type errors, parse errors)
+- ✅ Go to definition
+- ✅ Hover type information
+- ✅ Auto-completion (variables, functions, classes, keywords)
+- 🚧 Find references (planned for v2.0)
+- 🚧 Rename symbol (planned for v2.0)
+- 🚧 Code actions (planned for v2.0)
+- 🚧 Inlay hints (planned for v2.0)
 
 ### Neovim
 
-A ready-to-use Neovim plugin is included:
+A ready-to-use Neovim plugin is included in `editors/nvim/`:
 
 ```lua
 -- Using lazy.nvim
@@ -626,6 +721,14 @@ A ready-to-use Neovim plugin is included:
 ```
 
 See [editors/nvim/README.md](editors/nvim/README.md) for full installation instructions.
+
+### VS Code
+
+A VS Code extension is included in `editors/vscode/`:
+
+1. Copy or symlink `editors/vscode/` to `~/.vscode/extensions/lunar/`
+2. Reload VS Code
+3. Open any `.lunar` file to activate
 
 ### Other Editors
 
@@ -641,6 +744,7 @@ go build -o lunar-lsp ./cmd/lunar-lsp
 ### Documentation
 - **[LSP Design Document](docs/LSP_DESIGN.md)** - Architecture and implementation details
 - **[Neovim Plugin](editors/nvim/README.md)** - Installation and configuration
+- **[VS Code Extension](editors/vscode/README.md)** - Installation and usage
 
 ## Contributing
 

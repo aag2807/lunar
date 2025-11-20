@@ -198,6 +198,8 @@ func (s *Server) handleMessage(content json.RawMessage) error {
 		return s.handleDefinition(content, baseMsg.ID)
 	case "textDocument/completion":
 		return s.handleCompletion(content, baseMsg.ID)
+	case "textDocument/references":
+		return s.handleReferences(content, baseMsg.ID)
 
 	default:
 		s.logger.Printf("Unhandled method: %s", baseMsg.Method)

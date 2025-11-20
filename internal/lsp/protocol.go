@@ -320,3 +320,14 @@ type CompletionList struct {
 	IsIncomplete bool             `json:"isIncomplete"`
 	Items        []CompletionItem `json:"items"`
 }
+
+// ReferenceParams represents references parameters
+type ReferenceParams struct {
+	TextDocumentPositionParams
+	Context ReferenceContext `json:"context"`
+}
+
+// ReferenceContext represents reference context
+type ReferenceContext struct {
+	IncludeDeclaration bool `json:"includeDeclaration"`
+}

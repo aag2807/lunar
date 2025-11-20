@@ -941,7 +941,8 @@ type InterfaceType struct {
 	Methods        map[string]*FunctionType
 	Properties     map[string]Type
 	Extends        []*InterfaceType
-	IndexSignature *IndexSignature // [key: KeyType]: ValueType
+	IndexSignature *IndexSignature         // [key: KeyType]: ValueType
+	ReadonlyProps  map[string]bool         // Track readonly properties (for as const)
 }
 
 // IndexSignature represents an index signature like [key: string]: number

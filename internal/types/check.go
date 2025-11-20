@@ -3732,6 +3732,12 @@ func (c *Checker) checkSpreadExpression(node *ast.SpreadExpression) Type {
 
 // checkTypeAssertion checks a type assertion (value as Type)
 func (c *Checker) checkTypeAssertion(node *ast.TypeAssertion) Type {
+	// Check if this is a const assertion (as const)
+	if ident, ok := node.TargetType.(*ast.Identifier); ok && ident.Value == "const" {
+		// This is a const assertion - apply literal type inference
+		return c.applyConstAssertion(node.Expression)
+	}
+
 	// Check the expression being asserted (ensures it's valid)
 	c.checkExpression(node.Expression)
 
@@ -3744,6 +3750,75 @@ func (c *Checker) checkTypeAssertion(node *ast.TypeAssertion) Type {
 
 	// Return the target type - that's what the assertion claims it is
 	return targetType
+}
+
+// applyConstAssertion applies const assertion logic to an expression
+// This makes literals as specific as possible and objects/arrays readonly
+func (c *Checker) applyConstAssertion(expr ast.Expression) Type {
+	switch e := expr.(type) {
+	case *ast.NumberLiteral:
+		// Already returns NumberLiteralType
+		return &NumberLiteralType{Value: e.Value}
+
+	case *ast.StringLiteral:
+		// Already returns StringLiteralType
+		return &StringLiteralType{Value: e.Value}
+
+	case *ast.BooleanLiteral:
+		// Already returns BooleanLiteralType
+		return &BooleanLiteralType{Value: e.Value}
+
+	case *ast.TableLiteral:
+		// For arrays: convert to readonly tuple with literal types
+		// For objects: make all properties readonly with literal types
+		return c.applyConstToTableLiteral(e)
+
+	default:
+		// For other expressions, just check normally
+		return c.checkExpression(expr)
+	}
+}
+
+// applyConstToTableLiteral applies const assertion to a table literal
+func (c *Checker) applyConstToTableLiteral(node *ast.TableLiteral) Type {
+	// Check if this is an array (only Values, no Pairs)
+	if len(node.Pairs) == 0 && len(node.Values) > 0 {
+		// Convert to readonly tuple with literal element types
+		elementTypes := make([]Type, len(node.Values))
+		for i, val := range node.Values {
+			elementTypes[i] = c.applyConstAssertion(val)
+		}
+		// Return a tuple type (which is like a readonly array with fixed length)
+		return &TupleType{Elements: elementTypes}
+	}
+
+	// For objects (key-value pairs), create an interface with readonly properties
+	if len(node.Pairs) > 0 {
+		properties := make(map[string]Type)
+		readonlyProps := make(map[string]bool)
+
+		for key, value := range node.Pairs {
+			// Check if key is an identifier (property name)
+			if ident, ok := key.(*ast.Identifier); ok {
+				// Apply const assertion to get literal type for the value
+				valueType := c.applyConstAssertion(value)
+				properties[ident.Value] = valueType
+				readonlyProps[ident.Value] = true
+			}
+		}
+
+		// Return an interface type with readonly properties
+		return &InterfaceType{
+			Name:          "<const table literal>",
+			Properties:    properties,
+			Methods:       make(map[string]*FunctionType),
+			Extends:       []*InterfaceType{},
+			ReadonlyProps: readonlyProps,
+		}
+	}
+
+	// Empty table - return as-is
+	return c.checkTableLiteral(node)
 }
 
 // checkAwaitExpression checks an await expression

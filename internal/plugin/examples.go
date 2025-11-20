@@ -46,7 +46,7 @@ func (p *ExampleTypeCheckerPlugin) CheckType(node ast.Expression, context *TypeC
 	}
 
 	// Example: Check for unsafe number operations
-	if binOp, ok := node.(*ast.BinaryExpression); ok {
+	if binOp, ok := node.(*ast.InfixExpression); ok {
 		if binOp.Operator == "/" {
 			result.Warnings = append(result.Warnings, "Division operation detected - consider checking for division by zero")
 			result.Confidence = 0.9

@@ -221,7 +221,7 @@ func (a *ProjectAnalyzer) analyzeFile(filePath string, options ProjectAnalysisOp
 	// Count symbols
 	for _, stmt := range statements {
 		switch s := stmt.(type) {
-		case *ast.FunctionStatement:
+		case *ast.FunctionDeclaration:
 			analysis.Functions++
 		case *ast.InterfaceDeclaration:
 			analysis.Interfaces++
@@ -263,7 +263,7 @@ func (a *ProjectAnalyzer) extractDependencies(statements []ast.Statement) []stri
 	deps := make([]string, 0)
 
 	// Look for import statements and require calls
-	for _, stmt := range statements {
+	for range statements {
 		// This would need to be extended based on actual AST structure
 		// For now, return empty list
 	}
@@ -291,7 +291,7 @@ func (a *ProjectAnalyzer) calculateComplexity(statements []ast.Statement) int {
 			case *ast.ForStatement:
 				complexity++
 				walkStatements(s.Body.Statements)
-			case *ast.FunctionStatement:
+			case *ast.FunctionDeclaration:
 				complexity++
 				walkStatements(s.Body.Statements)
 			}

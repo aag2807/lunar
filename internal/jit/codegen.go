@@ -55,7 +55,7 @@ func (g *CodeGenerator) GeneratePostamble() string {
 }
 
 // WrapFunctionWithJIT wraps a function with JIT directives
-func (g *CodeGenerator) WrapFunctionWithJIT(fn *ast.FunctionStatement, body string) string {
+func (g *CodeGenerator) WrapFunctionWithJIT(fn *ast.FunctionDeclaration, body string) string {
 	var sb strings.Builder
 
 	// Get JIT directives for this function
@@ -92,8 +92,9 @@ type AnnotationExtractor struct {
 
 // Comment represents a source code comment
 type Comment struct {
-	Text     string
-	Position ast.Position
+	Text   string
+	Line   int
+	Column int
 }
 
 // NewAnnotationExtractor creates a new annotation extractor
@@ -105,23 +106,11 @@ func NewAnnotationExtractor() *AnnotationExtractor {
 }
 
 // ExtractFromTokens extracts annotations from lexer tokens
+// Note: Comments are not currently tokenized by the lexer, use ExtractFromSource instead
 func (e *AnnotationExtractor) ExtractFromTokens(tokens []lexer.Token) []Hint {
-	for _, token := range tokens {
-		if token.Type == lexer.COMMENT {
-			comment := Comment{
-				Text: token.Literal,
-				Position: ast.Position{
-					Line:   token.Line,
-					Column: token.Column,
-				},
-			}
-			e.comments = append(e.comments, comment)
-
-			// Try to parse as annotation
-			e.parser.ParseAnnotation(token.Literal, comment.Position)
-		}
-	}
-
+	// Comments are skipped by lexer, so this function is not used
+	// Use ExtractFromSource instead
+	_ = tokens
 	return e.parser.GetHints()
 }
 
@@ -133,19 +122,18 @@ func (e *AnnotationExtractor) ExtractFromSource(source string) []Hint {
 		// Look for comments
 		if idx := strings.Index(line, "--"); idx != -1 {
 			commentText := strings.TrimSpace(line[idx+2:])
-			position := ast.Position{
-				Line:   lineNum + 1,
-				Column: idx + 1,
-			}
+			linePos := lineNum + 1
+			colPos := idx + 1
 
 			comment := Comment{
-				Text:     commentText,
-				Position: position,
+				Text:   commentText,
+				Line:   linePos,
+				Column: colPos,
 			}
 			e.comments = append(e.comments, comment)
 
 			// Try to parse as annotation
-			e.parser.ParseAnnotation(commentText, position)
+			e.parser.ParseAnnotation(commentText, linePos, colPos)
 		}
 	}
 

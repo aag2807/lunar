@@ -29,7 +29,8 @@ type Hint struct {
 	Type     HintType
 	Target   string            // Function or block name
 	Options  map[string]string // Additional options
-	Position ast.Position      // Source position
+	Line     int               // Source line
+	Column   int               // Source column
 }
 
 // HintDirective converts hint to LuaJIT directive
@@ -91,7 +92,7 @@ func NewHintParser() *HintParser {
 
 // ParseAnnotation parses a JIT hint annotation from a comment
 // Format: @jit.on, @jit.off, @hotpath, @inline, @noinline, etc.
-func (p *HintParser) ParseAnnotation(comment string, position ast.Position) *Hint {
+func (p *HintParser) ParseAnnotation(comment string, line int, column int) *Hint {
 	comment = strings.TrimSpace(comment)
 	if !strings.HasPrefix(comment, "@") {
 		return nil
@@ -105,9 +106,10 @@ func (p *HintParser) ParseAnnotation(comment string, position ast.Position) *Hin
 	}
 
 	hint := &Hint{
-		Type:     HintNone,
-		Position: position,
-		Options:  make(map[string]string),
+		Type:    HintNone,
+		Line:    line,
+		Column:  column,
+		Options: make(map[string]string),
 	}
 
 	// Parse hint type
@@ -245,7 +247,7 @@ func NewJITOptimizer(hints []Hint, detector *HotPathDetector) *JITOptimizer {
 }
 
 // OptimizeFunction applies JIT optimizations to a function
-func (o *JITOptimizer) OptimizeFunction(fn *ast.FunctionStatement) []string {
+func (o *JITOptimizer) OptimizeFunction(fn *ast.FunctionDeclaration) []string {
 	directives := make([]string, 0)
 
 	// Check for explicit hints

@@ -3,7 +3,8 @@ package wasm
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
+	"os"
+	"path/filepath"
 )
 
 // Runtime provides WebAssembly runtime support
@@ -83,7 +84,7 @@ class LunarRuntime {
     try {
       const response = await fetch(wasmPath);
       if (!response.ok) {
-        throw new Error(\`Failed to fetch WASM module: \${response.statusText}\`);
+        throw new Error('Failed to fetch WASM module: ' + response.statusText);
       }
 
       const buffer = await response.arrayBuffer();
@@ -92,12 +93,12 @@ class LunarRuntime {
       this.modules.set(name, module);
 
       if (this.options.enableDebug) {
-        console.log(\`[Lunar] Module loaded: \${name}\`, module);
+        console.log('[Lunar] Module loaded: ' + name, module);
       }
 
       return module;
     } catch (err) {
-      console.error(\`[Lunar] Failed to load module \${name}:\`, err);
+      console.error('[Lunar] Failed to load module ' + name + ':', err);
       throw err;
     }
   }
@@ -181,7 +182,7 @@ class LunarRuntime {
         fd_seek: () => 0,
         fd_read: () => 0,
         proc_exit: (code) => {
-          console.log(\`Process exited with code: \${code}\`);
+          console.log('Process exited with code: ' + code);
         }
       }
     };
@@ -227,7 +228,7 @@ class LunarRuntime {
   execute(code, moduleName = 'default') {
     const module = this.modules.get(moduleName);
     if (!module) {
-      throw new Error(\`Module not found: \${moduleName}\`);
+      throw new Error('Module not found: ' + moduleName);
     }
 
     // Allocate memory for code string
@@ -255,9 +256,9 @@ class LunarRuntime {
         if (module.exports.lua_tostring) {
           const errPtr = module.exports.lua_tostring(this.luaState, -1);
           const errMsg = this.readString(errPtr);
-          throw new Error(\`Lua execution error: \${errMsg}\`);
+          throw new Error('Lua execution error: ' + errMsg);
         }
-        throw new Error(\`Lua execution failed with code: \${result}\`);
+        throw new Error('Lua execution failed with code: ' + result);
       }
 
       return result;
@@ -275,7 +276,7 @@ class LunarRuntime {
   call(functionName, args = [], moduleName = 'default') {
     const module = this.modules.get(moduleName);
     if (!module) {
-      throw new Error(\`Module not found: \${moduleName}\`);
+      throw new Error('Module not found: ' + moduleName);
     }
 
     if (!module.exports.lunar_call && !module.exports.lua_getglobal) {
@@ -305,7 +306,7 @@ class LunarRuntime {
       if (result !== 0) {
         const errPtr = module.exports.lua_tostring(this.luaState, -1);
         const errMsg = this.readString(errPtr);
-        throw new Error(\`Function call failed: \${errMsg}\`);
+        throw new Error('Function call failed: ' + errMsg);
       }
 
       // Get return value
@@ -335,7 +336,7 @@ class LunarRuntime {
     } else if (value === null || value === undefined) {
       exports.lua_pushnil(this.luaState);
     } else {
-      throw new Error(\`Unsupported value type: \${typeof value}\`);
+      throw new Error('Unsupported value type: ' + typeof value);
     }
   }
 
@@ -481,7 +482,7 @@ class LunarNodeRuntime {
   execute(code, moduleName = 'default') {
     const module = this.modules.get(moduleName);
     if (!module) {
-      throw new Error(\`Module not found: \${moduleName}\`);
+      throw new Error('Module not found: ' + moduleName);
     }
 
     // Implementation similar to browser runtime
@@ -600,11 +601,11 @@ const LunarRuntime = require('./runtime.js');
     await runtime.init();
     await runtime.loadModule('main', './%s.wasm');
 
-    runtime.execute(\`
+    runtime.execute(` + "`" + `
         function greet(name)
             return "Hello, " .. name
         end
-    \`);
+    ` + "`" + `);
 
     const result = runtime.call('greet', ['World']);
     console.log(result); // "Hello, World"

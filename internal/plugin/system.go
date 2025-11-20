@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"lunar/internal/ast"
-	"lunar/internal/lexer"
 )
 
 // PluginSystem manages all plugins

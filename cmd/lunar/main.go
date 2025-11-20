@@ -44,6 +44,7 @@ func main() {
 	testMode := flag.Bool("test", false, "Run tests in the specified directory")
 	testFilter := flag.String("filter", "", "Run only tests matching this pattern (regex)")
 	testWatch := flag.Bool("test-watch", false, "Watch test files and re-run on changes")
+	testCoverage := flag.Bool("coverage", false, "Generate code coverage report")
 	docsMode := flag.Bool("docs", false, "Generate documentation for source files")
 	docsOutput := flag.String("docs-output", "", "Output directory for generated docs (default: ./docs)")
 	targetLua := flag.String("target", "", "Target Lua version: lua51, lua52, lua53, lua54, luajit")
@@ -108,13 +109,13 @@ func main() {
 	if *testMode {
 		if *testWatch {
 			// Watch mode: run tests continuously on file changes
-			if err := watchTests(inputFile, *testFilter); err != nil {
+			if err := watchTests(inputFile, *testFilter, *testCoverage); err != nil {
 				fmt.Fprintf(os.Stderr, "Watch mode failed: %v\n", err)
 				os.Exit(1)
 			}
 		} else {
 			// Regular mode: run tests once
-			if err := runTests(inputFile, *testFilter); err != nil {
+			if err := runTests(inputFile, *testFilter, *testCoverage); err != nil {
 				fmt.Fprintf(os.Stderr, "Tests failed: %v\n", err)
 				os.Exit(1)
 			}
@@ -817,6 +818,9 @@ func runREPL() {
 					}
 				}
 				continue
+			case "symbols":
+				printREPLSymbols(allStatements, checker)
+				continue
 			}
 		}
 
@@ -909,6 +913,7 @@ func printREPLHelp() {
 	fmt.Println("REPL Commands:")
 	fmt.Println("  help     - Show this help")
 	fmt.Println("  history  - Show command history")
+	fmt.Println("  symbols  - Show available symbols (variables, functions, classes)")
 	fmt.Println("  clear    - Clear accumulated context")
 	fmt.Println("  context  - Show number of accumulated statements")
 	fmt.Println("  exit     - Exit the REPL (or 'quit')")
@@ -922,6 +927,109 @@ func printREPLHelp() {
 	fmt.Println("  >>> function add(a: number, b: number): number")
 	fmt.Println("  ...   return a + b")
 	fmt.Println("  ... end")
+}
+
+// printREPLSymbols prints all available symbols in the current REPL context
+func printREPLSymbols(statements []ast.Statement, checker *types.Checker) {
+	if len(statements) == 0 {
+		fmt.Println("No symbols defined yet")
+		return
+	}
+
+	fmt.Println("Available symbols:")
+
+	variables := []string{}
+	functions := []string{}
+	classes := []string{}
+	interfaces := []string{}
+	enums := []string{}
+	typeAliases := []string{}
+
+	for _, stmt := range statements {
+		switch s := stmt.(type) {
+		case *ast.VariableDeclaration:
+			for _, name := range s.Names {
+				variables = append(variables, name.Value)
+			}
+		case *ast.FunctionDeclaration:
+			if s.Name != nil {
+				params := []string{}
+				for _, param := range s.Parameters {
+					paramStr := param.Name.Value
+					if param.Type != nil {
+						paramStr += ": " + param.Type.String()
+					}
+					params = append(params, paramStr)
+				}
+				returnType := "void"
+				if s.ReturnType != nil {
+					returnType = s.ReturnType.String()
+				}
+				functions = append(functions, fmt.Sprintf("%s(%s): %s", s.Name.Value, strings.Join(params, ", "), returnType))
+			}
+		case *ast.ClassDeclaration:
+			if s.Name != nil {
+				classes = append(classes, s.Name.Value)
+			}
+		case *ast.InterfaceDeclaration:
+			if s.Name != nil {
+				interfaces = append(interfaces, s.Name.Value)
+			}
+		case *ast.EnumDeclaration:
+			if s.Name != nil {
+				enums = append(enums, s.Name.Value)
+			}
+		case *ast.TypeDeclaration:
+			if s.Name != nil {
+				typeAliases = append(typeAliases, s.Name.Value)
+			}
+		}
+	}
+
+	if len(variables) > 0 {
+		fmt.Println("\n  Variables:")
+		for _, v := range variables {
+			fmt.Printf("    - %s\n", v)
+		}
+	}
+
+	if len(functions) > 0 {
+		fmt.Println("\n  Functions:")
+		for _, f := range functions {
+			fmt.Printf("    - %s\n", f)
+		}
+	}
+
+	if len(classes) > 0 {
+		fmt.Println("\n  Classes:")
+		for _, c := range classes {
+			fmt.Printf("    - %s\n", c)
+		}
+	}
+
+	if len(interfaces) > 0 {
+		fmt.Println("\n  Interfaces:")
+		for _, i := range interfaces {
+			fmt.Printf("    - %s\n", i)
+		}
+	}
+
+	if len(enums) > 0 {
+		fmt.Println("\n  Enums:")
+		for _, e := range enums {
+			fmt.Printf("    - %s\n", e)
+		}
+	}
+
+	if len(typeAliases) > 0 {
+		fmt.Println("\n  Type Aliases:")
+		for _, t := range typeAliases {
+			fmt.Printf("    - %s\n", t)
+		}
+	}
+
+	totalSymbols := len(variables) + len(functions) + len(classes) + len(interfaces) + len(enums) + len(typeAliases)
+	fmt.Printf("\nTotal: %d symbols\n", totalSymbols)
 }
 
 // loadREPLHistory loads command history from file
@@ -945,7 +1053,7 @@ func saveREPLHistory(history []string, filename string) {
 }
 
 // runTests discovers and runs all test files in a directory
-func runTests(path string, filter string) error {
+func runTests(path string, filter string, coverage bool) error {
 	// Check if path is a directory or file
 	info, err := os.Stat(path)
 	if err != nil {
@@ -1000,7 +1108,7 @@ func runTests(path string, filter string) error {
 	fmt.Println()
 
 	// Create a temporary test runner file
-	runnerContent := generateTestRunner(testFiles, testDir)
+	runnerContent := generateTestRunner(testFiles, testDir, coverage)
 	runnerFile := filepath.Join(testDir, "__test_runner__.lunar")
 
 	if err := ioutil.WriteFile(runnerFile, []byte(runnerContent), 0644); err != nil {
@@ -1055,7 +1163,7 @@ func runTests(path string, filter string) error {
 }
 
 // watchTests watches test files and re-runs tests on changes
-func watchTests(path string, filter string) error {
+func watchTests(path string, filter string, coverage bool) error {
 	fmt.Println("🔍 Watch mode: Monitoring for changes...")
 	fmt.Println("Press Ctrl+C to exit")
 
@@ -1098,7 +1206,7 @@ func watchTests(path string, filter string) error {
 
 	// Run tests initially
 	fmt.Println("Running initial test suite...")
-	if err := runTests(path, filter); err != nil {
+	if err := runTests(path, filter, coverage); err != nil {
 		fmt.Fprintf(os.Stderr, "\n❌ Tests failed: %v\n", err)
 	}
 	fmt.Println("\n👀 Watching for changes...")
@@ -1149,7 +1257,7 @@ func watchTests(path string, filter string) error {
 			fileTimestamps = currentTimestamps
 
 			// Re-run tests
-			if err := runTests(path, filter); err != nil {
+			if err := runTests(path, filter, coverage); err != nil {
 				fmt.Fprintf(os.Stderr, "\n❌ Tests failed: %v\n", err)
 			}
 
@@ -1191,11 +1299,19 @@ func discoverTestFiles(dir string) ([]string, error) {
 }
 
 // generateTestRunner creates a Lunar file that imports and runs all test files
-func generateTestRunner(testFiles []string, baseDir string) string {
+func generateTestRunner(testFiles []string, baseDir string, withCoverage bool) string {
 	var sb strings.Builder
 
 	sb.WriteString("-- Auto-generated test runner\n")
-	sb.WriteString("import { runTests, printResults } from \"vendor/testing\"\n\n")
+	sb.WriteString("import { runTests, printResults } from \"vendor/testing\"\n")
+
+	if withCoverage {
+		sb.WriteString("import * as coverage from \"vendor/testing/coverage\"\n\n")
+		sb.WriteString("-- Start coverage tracking\n")
+		sb.WriteString("coverage.start()\n\n")
+	} else {
+		sb.WriteString("\n")
+	}
 
 	// Import each test file (wildcard import to execute the file)
 	for _, testFile := range testFiles {
@@ -1209,7 +1325,15 @@ func generateTestRunner(testFiles []string, baseDir string) string {
 
 	sb.WriteString("\n-- Run all tests and print results\n")
 	sb.WriteString("local results: any = runTests()\n")
-	sb.WriteString("printResults(results)\n\n")
+	sb.WriteString("printResults(results)\n")
+
+	if withCoverage {
+		sb.WriteString("\n-- Print coverage report\n")
+		sb.WriteString("coverage.stop()\n")
+		sb.WriteString("coverage.report()\n")
+	}
+
+	sb.WriteString("\n")
 
 	// Exit with appropriate code
 	sb.WriteString("-- Exit with appropriate code\n")

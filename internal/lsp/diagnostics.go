@@ -26,9 +26,15 @@ func (de *DiagnosticsEngine) Analyze(uri string, content string) []Diagnostic {
 
 	// Add parse errors
 	for _, err := range p.Errors() {
-		// Try to extract line info from error message
-		line := 0
-		col := 0
+		// Use line/column info from ParseError (convert to 0-based)
+		line := err.Line - 1
+		if line < 0 {
+			line = 0
+		}
+		col := err.Column - 1
+		if col < 0 {
+			col = 0
+		}
 
 		diagnostic := Diagnostic{
 			Range: Range{
@@ -37,7 +43,7 @@ func (de *DiagnosticsEngine) Analyze(uri string, content string) []Diagnostic {
 			},
 			Severity: SeverityError,
 			Source:   "lunar",
-			Message:  err,
+			Message:  err.Message,
 		}
 		diagnostics = append(diagnostics, diagnostic)
 	}

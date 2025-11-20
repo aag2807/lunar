@@ -1693,6 +1693,12 @@ func (p *Parser) parseParameter() *ast.Parameter {
 
 	param.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
+	// Check for optional parameter (name?: type)
+	if p.peekTokenIs(lexer.QUESTION) {
+		param.IsOptional = true
+		p.nextToken() // consume ?
+	}
+
 	if p.peekTokenIs(lexer.COLON) {
 		p.nextToken() // consumes :
 		p.nextToken() // moves onto type

@@ -438,11 +438,12 @@ func (t *TableType) IsAssignableTo(other Type) bool {
 
 // FunctionType represents a function type
 type FunctionType struct {
-	Parameters       []Type
-	ReturnType       Type
-	GenericParams    []string        // Generic type parameter names (e.g., ["T", "U"])
-	HasRestParameter bool            // True if the last parameter is a rest parameter
-	Overloads        []*FunctionType // Additional overload signatures (for method overloading)
+	Parameters        []Type
+	ReturnType        Type
+	GenericParams     []string        // Generic type parameter names (e.g., ["T", "U"])
+	HasRestParameter  bool            // True if the last parameter is a rest parameter
+	OptionalParams    []bool          // True for each parameter that is optional
+	Overloads         []*FunctionType // Additional overload signatures (for method overloading)
 }
 
 func (t *FunctionType) String() string {

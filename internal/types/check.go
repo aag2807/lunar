@@ -1860,6 +1860,9 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 
 	// Create function type
 	params := make([]Type, len(node.Parameters))
+	optionalParams := make([]bool, len(node.Parameters))
+	hasOptional := false
+
 	for i, param := range node.Parameters {
 		// Validate rest parameters
 		if param.IsRest {
@@ -1882,6 +1885,15 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 				params[i] = &ArrayType{ElementType: Any}
 			}
 		} else {
+			// Validate optional parameter ordering
+			if param.IsOptional {
+				hasOptional = true
+				optionalParams[i] = true
+			} else if hasOptional && !param.IsRest {
+				// Required parameter after optional parameter
+				c.addError("Required parameters cannot follow optional parameters", param.Token)
+			}
+
 			if param.Type != nil {
 				params[i] = c.resolveTypeExpression(param.Type)
 			} else {
@@ -1912,6 +1924,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		ReturnType:       returnType,
 		GenericParams:    genericParams,
 		HasRestParameter: hasRestParam,
+		OptionalParams:   optionalParams,
 	}
 
 	// Restore environment and register function
@@ -3060,13 +3073,38 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 	// If the function is generic and called without explicit type arguments, try to infer them
 	if len(fnType.GenericParams) > 0 {
 		// Check argument count first (skip if there are spread arguments or function has rest parameter)
-		if !hasSpreadArgs && !fnType.HasRestParameter && len(node.Arguments) != len(fnType.Parameters) {
-			c.addError(
-				fmt.Sprintf("Function expects %d arguments, got %d",
-					len(fnType.Parameters), len(node.Arguments)),
-				node.Token,
-			)
-			return fnType.ReturnType
+		if !hasSpreadArgs && !fnType.HasRestParameter {
+			// Calculate minimum required arguments (non-optional parameters)
+			minArgs := len(fnType.Parameters)
+			if len(fnType.OptionalParams) > 0 {
+				// Find the first optional parameter
+				for i, isOptional := range fnType.OptionalParams {
+					if isOptional {
+						minArgs = i
+						break
+					}
+				}
+			}
+
+			maxArgs := len(fnType.Parameters)
+			argCount := len(node.Arguments)
+
+			if argCount < minArgs || argCount > maxArgs {
+				if minArgs == maxArgs {
+					c.addError(
+						fmt.Sprintf("Function expects %d arguments, got %d",
+							maxArgs, argCount),
+						node.Token,
+					)
+				} else {
+					c.addError(
+						fmt.Sprintf("Function expects %d-%d arguments, got %d",
+							minArgs, maxArgs, argCount),
+						node.Token,
+					)
+				}
+				return fnType.ReturnType
+			}
 		}
 
 		// If function has rest parameter, check minimum argument count
@@ -3125,13 +3163,39 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 	}
 
 	// Check argument count (skip if there are spread arguments or function has rest parameter)
-	if !hasSpreadArgs && !fnType.HasRestParameter && len(node.Arguments) != len(fnType.Parameters) {
-		c.addError(
-			fmt.Sprintf("Function expects %d arguments, got %d",
-				len(fnType.Parameters), len(node.Arguments)),
-			node.Token,
-		)
-		return fnType.ReturnType
+	if !hasSpreadArgs && !fnType.HasRestParameter {
+		// Calculate minimum required arguments (non-optional parameters)
+		minArgs := len(fnType.Parameters)
+		if len(fnType.OptionalParams) > 0 {
+			// Find the first optional parameter
+			for i, isOptional := range fnType.OptionalParams {
+				if isOptional {
+					minArgs = i
+					break
+				}
+			}
+		}
+
+		maxArgs := len(fnType.Parameters)
+		argCount := len(node.Arguments)
+
+		if argCount < minArgs {
+			c.addError(
+				fmt.Sprintf("Function expects at least %d arguments, got %d",
+					minArgs, argCount),
+				node.Token,
+			)
+			return fnType.ReturnType
+		}
+
+		if argCount > maxArgs {
+			c.addError(
+				fmt.Sprintf("Function expects at most %d arguments, got %d",
+					maxArgs, argCount),
+				node.Token,
+			)
+			return fnType.ReturnType
+		}
 	}
 
 	// If function has rest parameter, check minimum argument count

@@ -514,6 +514,7 @@ type Parameter struct {
 	Name       *Identifier
 	Type       Expression
 	IsRest     bool   // true for ...param
+	IsOptional bool   // true for param?: type
 	Visibility string // "public", "private", "protected" for constructor parameter properties
 	IsReadonly bool   // true for readonly parameter properties
 }
@@ -526,6 +527,9 @@ func (p *Parameter) String() string {
 		out.WriteString("...")
 	}
 	out.WriteString(p.Name.String())
+	if p.IsOptional {
+		out.WriteString("?")
+	}
 	if p.Type != nil {
 		out.WriteString(": ")
 		out.WriteString(p.Type.String())

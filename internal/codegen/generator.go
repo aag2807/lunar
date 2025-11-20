@@ -1011,9 +1011,15 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 
 		// Then add explicit key-value pairs (they can override spread values)
 		for key, val := range node.Pairs {
-			keyStr := g.generateExpression(key)
 			valStr := g.generateExpression(val)
-			output.WriteString(fmt.Sprintf("__temp[%s] = %s; ", keyStr, valStr))
+
+			// For identifier keys, use string literal; for others, use the expression
+			if ident, ok := key.(*ast.Identifier); ok {
+				output.WriteString(fmt.Sprintf("__temp[\"%s\"] = %s; ", ident.Value, valStr))
+			} else {
+				keyStr := g.generateExpression(key)
+				output.WriteString(fmt.Sprintf("__temp[%s] = %s; ", keyStr, valStr))
+			}
 		}
 
 		output.WriteString("return __temp end)()")
@@ -1061,9 +1067,16 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 
 		pairs := []string{}
 		for key, val := range node.Pairs {
-			keyStr := g.generateExpression(key)
 			valStr := g.generateExpression(val)
-			pairs = append(pairs, fmt.Sprintf("[%s] = %s", keyStr, valStr))
+
+			// Check if key is a simple identifier - if so, use it directly without brackets
+			if ident, ok := key.(*ast.Identifier); ok {
+				pairs = append(pairs, fmt.Sprintf("%s = %s", ident.Value, valStr))
+			} else {
+				// For complex keys (expressions, string literals, etc.), use brackets
+				keyStr := g.generateExpression(key)
+				pairs = append(pairs, fmt.Sprintf("[%s] = %s", keyStr, valStr))
+			}
 		}
 		output.WriteString(strings.Join(pairs, ", "))
 	}

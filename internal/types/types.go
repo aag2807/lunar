@@ -1021,6 +1021,17 @@ func (t *InterfaceType) IsAssignableTo(other Type) bool {
 		}
 	}
 
+	// Check if this interface is assignable to a union type
+	// An interface is assignable to a union if it's assignable to ANY of the union's members
+	if otherUnion, ok := other.(*UnionType); ok {
+		for _, memberType := range otherUnion.Types {
+			if t.IsAssignableTo(memberType) {
+				return true
+			}
+		}
+		return false
+	}
+
 	return false
 }
 

@@ -2096,42 +2096,158 @@ func (c *Checker) checkIfStatement(node *ast.IfStatement) {
 	}
 }
 
-// extractTypeNarrowing checks if the expression is a type guard call and extracts narrowing info
-// Returns the variable name and the narrowed type, or empty string and nil if not a type guard
+// extractTypeNarrowing checks if the expression is a type guard call or discriminated union check
+// and extracts narrowing info. Returns the variable name and the narrowed type, or empty string and nil
 func (c *Checker) extractTypeNarrowing(expr ast.Expression) (string, Type) {
-	// Check if this is a call expression
-	callExpr, ok := expr.(*ast.CallExpression)
-	if !ok || len(callExpr.Arguments) != 1 {
-		return "", nil
+	// Check if this is a call expression (type guard function)
+	if callExpr, ok := expr.(*ast.CallExpression); ok && len(callExpr.Arguments) == 1 {
+		// Get the function being called
+		var funcType *FunctionType
+		if ident, ok := callExpr.Function.(*ast.Identifier); ok {
+			typ, exists := c.env.Get(ident.Value)
+			if exists {
+				funcType, ok = typ.(*FunctionType)
+				if ok {
+					// Check if return type is a type guard
+					guardType, ok := funcType.ReturnType.(*TypeGuardType)
+					if ok {
+						// Extract the variable being guarded from the argument
+						if argIdent, ok := callExpr.Arguments[0].(*ast.Identifier); ok {
+							return argIdent.Value, guardType.GuardedType
+						}
+					}
+				}
+			}
+		}
 	}
 
-	// Get the function being called
-	var funcType *FunctionType
-	if ident, ok := callExpr.Function.(*ast.Identifier); ok {
-		typ, exists := c.env.Get(ident.Value)
-		if !exists {
-			return "", nil
+	// Check if this is a discriminated union check (e.g., obj.status === "success")
+	if infixExpr, ok := expr.(*ast.InfixExpression); ok {
+		if infixExpr.Operator == "==" || infixExpr.Operator == "!=" {
+			// Try both directions: prop === literal or literal === prop
+			varName, narrowedType := c.extractDiscriminantNarrowing(infixExpr.Left, infixExpr.Right, infixExpr.Operator == "==")
+			if varName != "" && narrowedType != nil {
+				return varName, narrowedType
+			}
+			// Try reverse
+			varName, narrowedType = c.extractDiscriminantNarrowing(infixExpr.Right, infixExpr.Left, infixExpr.Operator == "==")
+			if varName != "" && narrowedType != nil {
+				return varName, narrowedType
+			}
 		}
-		funcType, ok = typ.(*FunctionType)
-		if !ok {
-			return "", nil
-		}
-	} else {
-		return "", nil
 	}
 
-	// Check if return type is a type guard
-	guardType, ok := funcType.ReturnType.(*TypeGuardType)
+	return "", nil
+}
+
+// extractDiscriminantNarrowing checks if we're comparing a property to a literal value
+// and narrows a union type based on that discriminant property
+func (c *Checker) extractDiscriminantNarrowing(propExpr, literalExpr ast.Expression, isEquality bool) (string, Type) {
+	// Check if propExpr is a property access (IndexExpression with identifier base)
+	indexExpr, ok := propExpr.(*ast.IndexExpression)
 	if !ok {
 		return "", nil
 	}
 
-	// Extract the variable being guarded from the argument
-	if argIdent, ok := callExpr.Arguments[0].(*ast.Identifier); ok {
-		return argIdent.Value, guardType.GuardedType
+	// Get the object being accessed (must be an identifier)
+	objIdent, ok := indexExpr.Left.(*ast.Identifier)
+	if !ok {
+		return "", nil
 	}
 
-	return "", nil
+	// Get the property name (must be a string literal or identifier used as property)
+	var propName string
+	if stringLit, ok := indexExpr.Index.(*ast.StringLiteral); ok {
+		propName = stringLit.Value
+	} else if ident, ok := indexExpr.Index.(*ast.Identifier); ok {
+		// Property access like obj.prop is parsed as obj[prop] with identifier
+		propName = ident.Value
+	} else {
+		return "", nil
+	}
+
+	// Get the literal value being compared
+	var literalType Type
+	switch lit := literalExpr.(type) {
+	case *ast.StringLiteral:
+		literalType = &StringLiteralType{Value: lit.Value}
+	case *ast.NumberLiteral:
+		literalType = &NumberLiteralType{Value: lit.Value}
+	case *ast.BooleanLiteral:
+		literalType = &BooleanLiteralType{Value: lit.Value}
+	default:
+		return "", nil
+	}
+
+	// Get the type of the object
+	objType, exists := c.env.Get(objIdent.Value)
+	if !exists {
+		return "", nil
+	}
+
+	// If it's a union type, narrow it based on the discriminant property
+	unionType, ok := objType.(*UnionType)
+	if !ok {
+		return "", nil
+	}
+
+	// Filter union variants that match the discriminant
+	narrowedTypes := []Type{}
+	for _, variantType := range unionType.Types {
+		// Check if this variant has the discriminant property with the matching value
+		if c.variantMatchesDiscriminant(variantType, propName, literalType, isEquality) {
+			narrowedTypes = append(narrowedTypes, variantType)
+		}
+	}
+
+	// If no variants match, return nil (this will cause a type error later)
+	if len(narrowedTypes) == 0 {
+		return "", nil
+	}
+
+	// If only one variant matches, return that type directly
+	if len(narrowedTypes) == 1 {
+		return objIdent.Value, narrowedTypes[0]
+	}
+
+	// Multiple variants match, return a narrowed union
+	return objIdent.Value, &UnionType{Types: narrowedTypes}
+}
+
+// variantMatchesDiscriminant checks if a type variant has a property with the expected value
+func (c *Checker) variantMatchesDiscriminant(variantType Type, propName string, expectedValue Type, isEquality bool) bool {
+	// Get the property type from the variant
+	var propType Type
+
+	switch v := variantType.(type) {
+	case *InterfaceType:
+		var exists bool
+		propType, exists = v.Properties[propName]
+		if !exists {
+			return false
+		}
+	case *ClassType:
+		// Check if the class has the property
+		var exists bool
+		propType, exists = v.Properties[propName]
+		if !exists {
+			return false
+		}
+	case *TableType:
+		// For tables, we can't determine the specific property value
+		return false
+	default:
+		return false
+	}
+
+	// Check if the property type matches the expected literal type
+	if isEquality {
+		// For ==, the property must equal the expected value
+		return propType.Equals(expectedValue)
+	} else {
+		// For !=, the property must NOT equal the expected value
+		return !propType.Equals(expectedValue)
+	}
 }
 
 // checkWhileStatement checks a while statement
@@ -2677,7 +2793,8 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 	case *ast.TemplateLiteral:
 		return c.checkTemplateLiteral(node)
 	case *ast.BooleanLiteral:
-		return Boolean
+		// Boolean literals infer as literal types for discriminated unions
+		return &BooleanLiteralType{Value: node.Value}
 	case *ast.NilLiteral:
 		return Nil
 	case *ast.TableLiteral:

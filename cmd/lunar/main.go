@@ -14,6 +14,7 @@ import (
 	"lunar/internal/formatter"
 	"lunar/internal/lexer"
 	"lunar/internal/linter"
+	"lunar/internal/luarocks"
 	"lunar/internal/minify"
 	"lunar/internal/optimizer"
 	"lunar/internal/parser"
@@ -62,6 +63,15 @@ func main() {
 	clearCache := flag.Bool("clear-cache", false, "Clear compilation cache and exit")
 	cacheStats := flag.Bool("cache-stats", false, "Show cache statistics and exit")
 
+	// LuaRocks integration flags
+	rocksInstall := flag.String("rocks-install", "", "Install a LuaRocks package")
+	rocksRemove := flag.String("rocks-remove", "", "Remove a LuaRocks package")
+	rocksList := flag.Bool("rocks-list", false, "List installed LuaRocks packages")
+	rocksSearch := flag.String("rocks-search", "", "Search for LuaRocks packages")
+	rocksGenTypes := flag.String("rocks-types", "", "Generate type definitions for a package")
+	rocksInit := flag.Bool("rocks-init", false, "Initialize lunarocks.json config file")
+	rocksInstallDeps := flag.Bool("rocks-deps", false, "Install dependencies from lunarocks.json")
+
 	flag.Parse()
 
 	// Handle cache commands first
@@ -81,6 +91,12 @@ func main() {
 		fmt.Printf("  Entries: %v\n", stats["entries"])
 		fmt.Printf("  Cache Size: %v\n", stats["cachedSize"])
 		fmt.Printf("  Cache Directory: %v\n", stats["cacheDir"])
+		os.Exit(0)
+	}
+
+	// Handle LuaRocks commands
+	if *rocksInstall != "" || *rocksRemove != "" || *rocksList || *rocksSearch != "" || *rocksGenTypes != "" || *rocksInit || *rocksInstallDeps {
+		handleLuaRocksCommands(rocksInstall, rocksRemove, rocksList, rocksSearch, rocksGenTypes, rocksInit, rocksInstallDeps)
 		os.Exit(0)
 	}
 
@@ -912,6 +928,15 @@ func printHelp() {
 	fmt.Println("  --version           Show version information")
 	fmt.Println("  --help              Show this help message")
 	fmt.Println()
+	fmt.Println("LuaRocks Integration:")
+	fmt.Println("  --rocks-install <pkg>   Install a LuaRocks package (e.g., lfs@1.8.0)")
+	fmt.Println("  --rocks-remove <pkg>    Remove a LuaRocks package")
+	fmt.Println("  --rocks-list            List installed LuaRocks packages")
+	fmt.Println("  --rocks-search <query>  Search for LuaRocks packages")
+	fmt.Println("  --rocks-types <pkg>     Generate type definitions for a package")
+	fmt.Println("  --rocks-init            Initialize lunarocks.json config file")
+	fmt.Println("  --rocks-deps            Install dependencies from lunarocks.json")
+	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  lunar main.lunar")
 	fmt.Println("  lunar main.lunar -o output.lua")
@@ -1607,4 +1632,115 @@ func generateDocs(path string, outputDir string) error {
 
 	fmt.Printf("\n✓ Documentation generated in %s\n", outputDir)
 	return nil
+}
+
+// handleLuaRocksCommands handles all LuaRocks-related commands
+func handleLuaRocksCommands(install, remove *string, list *bool, search, genTypes *string, init, installDeps *bool) {
+	mgr, err := luarocks.New()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Initialize lunarocks.json
+	if *init {
+		config := &luarocks.Config{
+			Dependencies:    make(map[string]string),
+			DevDependencies: make(map[string]string),
+		}
+		if err := mgr.SaveConfig("lunarocks.json", config); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to create config: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("✓ Created lunarocks.json")
+		return
+	}
+
+	// Install dependencies
+	if *installDeps {
+		if err := mgr.InstallDependencies("lunarocks.json"); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to install dependencies: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Install package
+	if *install != "" {
+		parts := strings.SplitN(*install, "@", 2)
+		packageName := parts[0]
+		version := ""
+		if len(parts) > 1 {
+			version = parts[1]
+		}
+
+		if err := mgr.Install(packageName, version); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to install package: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Auto-generate type definitions
+		if err := mgr.GenerateTypeDefinitions(packageName); err != nil {
+			fmt.Printf("Warning: Failed to generate type definitions: %v\n", err)
+		}
+		return
+	}
+
+	// Remove package
+	if *remove != "" {
+		if err := mgr.Remove(*remove); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to remove package: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// List installed packages
+	if *list {
+		packages, err := mgr.List()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to list packages: %v\n", err)
+			os.Exit(1)
+		}
+
+		if len(packages) == 0 {
+			fmt.Println("No packages installed")
+			return
+		}
+
+		fmt.Println("Installed packages:")
+		for _, pkg := range packages {
+			fmt.Printf("  %s@%s\n", pkg.Name, pkg.Version)
+		}
+		return
+	}
+
+	// Search packages
+	if *search != "" {
+		packages, err := mgr.Search(*search)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to search packages: %v\n", err)
+			os.Exit(1)
+		}
+
+		if len(packages) == 0 {
+			fmt.Printf("No packages found matching '%s'\n", *search)
+			return
+		}
+
+		fmt.Printf("Search results for '%s':\n", *search)
+		for _, pkg := range packages {
+			fmt.Printf("  %s@%s\n", pkg.Name, pkg.Version)
+		}
+		return
+	}
+
+	// Generate type definitions
+	if *genTypes != "" {
+		if err := mgr.GenerateTypeDefinitions(*genTypes); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to generate type definitions: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 }

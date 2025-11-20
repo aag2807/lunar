@@ -1,0 +1,124 @@
+-- LuaCrypto - Cryptographic Functions
+-- Type declarations for hashing, encryption, and cryptographic operations
+-- https://github.com/mkottman/luacrypto
+
+-- Digest context for incremental hashing
+declare interface DigestContext
+    update: function(data: string): DigestContext
+    final: function(): string
+    reset: function(): DigestContext
+end
+
+-- HMAC context for message authentication
+declare interface HMACContext
+    update: function(data: string): HMACContext
+    final: function(): string
+    reset: function(): HMACContext
+end
+
+-- Cipher context for encryption/decryption
+declare interface CipherContext
+    update: function(data: string): string
+    final: function(): string
+    reset: function(key: string, iv: string?): CipherContext
+end
+
+-- EVP (envelope) interface for modern crypto operations
+declare interface EVPLib
+    -- Message Digests (Hashing)
+    digest: function(algorithm: string, data: string): string
+    new: function(algorithm: string): DigestContext
+
+    -- HMAC (Keyed-hash message authentication code)
+    hmac: function(algorithm: string, key: string, data: string): string
+    hmac_new: function(algorithm: string, key: string): HMACContext
+
+    -- Encryption/Decryption
+    encrypt: function(algorithm: string, key: string, iv: string?, data: string): string
+    decrypt: function(algorithm: string, key: string, iv: string?, data: string): string
+    cipher_new: function(algorithm: string, key: string, iv: string?, encrypt: boolean): CipherContext
+
+    -- Key Derivation
+    pbkdf2: function(password: string, salt: string, iterations: number, keylen: number, algorithm: string?): string
+
+    -- Signing/Verification (requires private/public key)
+    sign: function(algorithm: string, key: string, data: string): string
+    verify: function(algorithm: string, key: string, data: string, signature: string): boolean
+
+    -- Random Number Generation
+    random_bytes: function(count: number): string
+    random_pseudo_bytes: function(count: number): string, boolean
+end
+
+-- Hash algorithms
+declare interface HashLib
+    -- SHA Family
+    sha1: function(data: string): string
+    sha224: function(data: string): string
+    sha256: function(data: string): string
+    sha384: function(data: string): string
+    sha512: function(data: string): string
+
+    -- MD5 (deprecated, but still common)
+    md5: function(data: string): string
+
+    -- BLAKE2
+    blake2b: function(data: string, size: number?): string
+    blake2s: function(data: string, size: number?): string
+
+    -- Incremental hashing
+    new: function(algorithm: "sha1" | "sha256" | "sha512" | "md5"): DigestContext
+end
+
+-- Encoding utilities
+declare interface EncodeLib
+    -- Hexadecimal encoding
+    hex_encode: function(data: string): string
+    hex_decode: function(hex: string): string
+
+    -- Base64 encoding
+    base64_encode: function(data: string): string
+    base64_decode: function(base64: string): string
+
+    -- URL-safe Base64
+    base64url_encode: function(data: string): string
+    base64url_decode: function(base64url: string): string
+end
+
+-- Random number generation
+declare interface RandLib
+    -- Generate random bytes
+    bytes: function(count: number): string
+
+    -- Generate random number in range
+    num: function(min: number?, max: number?): number
+
+    -- Seed the random number generator
+    seed: function(seed: string): void
+
+    -- Add entropy
+    add: function(data: string, entropy: number?): void
+
+    -- Check if enough entropy is available
+    status: function(): boolean
+end
+
+-- Main crypto library
+declare interface CryptoLib
+    evp: EVPLib
+    hash: HashLib
+    encode: EncodeLib
+    rand: RandLib
+
+    -- Direct access to common functions
+    digest: function(algorithm: string, data: string): string
+    hmac: function(algorithm: string, key: string, data: string): string
+    encrypt: function(cipher: string, key: string, iv: string?, data: string): string
+    decrypt: function(cipher: string, key: string, iv: string?, data: string): string
+
+    -- Utility functions
+    hex: function(data: string): string
+    unhex: function(hex: string): string
+end
+
+declare const crypto: CryptoLib

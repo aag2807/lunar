@@ -7,12 +7,15 @@ import (
 	"io/ioutil"
 	"lunar/internal/ast"
 	"lunar/internal/bundler"
+	"lunar/internal/cache"
 	"lunar/internal/codegen"
 	"lunar/internal/config"
 	"lunar/internal/docgen"
 	"lunar/internal/formatter"
 	"lunar/internal/lexer"
 	"lunar/internal/linter"
+	"lunar/internal/minify"
+	"lunar/internal/optimizer"
 	"lunar/internal/parser"
 	"lunar/internal/types"
 	"os"
@@ -50,7 +53,34 @@ func main() {
 	targetLua := flag.String("target", "", "Target Lua version: lua51, lua52, lua53, lua54, luajit")
 	configFile := flag.String("config", "", "Path to lunar.config.json (auto-detected if not specified)")
 
+	// Optimization flags
+	minifyMode := flag.Bool("minify", false, "Minify output (remove whitespace and comments)")
+	optimizeMode := flag.Bool("optimize", false, "Enable optimizations (constant folding, dead code elimination)")
+	noCache := flag.Bool("no-cache", false, "Disable incremental compilation cache")
+	clearCache := flag.Bool("clear-cache", false, "Clear compilation cache and exit")
+	cacheStats := flag.Bool("cache-stats", false, "Show cache statistics and exit")
+
 	flag.Parse()
+
+	// Handle cache commands first
+	compCache, _ := cache.New("")
+	if *clearCache {
+		if err := compCache.Clear(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to clear cache: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Cache cleared successfully")
+		os.Exit(0)
+	}
+
+	if *cacheStats {
+		stats := compCache.Stats()
+		fmt.Println("Cache Statistics:")
+		fmt.Printf("  Entries: %v\n", stats["entries"])
+		fmt.Printf("  Cache Size: %v\n", stats["cachedSize"])
+		fmt.Printf("  Cache Directory: %v\n", stats["cacheDir"])
+		os.Exit(0)
+	}
 
 	// Handle version flag
 	if *showVersion {
@@ -207,10 +237,12 @@ func main() {
 
 	// Watch mode or single compilation
 	if *watchMode {
-		runWatchMode(inputFile, output, !*noTypeCheck, *sourceMap, *watchInterval, *runMode, cfg.CompilerOptions.Target)
+		useCache := !*noCache
+		runWatchMode(inputFile, output, !*noTypeCheck, *sourceMap, *watchInterval, *runMode, cfg.CompilerOptions.Target, useCache, *optimizeMode, *minifyMode)
 	} else {
 		// Compile the file
-		if err := compile(inputFile, output, !*noTypeCheck, *sourceMap, cfg.CompilerOptions.Target); err != nil {
+		useCache := !*noCache
+		if err := compile(inputFile, output, !*noTypeCheck, *sourceMap, cfg.CompilerOptions.Target, useCache, *optimizeMode, *minifyMode); err != nil {
 			fmt.Fprintf(os.Stderr, "Compilation failed:\n%v\n", err)
 			os.Exit(1)
 		}
@@ -370,7 +402,27 @@ func runBundleWatchMode(inputFile, outputFile string, typeCheck, runAfter bool, 
 }
 
 // compile compiles a Lunar source file to Lua
-func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool, target string) error {
+func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool, target string, useCache, useOptimize, useMinify bool) error {
+	// Check cache if enabled
+	var compCache *cache.Cache
+	if useCache {
+		var err error
+		compCache, err = cache.New("")
+		if err == nil {
+			if entry, found := compCache.Get(inputFile); found {
+				// Cache hit! Write cached output
+				if err := ioutil.WriteFile(outputFile, []byte(entry.CompiledCode), 0644); err == nil {
+					if entry.SourceMapData != "" && generateSourceMap {
+						mapFile := outputFile + ".map"
+						ioutil.WriteFile(mapFile, []byte(entry.SourceMapData), 0644)
+					}
+					fmt.Printf("✓ Using cached: %s\n", inputFile)
+					return nil
+				}
+			}
+		}
+	}
+
 	// Auto-load declaration files from the same directory
 	declarationStatements := []ast.Statement{}
 	if typeCheck {
@@ -417,6 +469,13 @@ func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool, ta
 		}
 	}
 
+	// Optimizer: Apply AST-level optimizations (if enabled)
+	if useOptimize {
+		opts := optimizer.DefaultOptions()
+		opt := optimizer.New(opts)
+		statements = opt.Optimize(statements)
+	}
+
 	// Code Generator: Transpile to Lua (only main file, not declarations)
 	var luaCode string
 	if generateSourceMap {
@@ -442,9 +501,45 @@ func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool, ta
 		luaCode = codegen.GenerateWithTarget(statements, target)
 	}
 
+	// Minifier: Reduce code size (if enabled)
+	sourceMapData := ""
+	if generateSourceMap && strings.Contains(luaCode, "sourceMappingURL") {
+		// Extract source map data if present
+		lines := strings.Split(luaCode, "\n")
+		for i := len(lines) - 1; i >= 0; i-- {
+			if strings.Contains(lines[i], "sourceMappingURL") {
+				sourceMapData = lines[i]
+				break
+			}
+		}
+	}
+
+	if useMinify {
+		minOpts := minify.DefaultOptions()
+		luaCode = minify.Minify(luaCode, minOpts)
+
+		// Re-add source map comment if it was present
+		if sourceMapData != "" {
+			luaCode += "\n" + sourceMapData
+		}
+	}
+
 	// Write output file
 	if err := ioutil.WriteFile(outputFile, []byte(luaCode), 0644); err != nil {
 		return fmt.Errorf("failed to write output file: %w", err)
+	}
+
+	// Cache the compilation result (if enabled)
+	if useCache && compCache != nil {
+		dependencies := []string{} // TODO: Track actual dependencies
+		mapData := ""
+		if generateSourceMap {
+			mapFile := outputFile + ".map"
+			if mapBytes, err := ioutil.ReadFile(mapFile); err == nil {
+				mapData = string(mapBytes)
+			}
+		}
+		compCache.Put(inputFile, luaCode, dependencies, mapData)
 	}
 
 	return nil
@@ -639,14 +734,14 @@ func lintFile(inputFile string) error {
 }
 
 // runWatchMode watches files for changes and recompiles automatically
-func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap bool, intervalMs int, runAfter bool, target string) {
+func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap bool, intervalMs int, runAfter bool, target string, useCache, useOptimize, useMinify bool) {
 	fmt.Printf("Watching %s for changes (Ctrl+C to stop)\n", inputFile)
 
 	// Get initial modification time
 	lastModTime := getFileModTime(inputFile)
 
 	// Initial compilation
-	if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target); err != nil {
+	if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target, useCache, useOptimize, useMinify); err != nil {
 		fmt.Fprintf(os.Stderr, "[%s] Compilation failed:\n%v\n", time.Now().Format("15:04:05"), err)
 	} else {
 		fmt.Printf("[%s] Successfully compiled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
@@ -676,7 +771,7 @@ func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap boo
 			if !currentModTime.Equal(lastModTime) {
 				lastModTime = currentModTime
 				fmt.Printf("[%s] File changed, recompiling...\n", time.Now().Format("15:04:05"))
-				if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target); err != nil {
+				if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target, useCache, useOptimize, useMinify); err != nil {
 					fmt.Fprintf(os.Stderr, "[%s] Compilation failed:\n%v\n", time.Now().Format("15:04:05"), err)
 				} else {
 					fmt.Printf("[%s] Successfully compiled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
@@ -718,6 +813,13 @@ func printHelp() {
 	fmt.Println("  --watch-interval    Watch interval in ms (default: 500)")
 	fmt.Println("  --format            Format source code and print to stdout")
 	fmt.Println("  --format-write      Format source code and write back to file")
+	fmt.Println()
+	fmt.Println("Optimization Options:")
+	fmt.Println("  --optimize          Enable AST optimizations (constant folding, dead code elimination)")
+	fmt.Println("  --minify            Minify output (remove whitespace and comments)")
+	fmt.Println("  --no-cache          Disable incremental compilation cache")
+	fmt.Println("  --clear-cache       Clear compilation cache and exit")
+	fmt.Println("  --cache-stats       Show cache statistics and exit")
 	fmt.Println("  --lint              Check code for potential issues")
 	fmt.Println("  --bundle            Bundle all dependencies into a single file")
 	fmt.Println("  --run               Run the compiled Lua file after compilation")

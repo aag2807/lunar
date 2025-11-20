@@ -54,7 +54,7 @@ func (l *Lexer) NextToken() Token {
 			l.readChar()
 			tok = Token{Type: NOT_EQ_LUA, Literal: "~=", Line: l.line, Column: l.column}
 		} else {
-			tok = newToken(ILLEGAL, l.ch, l.line, l.column)
+			tok = newToken(TILDE, l.ch, l.line, l.column)
 		}
 	case '!':
 		if l.peekChar() == '=' {
@@ -86,14 +86,20 @@ func (l *Lexer) NextToken() Token {
 	case '|':
 		tok = newToken(PIPE, l.ch, l.line, l.column)
 	case '<':
-		if l.peekChar() == '=' {
+		if l.peekChar() == '<' {
+			l.readChar()
+			tok = Token{Type: LEFT_SHIFT, Literal: "<<", Line: l.line, Column: l.column}
+		} else if l.peekChar() == '=' {
 			l.readChar()
 			tok = Token{Type: LT_EQ, Literal: "<=", Line: l.line, Column: l.column}
 		} else {
 			tok = newToken(LT, l.ch, l.line, l.column)
 		}
 	case '>':
-		if l.peekChar() == '=' {
+		if l.peekChar() == '>' {
+			l.readChar()
+			tok = Token{Type: RIGHT_SHIFT, Literal: ">>", Line: l.line, Column: l.column}
+		} else if l.peekChar() == '=' {
 			l.readChar()
 			tok = Token{Type: GT_EQ, Literal: ">=", Line: l.line, Column: l.column}
 		} else {
@@ -102,13 +108,20 @@ func (l *Lexer) NextToken() Token {
 	case '*':
 		tok = newToken(ASTERISK, l.ch, l.line, l.column)
 	case '/':
-		tok = newToken(SLASH, l.ch, l.line, l.column)
+		if l.peekChar() == '/' {
+			l.readChar()
+			tok = Token{Type: FLOOR_DIV, Literal: "//", Line: l.line, Column: l.column}
+		} else {
+			tok = newToken(SLASH, l.ch, l.line, l.column)
+		}
 	case '%':
 		tok = newToken(MODULO, l.ch, l.line, l.column)
 	case '#':
 		tok = newToken(HASH, l.ch, l.line, l.column)
 	case '&':
 		tok = newToken(AMPERSAND, l.ch, l.line, l.column)
+	case '^':
+		tok = newToken(CARET, l.ch, l.line, l.column)
 	case '@':
 		tok = newToken(AT, l.ch, l.line, l.column)
 	case '.':
@@ -142,7 +155,11 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(RBRACE, l.ch, l.line, l.column)
 	case '"':
 		tok.Type = STRING
-		tok.Literal = l.readString()
+		tok.Literal = l.readString('"')
+		return tok
+	case '\'':
+		tok.Type = STRING
+		tok.Literal = l.readString('\'')
 		return tok
 	case '`':
 		tok.Type = TEMPLATE_STRING
@@ -244,7 +261,7 @@ func (l *Lexer) readNumber() string {
 	return l.input[position:l.position]
 }
 
-func (l *Lexer) readString() string {
+func (l *Lexer) readString(delimiter byte) string {
 	var result []byte
 
 	for {
@@ -259,6 +276,8 @@ func (l *Lexer) readString() string {
 				result = append(result, '\t')
 			case '"':
 				result = append(result, '"')
+			case '\'':
+				result = append(result, '\'')
 			case '\\':
 				result = append(result, '\\')
 			default:
@@ -267,7 +286,7 @@ func (l *Lexer) readString() string {
 			continue
 		}
 
-		if l.ch == '"' {
+		if l.ch == delimiter {
 			l.readChar()
 			break
 		}

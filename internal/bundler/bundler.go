@@ -5,21 +5,25 @@ import (
 	"io/ioutil"
 	"lunar/internal/ast"
 	"lunar/internal/codegen"
+	"lunar/internal/config"
 	"lunar/internal/lexer"
 	"lunar/internal/parser"
 	"lunar/internal/types"
+	"os"
 	"path/filepath"
 	"strings"
 )
 
 // Module represents a parsed Lunar module
 type Module struct {
-	Path       string          // Resolved file path
-	ModuleID   string          // Module identifier for require()
-	Source     string          // Source code
-	Statements []ast.Statement // Parsed AST
-	Imports    []string        // Module IDs this module depends on
-	Exports    []string        // Exported names
+	Path        string          // Resolved file path
+	ModuleID    string          // Module identifier for require()
+	Source      string          // Source code
+	Statements  []ast.Statement // Parsed AST
+	Imports     []string        // Module IDs this module depends on
+	Exports     []string        // Exported names
+	UsedExports map[string]bool // Exports that are actually imported (for tree shaking)
+	IsVendor    bool            // True if this is a vendor Lua module
 }
 
 // Bundler handles bundling multiple Lunar files into a single output
@@ -30,6 +34,7 @@ type Bundler struct {
 	loadOrder    []string           // Topologically sorted module IDs
 	typeCheck    bool
 	declStmts    []ast.Statement // Declaration statements for type checking
+	config       *config.Config  // Project configuration
 }
 
 // New creates a new Bundler
@@ -40,6 +45,19 @@ func New(entryFile string, typeCheck bool) *Bundler {
 		baseDir:   filepath.Dir(absPath),
 		modules:   make(map[string]*Module),
 		typeCheck: typeCheck,
+		config:    config.DefaultConfig(),
+	}
+}
+
+// NewWithConfig creates a new Bundler with configuration
+func NewWithConfig(entryFile string, typeCheck bool, cfg *config.Config) *Bundler {
+	absPath, _ := filepath.Abs(entryFile)
+	return &Bundler{
+		entryFile: absPath,
+		baseDir:   filepath.Dir(absPath),
+		modules:   make(map[string]*Module),
+		typeCheck: typeCheck,
+		config:    cfg,
 	}
 }
 
@@ -78,8 +96,46 @@ func (b *Bundler) Bundle() (string, error) {
 		}
 	}
 
+	// Analyze used exports for tree shaking
+	if b.config.CompilerOptions.TreeShake {
+		b.analyzeUsedExports()
+	}
+
 	// Generate bundled output
 	return b.generateBundle(entryModuleID), nil
+}
+
+// analyzeUsedExports marks which exports are actually used by analyzing imports
+func (b *Bundler) analyzeUsedExports() {
+	// Initialize UsedExports maps
+	for _, module := range b.modules {
+		module.UsedExports = make(map[string]bool)
+	}
+
+	// Analyze each module's imports
+	for _, module := range b.modules {
+		for _, stmt := range module.Statements {
+			if importStmt, ok := stmt.(*ast.ImportStatement); ok {
+				// Find the target module
+				depModule := b.findModuleByImport(importStmt.Module, module.Path)
+				if depModule == nil {
+					continue
+				}
+
+				if importStmt.IsWildcard {
+					// Wildcard import uses all exports
+					for _, export := range depModule.Exports {
+						depModule.UsedExports[export] = true
+					}
+				} else {
+					// Named imports - mark specific exports as used
+					for _, name := range importStmt.Names {
+						depModule.UsedExports[name.Value] = true
+					}
+				}
+			}
+		}
+	}
 }
 
 // loadModule loads and parses a module, recursively loading its dependencies
@@ -89,20 +145,36 @@ func (b *Bundler) loadModule(filePath, moduleID string) error {
 		return nil
 	}
 
-	// Read and parse the file
+	// Read the file
 	source, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to read %s: %w", filePath, err)
 	}
 
-	statements, err := b.parseFile(filePath)
-	if err != nil {
-		return err
-	}
+	// Check if this is a vendor Lua module
+	isVendor := strings.HasSuffix(filePath, ".lua") && strings.Contains(filePath, "vendor")
 
-	// Extract imports and exports
-	imports := b.extractImports(statements)
-	exports := b.extractExports(statements)
+	var statements []ast.Statement
+	var imports []string
+	var exports []string
+
+	if isVendor {
+		// Vendor modules are raw Lua - don't parse them
+		// They have no imports/exports in Lunar sense
+		statements = nil
+		imports = nil
+		exports = nil
+	} else {
+		// Parse Lunar file
+		statements, err = b.parseFile(filePath)
+		if err != nil {
+			return err
+		}
+
+		// Extract imports and exports
+		imports = b.extractImports(statements)
+		exports = b.extractExports(statements)
+	}
 
 	// Create module
 	module := &Module{
@@ -112,17 +184,20 @@ func (b *Bundler) loadModule(filePath, moduleID string) error {
 		Statements: statements,
 		Imports:    imports,
 		Exports:    exports,
+		IsVendor:   isVendor,
 	}
 	b.modules[moduleID] = module
 
-	// Recursively load dependencies
-	for _, importPath := range imports {
-		depFile, depModuleID, err := b.resolveModule(importPath, filePath)
-		if err != nil {
-			return fmt.Errorf("in %s: %w", filePath, err)
-		}
-		if err := b.loadModule(depFile, depModuleID); err != nil {
-			return err
+	// Recursively load dependencies (only for Lunar modules)
+	if !isVendor {
+		for _, importPath := range imports {
+			depFile, depModuleID, err := b.resolveModule(importPath, filePath)
+			if err != nil {
+				return fmt.Errorf("in %s: %w", filePath, err)
+			}
+			if err := b.loadModule(depFile, depModuleID); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -141,7 +216,11 @@ func (b *Bundler) parseFile(filePath string) ([]ast.Statement, error) {
 	statements := p.Parse()
 
 	if len(p.Errors()) > 0 {
-		return nil, fmt.Errorf("parse errors in %s:\n%s", filePath, strings.Join(p.Errors(), "\n"))
+		var errMsgs []string
+		for _, err := range p.Errors() {
+			errMsgs = append(errMsgs, fmt.Sprintf("Line %d, Col %d: %s", err.Line, err.Column, err.Message))
+		}
+		return nil, fmt.Errorf("parse errors in %s:\n%s", filePath, strings.Join(errMsgs, "\n"))
 	}
 
 	return statements, nil
@@ -184,15 +263,24 @@ func (b *Bundler) extractExports(statements []ast.Statement) []string {
 func (b *Bundler) resolveModule(importPath, fromFile string) (string, string, error) {
 	fromDir := filepath.Dir(fromFile)
 
+	// Apply path aliases from config
+	resolvedPath := b.config.ResolvePath(importPath, fromDir)
+	if resolvedPath != importPath {
+		// Path was aliased, resolve from base directory
+		// Ensure the path is relative
+		if !strings.HasPrefix(resolvedPath, "./") && !strings.HasPrefix(resolvedPath, "../") {
+			resolvedPath = "./" + resolvedPath
+		}
+		importPath = resolvedPath
+		fromDir = b.baseDir
+	}
+
 	// Handle relative imports
 	if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
-		// Try with .lunar extension
 		resolved := filepath.Join(fromDir, importPath)
-		if !strings.HasSuffix(resolved, ".lunar") {
-			resolved += ".lunar"
-		}
 
-		absPath, err := filepath.Abs(resolved)
+		// Try different resolution strategies
+		absPath, err := b.resolveFile(resolved)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to resolve %s: %w", importPath, err)
 		}
@@ -208,9 +296,113 @@ func (b *Bundler) resolveModule(importPath, fromFile string) (string, string, er
 		return absPath, moduleID, nil
 	}
 
+	// Handle vendor imports (e.g., "vendor/testing", "vendor/http")
+	if strings.HasPrefix(importPath, "vendor/") {
+		// Find project root (look for lunar.config.json or use base directory)
+		projectRoot := b.findProjectRoot()
+		vendorPath := filepath.Join(projectRoot, importPath)
+
+		// Try to resolve vendor module
+		absPath, err := b.resolveVendorFile(vendorPath)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to resolve vendor module %s: %w", importPath, err)
+		}
+
+		// Use the import path as module ID for vendor modules
+		moduleID := importPath
+
+		return absPath, moduleID, nil
+	}
+
 	// For non-relative imports (e.g., "lua" stdlib), don't bundle them
 	// They'll be left as regular require() calls
 	return "", importPath, fmt.Errorf("cannot bundle external module: %s", importPath)
+}
+
+// findProjectRoot finds the project root directory
+func (b *Bundler) findProjectRoot() string {
+	// Start from base directory and look for lunar.config.json
+	dir := b.baseDir
+	for {
+		configPath := filepath.Join(dir, "lunar.config.json")
+		if _, err := os.Stat(configPath); err == nil {
+			return dir
+		}
+
+		// Also check for vendor directory
+		vendorPath := filepath.Join(dir, "vendor")
+		if info, err := os.Stat(vendorPath); err == nil && info.IsDir() {
+			return dir
+		}
+
+		// Move up one directory
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached filesystem root
+			break
+		}
+		dir = parent
+	}
+
+	// Default to base directory
+	return b.baseDir
+}
+
+// resolveVendorFile resolves a vendor module path to its .lua file
+func (b *Bundler) resolveVendorFile(basePath string) (string, error) {
+	// Try with .lua extension (vendor libraries are Lua files)
+	luaPath := basePath + ".lua"
+	if _, err := os.Stat(luaPath); err == nil {
+		return filepath.Abs(luaPath)
+	}
+
+	// Try as directory with index.lua
+	indexPath := filepath.Join(basePath, "index.lua")
+	if _, err := os.Stat(indexPath); err == nil {
+		return filepath.Abs(indexPath)
+	}
+
+	// Try as directory with same-named .lua file (e.g., vendor/testing/testing.lua)
+	parts := strings.Split(basePath, string(filepath.Separator))
+	if len(parts) > 0 {
+		moduleName := parts[len(parts)-1]
+		namedPath := filepath.Join(basePath, moduleName+".lua")
+		if _, err := os.Stat(namedPath); err == nil {
+			return filepath.Abs(namedPath)
+		}
+	}
+
+	return "", fmt.Errorf("vendor module not found: %s", basePath)
+}
+
+// resolveFile tries to resolve a file path with various extensions and index files
+func (b *Bundler) resolveFile(basePath string) (string, error) {
+	// Try exact path with .lunar extension
+	if !strings.HasSuffix(basePath, ".lunar") {
+		lunarPath := basePath + ".lunar"
+		if _, err := os.Stat(lunarPath); err == nil {
+			return filepath.Abs(lunarPath)
+		}
+	} else {
+		if _, err := os.Stat(basePath); err == nil {
+			return filepath.Abs(basePath)
+		}
+	}
+
+	// Try as directory with index.lunar
+	indexPath := filepath.Join(basePath, "index.lunar")
+	if _, err := os.Stat(indexPath); err == nil {
+		return filepath.Abs(indexPath)
+	}
+
+	// Try without extension (in case it's already .lunar)
+	if strings.HasSuffix(basePath, ".lunar") {
+		if _, err := os.Stat(basePath); err == nil {
+			return filepath.Abs(basePath)
+		}
+	}
+
+	return "", fmt.Errorf("module not found: %s", basePath)
 }
 
 // topologicalSort sorts modules in dependency order
@@ -218,17 +410,27 @@ func (b *Bundler) topologicalSort() error {
 	visited := make(map[string]bool)
 	inStack := make(map[string]bool)
 	var order []string
+	var path []string // Track the current path for better error messages
 
 	var visit func(moduleID string) error
 	visit = func(moduleID string) error {
 		if inStack[moduleID] {
-			return fmt.Errorf("circular dependency detected involving %s", moduleID)
+			// Build circular dependency chain
+			cycle := []string{moduleID}
+			for i := len(path) - 1; i >= 0; i-- {
+				cycle = append([]string{path[i]}, cycle...)
+				if path[i] == moduleID {
+					break
+				}
+			}
+			return fmt.Errorf("circular dependency detected:\n  %s", strings.Join(cycle, " -> "))
 		}
 		if visited[moduleID] {
 			return nil
 		}
 
 		inStack[moduleID] = true
+		path = append(path, moduleID)
 		module := b.modules[moduleID]
 		if module != nil {
 			for _, dep := range module.Imports {
@@ -240,6 +442,7 @@ func (b *Bundler) topologicalSort() error {
 				}
 			}
 		}
+		path = path[:len(path)-1]
 		inStack[moduleID] = false
 		visited[moduleID] = true
 		order = append(order, moduleID)
@@ -340,6 +543,21 @@ func (b *Bundler) generateModuleWrapper(module *Module) string {
 
 	output.WriteString(fmt.Sprintf("__modules[\"%s\"] = function()\n", module.ModuleID))
 
+	// Handle vendor modules specially - include raw Lua source
+	if module.IsVendor {
+		// Indent the vendor module source
+		lines := strings.Split(module.Source, "\n")
+		for _, line := range lines {
+			if line != "" {
+				output.WriteString("    " + line + "\n")
+			} else {
+				output.WriteString("\n")
+			}
+		}
+		output.WriteString("end\n")
+		return output.String()
+	}
+
 	// Generate module code
 	gen := codegen.New()
 
@@ -387,6 +605,28 @@ func (b *Bundler) generateModuleWrapper(module *Module) string {
 			}
 			continue
 		}
+		// Tree shaking: skip unused exports
+		if b.config.CompilerOptions.TreeShake && module.UsedExports != nil {
+			if exportStmt, ok := stmt.(*ast.ExportStatement); ok {
+				var exportName string
+				switch s := exportStmt.Statement.(type) {
+				case *ast.VariableDeclaration:
+					if len(s.Names) > 0 {
+						exportName = s.Names[0].Value
+					}
+				case *ast.FunctionDeclaration:
+					exportName = s.Name.Value
+				case *ast.ClassDeclaration:
+					exportName = s.Name.Value
+				case *ast.EnumDeclaration:
+					exportName = s.Name.Value
+				}
+				if exportName != "" && !module.UsedExports[exportName] {
+					// Skip unused export
+					continue
+				}
+			}
+		}
 		moduleStatements = append(moduleStatements, stmt)
 	}
 
@@ -414,4 +654,13 @@ func (b *Bundler) generateModuleWrapper(module *Module) string {
 // transformImports transforms import statements (placeholder for future use)
 func (b *Bundler) transformImports(statements []ast.Statement, fromFile string) []ast.Statement {
 	return statements
+}
+
+// GetAllFiles returns all file paths that were bundled
+func (b *Bundler) GetAllFiles() []string {
+	var files []string
+	for _, module := range b.modules {
+		files = append(files, module.Path)
+	}
+	return files
 }

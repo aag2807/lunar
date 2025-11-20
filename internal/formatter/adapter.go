@@ -33,5 +33,9 @@ func (p *ParserAdapter) Parse() []ast.Statement {
 
 // Errors returns any parsing errors
 func (p *ParserAdapter) Errors() []string {
-	return p.parser.Errors()
+	var errs []string
+	for _, err := range p.parser.Errors() {
+		errs = append(errs, err.Error())
+	}
+	return errs
 }

@@ -3,14 +3,14 @@
 -- Automatically loaded with any Lunar project
 
 -- Basic Functions
-declare function print(message: any): void end
+declare function print(...args: any): void end
 declare function type(value: any): string end
 declare function tonumber(value: any): any end
 declare function tostring(value: any): string end
 declare function error(message: string): void end
-declare function assert(condition: any, message: string): any end
-declare function pcall(func: any): boolean end
-declare function xpcall(func: any, errorHandler: any): boolean end
+declare function assert(condition: any): any end
+declare function pcall(func: any, ...args: any): any end
+declare function xpcall(func: any, errorHandler: any, ...args: any): any end
 
 -- Type Conversion
 declare function pairs(t: any): any end
@@ -31,7 +31,7 @@ declare function rawset(t: any, key: any, value: any): any end
 declare function rawequal(v1: any, v2: any): boolean end
 
 -- Collection Operations
-declare function select(index: number): any end
+declare function select(index: any, ...args: any): any end
 declare function unpack(list: any): any end
 
 -- Global Environment

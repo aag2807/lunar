@@ -1,0 +1,67 @@
+{
+  "name": "lunar-lang",
+  "displayName": "Lunar Language",
+  "description": "Language support for Lunar - a statically-typed superset of Lua",
+  "version": "1.5.0",
+  "publisher": "lunar-lang",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:lunar"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "lunar",
+        "aliases": ["Lunar", "lunar"],
+        "extensions": [".lunar", ".d.lunar"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lunar",
+        "scopeName": "source.lunar",
+        "path": "./syntaxes/lunar.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Lunar",
+      "properties": {
+        "lunar.serverPath": {
+          "type": "string",
+          "default": "lunar-lsp",
+          "description": "Path to the lunar-lsp executable"
+        },
+        "lunar.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the language server"
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^8.1.0"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.75.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aag2807/lunar"
+  },
+  "keywords": [
+    "lunar",
+    "lua",
+    "typed",
+    "language"
+  ]
+}

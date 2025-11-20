@@ -1,0 +1,7 @@
+-- Index file for helpers module
+
+export function helper(): string
+    return "I'm a helper!"
+end
+
+export const HELPER_VERSION: string = "1.0"

@@ -17,12 +17,17 @@ const (
 	PLUS     = "+"
 	MINUS    = "-"
 	BANG     = "!"
-	ASTERISK = "*"
+	ASTERISK  = "*"
 	SLASH     = "/"
+	FLOOR_DIV = "//"
 	MODULO    = "%"
 	HASH      = "#"
-	AMPERSAND = "&" // for intersection types Type1 & Type2
+	AMPERSAND = "&" // for intersection types Type1 & Type2, and bitwise AND
 	AT        = "@" // for decorators @decoratorName
+	CARET     = "^" // for bitwise XOR
+	TILDE     = "~" // for bitwise NOT
+	LEFT_SHIFT  = "<<"
+	RIGHT_SHIFT = ">>"
 
 	//comparison
 	EQ         = "=="

@@ -1,0 +1,44 @@
+-- HTTP client library declarations for Lunar
+-- Usage: import { get, post, request } from "vendor/http"
+-- Uses curl (no external dependencies required)
+
+declare interface HttpResponse {
+    status: number
+    body: string
+    headers: table
+    error: string?
+}
+
+declare interface HttpOptions {
+    headers: table?
+    timeout: number?
+    body: string?
+}
+
+-- Simple GET request
+declare function get(url: string, options: HttpOptions?): HttpResponse end
+
+-- Simple POST request
+declare function post(url: string, body: string?, options: HttpOptions?): HttpResponse end
+
+-- PUT request
+declare function put(url: string, body: string?, options: HttpOptions?): HttpResponse end
+
+-- DELETE request
+declare function delete(url: string, options: HttpOptions?): HttpResponse end
+
+-- HEAD request
+declare function head(url: string, options: HttpOptions?): HttpResponse end
+
+-- PATCH request
+declare function patch(url: string, body: string?, options: HttpOptions?): HttpResponse end
+
+-- Generic request
+declare function request(method: string, url: string, options: HttpOptions?): HttpResponse end
+
+-- JSON helper - sets Content-Type and Accept headers
+declare function json(method: string, url: string, data: any?, options: HttpOptions?): HttpResponse end
+
+-- URL utilities
+declare function encodeURI(str: string): string end
+declare function decodeURI(str: string): string end

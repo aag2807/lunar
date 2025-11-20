@@ -1,0 +1,14 @@
+-- JSON library declarations for Lunar
+-- Usage: import { encode, decode } from "vendor/json"
+
+-- Encode a Lua table to JSON string
+declare function encode(value: any): string end
+
+-- Decode a JSON string to Lua table
+declare function decode(str: string): any end
+
+-- Pretty print JSON with indentation
+declare function pretty(value: any, indent: number?): string end
+
+-- Check if string is valid JSON
+declare function isValid(str: string): boolean end

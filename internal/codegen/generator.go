@@ -19,6 +19,7 @@ type Generator struct {
 	classParents     map[string]string // Track parent class names for super
 	currentClassName string            // Current class being generated
 	exports          []string          // Track exported names for module generation
+	target           string            // Target Lua version: lua51, lua52, lua53, lua54, luajit
 }
 
 // New creates a new code generator
@@ -28,11 +29,39 @@ func New() *Generator {
 		classes:      make(map[string]bool),
 		classParents: make(map[string]string),
 		exports:      make([]string, 0),
+		target:       "lua53",
 	}
+}
+
+// NewWithTarget creates a new code generator with specified target
+func NewWithTarget(target string) *Generator {
+	if target == "" {
+		target = "lua53"
+	}
+	return &Generator{
+		indent:       0,
+		classes:      make(map[string]bool),
+		classParents: make(map[string]string),
+		exports:      make([]string, 0),
+		target:       target,
+	}
+}
+
+// IsLuaJIT returns true if targeting LuaJIT or Lua 5.1
+func (g *Generator) IsLuaJIT() bool {
+	return g.target == "luajit" || g.target == "lua51"
 }
 
 // NewWithSourceMap creates a new code generator with source map support
 func NewWithSourceMap(sourceFile, generatedFile string) *Generator {
+	return NewWithSourceMapAndTarget(sourceFile, generatedFile, "")
+}
+
+// NewWithSourceMapAndTarget creates a new code generator with source map support and target
+func NewWithSourceMapAndTarget(sourceFile, generatedFile string, target string) *Generator {
+	if target == "" {
+		target = "lua53"
+	}
 	return &Generator{
 		indent:           0,
 		sourceMapBuilder: sourcemap.NewBuilder(sourceFile, generatedFile),
@@ -42,6 +71,7 @@ func NewWithSourceMap(sourceFile, generatedFile string) *Generator {
 		classes:          make(map[string]bool),
 		classParents:     make(map[string]string),
 		exports:          make([]string, 0),
+		target:           target,
 	}
 }
 
@@ -1024,6 +1054,20 @@ func (g *Generator) generatePrefixExpression(node *ast.PrefixExpression) string 
 		operator = "not"
 	}
 
+	// Handle bitwise NOT (~) for Lua 5.1/5.2/LuaJIT compatibility
+	if operator == "~" {
+		if g.target == "lua53" || g.target == "lua54" {
+			// Lua 5.3+ supports ~ natively
+			return fmt.Sprintf("~%s", right)
+		} else if g.target == "lua52" {
+			// Lua 5.2 uses bit32 library
+			return fmt.Sprintf("bit32.bnot(%s)", right)
+		} else {
+			// LuaJIT and Lua 5.1 use bit library
+			return fmt.Sprintf("bit.bnot(%s)", right)
+		}
+	}
+
 	// Only add parentheses if the right side is a complex expression
 	if needsParentheses(node.Right) {
 		return fmt.Sprintf("%s (%s)", operator, right)
@@ -1041,6 +1085,44 @@ func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
 	if operator == "??" {
 		// Generate: (function() local __temp = left; if __temp ~= nil then return __temp else return right end end)()
 		return fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp else return %s end end)()", left, right)
+	}
+
+	// Handle integer division for LuaJIT compatibility
+	if operator == "//" {
+		if g.IsLuaJIT() {
+			// LuaJIT doesn't support //, use math.floor(a/b)
+			return fmt.Sprintf("math.floor(%s / %s)", left, right)
+		}
+		// Lua 5.3+ supports // natively
+		return fmt.Sprintf("%s // %s", left, right)
+	}
+
+	// Handle bitwise operators for Lua 5.1/5.2/LuaJIT compatibility
+	bitwiseOp := ""
+	switch operator {
+	case "&":
+		bitwiseOp = "band"
+	case "|":
+		bitwiseOp = "bor"
+	case "^":
+		bitwiseOp = "bxor"
+	case "<<":
+		bitwiseOp = "lshift"
+	case ">>":
+		bitwiseOp = "rshift"
+	}
+
+	if bitwiseOp != "" {
+		if g.target == "lua53" || g.target == "lua54" {
+			// Lua 5.3+ supports bitwise operators natively
+			return fmt.Sprintf("%s %s %s", left, operator, right)
+		} else if g.target == "lua52" {
+			// Lua 5.2 uses bit32 library
+			return fmt.Sprintf("bit32.%s(%s, %s)", bitwiseOp, left, right)
+		} else {
+			// LuaJIT and Lua 5.1 use bit library
+			return fmt.Sprintf("bit.%s(%s, %s)", bitwiseOp, left, right)
+		}
 	}
 
 	// Convert operators to Lua equivalents
@@ -1291,30 +1373,46 @@ func (g *Generator) generateImportStatement(node *ast.ImportStatement) string {
 // Generate is the main entry point for code generation
 // Note: Optimizations disabled by default in v1.0 (enabled in future versions)
 func Generate(statements []ast.Statement) string {
-	return GenerateWithOptions(statements, false)
+	return GenerateWithTarget(statements, "")
+}
+
+// GenerateWithTarget generates Lua code for a specific target
+func GenerateWithTarget(statements []ast.Statement, target string) string {
+	generator := NewWithTarget(target)
+	return generator.Generate(statements)
 }
 
 // GenerateWithOptions generates Lua code with configurable optimization
 func GenerateWithOptions(statements []ast.Statement, optimize bool) string {
+	return GenerateWithOptionsAndTarget(statements, optimize, "")
+}
+
+// GenerateWithOptionsAndTarget generates Lua code with configurable optimization and target
+func GenerateWithOptionsAndTarget(statements []ast.Statement, optimize bool, target string) string {
 	// Run optimizer if enabled
 	if optimize {
 		optimizer := NewOptimizer(true)
 		statements = optimizer.OptimizeStatements(statements)
 	}
 
-	generator := New()
+	generator := NewWithTarget(target)
 	return generator.Generate(statements)
 }
 
 // GenerateWithSourceMap generates Lua code and source map
 func GenerateWithSourceMap(statements []ast.Statement, sourceFile, generatedFile string, optimize bool) (string, *sourcemap.SourceMap) {
+	return GenerateWithSourceMapAndTarget(statements, sourceFile, generatedFile, optimize, "")
+}
+
+// GenerateWithSourceMapAndTarget generates Lua code and source map for a specific target
+func GenerateWithSourceMapAndTarget(statements []ast.Statement, sourceFile, generatedFile string, optimize bool, target string) (string, *sourcemap.SourceMap) {
 	// Run optimizer if enabled
 	if optimize {
 		optimizer := NewOptimizer(true)
 		statements = optimizer.OptimizeStatements(statements)
 	}
 
-	generator := NewWithSourceMap(sourceFile, generatedFile)
+	generator := NewWithSourceMapAndTarget(sourceFile, generatedFile, target)
 	code := generator.Generate(statements)
 	sourceMap := generator.GetSourceMap()
 

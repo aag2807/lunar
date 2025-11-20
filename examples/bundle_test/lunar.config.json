@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "sourceMap": false,
+    "bundle": true,
+    "baseUrl": ".",
+    "paths": {
+      "@utils": "./utils",
+      "@math/*": "./math_*"
+    }
+  },
+  "entry": "main.lunar",
+  "outFile": "dist/bundle.lua"
+}

@@ -178,7 +178,60 @@ print(used())
 // TestPathAliases tests path alias resolution
 // Note: Path aliases work when baseUrl is relative to the project root
 func TestPathAliases(t *testing.T) {
-	t.Skip("Path aliases require more complex setup - skipping for now")
+	tmpDir, err := os.MkdirTemp("", "lunar-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create src directory structure
+	srcDir := filepath.Join(tmpDir, "src")
+	os.MkdirAll(filepath.Join(srcDir, "utils"), 0755)
+
+	// Create files in src/utils/
+	helperFile := filepath.Join(srcDir, "utils", "helper.lunar")
+	os.WriteFile(helperFile, []byte(`
+export function helper(): string
+    return "helper result"
+end
+`), 0644)
+
+	// Create main file that uses path alias
+	mainFile := filepath.Join(tmpDir, "main.lunar")
+	os.WriteFile(mainFile, []byte(`
+import { helper } from "@/utils/helper"
+
+local result: string = helper()
+print(result)
+`), 0644)
+
+	// Create config with path alias
+	// Path aliases map @/* to src/* with baseURL as the project root
+	cfg := &config.Config{
+		CompilerOptions: config.CompilerOptions{
+			BaseURL: ".",
+			Paths: map[string]string{
+				"@/*": "src/*",
+			},
+			TreeShake: false,
+		},
+	}
+
+	// Create bundler with config
+	b := NewWithConfig(mainFile, false, cfg)
+	output, err := b.Bundle()
+
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !strings.Contains(output, "helper result") {
+		t.Errorf("Expected output to contain helper result")
+	}
+
+	if !strings.Contains(output, "function helper()") {
+		t.Errorf("Expected output to contain helper function")
+	}
 }
 
 func TestGetAllFiles(t *testing.T) {

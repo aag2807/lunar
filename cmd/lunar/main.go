@@ -1057,7 +1057,7 @@ func runTests(path string, filter string) error {
 // watchTests watches test files and re-runs tests on changes
 func watchTests(path string, filter string) error {
 	fmt.Println("🔍 Watch mode: Monitoring for changes...")
-	fmt.Println("Press Ctrl+C to exit\n")
+	fmt.Println("Press Ctrl+C to exit")
 
 	// Get initial file timestamps
 	fileTimestamps := make(map[string]time.Time)
@@ -1143,7 +1143,7 @@ func watchTests(path string, filter string) error {
 			for _, file := range changedFiles {
 				fmt.Printf("   - %s\n", file)
 			}
-			fmt.Println("\nRe-running tests...\n")
+			fmt.Println("\nRe-running tests...")
 
 			// Update timestamps
 			fileTimestamps = currentTimestamps

@@ -1,0 +1,68 @@
+-- Testing spread operator for table literals
+
+print("=== Testing Spread Operator for Tables ===")
+print("")
+
+-- Test 1: Spread arrays
+print("Test 1: Spread in arrays")
+local arr1: number[] = {1, 2, 3}
+local arr2: number[] = {4, 5, 6}
+local merged1: number[] = {...arr1, ...arr2}
+print("Merged arrays:", merged1[1], merged1[2], merged1[3], merged1[4], merged1[5], merged1[6])
+
+-- Test 2: Spread arrays with additional elements
+print("")
+print("Test 2: Spread with additional elements")
+local merged2: number[] = {0, ...arr1, 99, ...arr2, 100}
+print("With extras:", merged2[1], merged2[2], merged2[3], merged2[4], merged2[5], merged2[6], merged2[7], merged2[8], merged2[9])
+
+-- Test 3: Spread objects (key-value pairs)
+print("")
+print("Test 3: Spread objects")
+local obj1 = {name = "Alice", age = 30}
+local obj2 = {city = "NYC", country = "USA"}
+local merged3 = {...obj1, ...obj2}
+print("Merged objects - name:", merged3["name"])
+print("Merged objects - age:", merged3["age"])
+print("Merged objects - city:", merged3["city"])
+print("Merged objects - country:", merged3["country"])
+
+-- Test 4: Spread with override
+print("")
+print("Test 4: Spread with override")
+local base = {x = 10, y = 20, z = 30}
+local override = {...base, y = 999, w = 40}
+print("Override - x:", override["x"])
+print("Override - y (should be 999):", override["y"])
+print("Override - z:", override["z"])
+print("Override - w:", override["w"])
+
+-- Test 5: Multiple spreads with explicit keys
+print("")
+print("Test 5: Multiple spreads with explicit keys")
+local part1 = {a = "A", b = "B"}
+local part2 = {c = "C", d = "D"}
+local combined = {...part1, e = "E", ...part2, f = "F"}
+print("Combined - a:", combined["a"])
+print("Combined - b:", combined["b"])
+print("Combined - c:", combined["c"])
+print("Combined - d:", combined["d"])
+print("Combined - e:", combined["e"])
+print("Combined - f:", combined["f"])
+
+-- Test 6: Empty spread
+print("")
+print("Test 6: Empty spread")
+local empty: number[] = {}
+local withEmpty: number[] = {...empty, 1, 2, 3}
+print("With empty spread:", withEmpty[1], withEmpty[2], withEmpty[3])
+
+-- Test 7: Nested spread
+print("")
+print("Test 7: Nested spread")
+local inner: number[] = {5, 6}
+local outer: number[] = {1, 2, ...inner, 7, 8}
+print("Nested:", outer[1], outer[2], outer[3], outer[4], outer[5], outer[6])
+
+print("")
+print("=== All Table Spread Tests Passed ===")

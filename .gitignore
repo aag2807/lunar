@@ -23,3 +23,6 @@
 
 # Generated documentation
 /docs/
+
+# Lunar cache directory (incremental compilation)
+.lunar-cache/

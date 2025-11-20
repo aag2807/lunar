@@ -39,6 +39,7 @@ func (s *Server) handleInitialize(content json.RawMessage) error {
 				ResolveProvider:   false,
 			},
 			ReferencesProvider: true,
+			RenameProvider:     true,
 		},
 	}
 
@@ -245,6 +246,48 @@ func (s *Server) handleReferences(content json.RawMessage, id interface{}) error
 	locations := s.findReferences(doc.Content, word, request.Params.TextDocument.URI, request.Params.Context.IncludeDeclaration)
 
 	return s.sendResponse(id, locations)
+}
+
+// handleRename handles textDocument/rename
+func (s *Server) handleRename(content json.RawMessage, id interface{}) error {
+	var request struct {
+		Params RenameParams `json:"params"`
+	}
+
+	if err := json.Unmarshal(content, &request); err != nil {
+		return s.sendError(id, InvalidParams, err.Error())
+	}
+
+	doc := s.documents.Get(request.Params.TextDocument.URI)
+	if doc == nil {
+		return s.sendResponse(id, nil)
+	}
+
+	word := doc.GetWordAtPosition(request.Params.Position)
+	if word == "" {
+		return s.sendResponse(id, nil)
+	}
+
+	// Find all references to this symbol (including declaration)
+	locations := s.findReferences(doc.Content, word, request.Params.TextDocument.URI, true)
+
+	// Create text edits for all locations
+	edits := make([]TextEdit, len(locations))
+	for i, loc := range locations {
+		edits[i] = TextEdit{
+			Range:   loc.Range,
+			NewText: request.Params.NewName,
+		}
+	}
+
+	// Create workspace edit
+	workspaceEdit := WorkspaceEdit{
+		Changes: map[string][]TextEdit{
+			request.Params.TextDocument.URI: edits,
+		},
+	}
+
+	return s.sendResponse(id, workspaceEdit)
 }
 
 // handleCompletion handles textDocument/completion

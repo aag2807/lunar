@@ -2,6 +2,15 @@
 
 This guide explains how to test the Lunar Language Server Protocol (LSP) implementation with Neovim.
 
+## 📚 Configuration Examples
+
+For comprehensive LSP configuration examples for **all editors**, see:
+
+- **[LSP Configuration Guide](examples/LSP_CONFIG_GUIDE.md)** - Complete guide for Neovim, VSCode, Sublime, Emacs, Helix, and more
+- **[Neovim Configuration](examples/nvim-lsp-config.lua)** - Full Neovim config with 3 different setup options
+- **[VSCode Configuration](examples/vscode-lsp-config.json)** - Settings and extension example
+- **[VSCode Extension](examples/vscode-extension.ts)** - Custom VSCode extension code
+
 ## Prerequisites
 
 - Neovim 0.9.5+ installed ✓

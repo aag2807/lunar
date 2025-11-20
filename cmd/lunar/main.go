@@ -9,6 +9,7 @@ import (
 	"lunar/internal/bundler"
 	"lunar/internal/codegen"
 	"lunar/internal/config"
+	"lunar/internal/docgen"
 	"lunar/internal/formatter"
 	"lunar/internal/lexer"
 	"lunar/internal/linter"
@@ -42,6 +43,8 @@ func main() {
 	runMode := flag.Bool("run", false, "Run the compiled Lua file after compilation")
 	testMode := flag.Bool("test", false, "Run tests in the specified directory")
 	testFilter := flag.String("filter", "", "Run only tests matching this pattern (regex)")
+	docsMode := flag.Bool("docs", false, "Generate documentation for source files")
+	docsOutput := flag.String("docs-output", "", "Output directory for generated docs (default: ./docs)")
 	targetLua := flag.String("target", "", "Target Lua version: lua51, lua52, lua53, lua54, luajit")
 	configFile := flag.String("config", "", "Path to lunar.config.json (auto-detected if not specified)")
 
@@ -104,6 +107,15 @@ func main() {
 	if *testMode {
 		if err := runTests(inputFile, *testFilter); err != nil {
 			fmt.Fprintf(os.Stderr, "Tests failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	// Handle docs mode
+	if *docsMode {
+		if err := generateDocs(inputFile, *docsOutput); err != nil {
+			fmt.Fprintf(os.Stderr, "Documentation generation failed: %v\n", err)
 			os.Exit(1)
 		}
 		os.Exit(0)
@@ -700,6 +712,8 @@ func printHelp() {
 	fmt.Println("  --run               Run the compiled Lua file after compilation")
 	fmt.Println("  --test              Run tests in directory (*_test.lunar files)")
 	fmt.Println("  --filter <pattern>  Run only tests matching pattern (with --test)")
+	fmt.Println("  --docs              Generate documentation for source files")
+	fmt.Println("  --docs-output <dir> Output directory for docs (default: ./docs)")
 	fmt.Println("  --config <file>     Path to lunar.config.json")
 	fmt.Println("  --repl              Start interactive REPL mode")
 	fmt.Println("  --version           Show version information")
@@ -716,6 +730,8 @@ func printHelp() {
 	fmt.Println("  lunar main.lunar --bundle --watch --run")
 	fmt.Println("  lunar --test ./tests")
 	fmt.Println("  lunar --test ./tests --filter \"Math\"")
+	fmt.Println("  lunar --docs ./src")
+	fmt.Println("  lunar --docs ./src --docs-output ./api-docs")
 	fmt.Println("  lunar --repl")
 	fmt.Println()
 	fmt.Println("For more information about the Lunar language:")
@@ -1032,4 +1048,88 @@ func generateTestRunner(testFiles []string, baseDir string) string {
 	sb.WriteString("end\n")
 
 	return sb.String()
+}
+
+// generateDocs generates documentation for Lunar source files
+func generateDocs(path string, outputDir string) error {
+	// Set default output directory
+	if outputDir == "" {
+		outputDir = "./docs"
+	}
+
+	// Check if path is a file or directory
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("failed to access path: %v", err)
+	}
+
+	// Create output directory
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %v", err)
+	}
+
+	var files []string
+	if fileInfo.IsDir() {
+		// Walk directory and find all .lunar files
+		err = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() && strings.HasSuffix(filePath, ".lunar") {
+				files = append(files, filePath)
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("failed to walk directory: %v", err)
+		}
+	} else {
+		// Single file
+		files = append(files, path)
+	}
+
+	if len(files) == 0 {
+		return fmt.Errorf("no .lunar files found in %s", path)
+	}
+
+	fmt.Printf("Generating documentation for %d file(s)...\n", len(files))
+
+	// Generate documentation for each file
+	generator := docgen.New()
+	for _, file := range files {
+		// Read source
+		source, err := ioutil.ReadFile(file)
+		if err != nil {
+			return fmt.Errorf("failed to read file %s: %v", file, err)
+		}
+
+		// Generate documentation
+		docs, err := generator.Generate(filepath.Base(file), string(source))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to generate docs for %s: %v\n", file, err)
+			continue
+		}
+
+		// Determine output file path
+		relPath, err := filepath.Rel(path, file)
+		if err != nil {
+			relPath = filepath.Base(file)
+		}
+		outputFile := filepath.Join(outputDir, strings.TrimSuffix(relPath, ".lunar")+".md")
+
+		// Create subdirectories if needed
+		if err := os.MkdirAll(filepath.Dir(outputFile), 0755); err != nil {
+			return fmt.Errorf("failed to create output directory: %v", err)
+		}
+
+		// Write documentation
+		if err := ioutil.WriteFile(outputFile, []byte(docs), 0644); err != nil {
+			return fmt.Errorf("failed to write documentation to %s: %v", outputFile, err)
+		}
+
+		fmt.Printf("  ✓ %s → %s\n", file, outputFile)
+	}
+
+	fmt.Printf("\n✓ Documentation generated in %s\n", outputDir)
+	return nil
 }

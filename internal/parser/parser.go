@@ -742,29 +742,61 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 		Values:     []ast.Expression{},
 	}
 
-	// Parse first identifier (name) - allows context-aware keywords
-	if !p.expectPeekIdentOrContextual() {
-		return nil
-	}
-	decl.Names = append(decl.Names, p.parseIdentifierOrContextual())
+	// Check for tuple destructuring: local (a, b) = func()
+	if p.peekTokenIs(lexer.LPAREN) {
+		decl.IsTupleDestructuring = true
+		p.nextToken() // consume local/const
+		p.nextToken() // consume (, now on first identifier
 
-	// Parse type annotation if present
-	if p.peekTokenIs(lexer.COLON) {
-		p.nextToken() // consume :
-		p.nextToken() // move to type
-		decl.Types = append(decl.Types, p.parseType())
-	}
-
-	// Parse additional variables after commas
-	for p.peekTokenIs(lexer.COMMA) {
-		p.nextToken() // consume previous token/type
-		p.nextToken() // consume comma, now on next identifier
-
+		// Parse first identifier
 		if !p.curTokenIs(lexer.IDENT) {
-			p.addError(fmt.Sprintf("expected identifier after comma, got %s", p.curToken.Type), p.curToken)
+			p.addError("expected identifier in tuple destructuring", p.curToken)
 			return nil
 		}
+		decl.Names = append(decl.Names, p.parseIdentifierOrContextual())
 
+		// Parse type annotation if present
+		if p.peekTokenIs(lexer.COLON) {
+			p.nextToken() // consume identifier
+			p.nextToken() // consume :
+			decl.Types = append(decl.Types, p.parseType())
+		} else {
+			decl.Types = append(decl.Types, nil)
+		}
+
+		// Parse additional variables in tuple
+		for p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // consume previous token/type
+			p.nextToken() // consume comma, now on next identifier
+
+			if !p.curTokenIs(lexer.IDENT) {
+				p.addError(fmt.Sprintf("expected identifier after comma in tuple, got %s", p.curToken.Type), p.curToken)
+				return nil
+			}
+
+			decl.Names = append(decl.Names, p.parseIdentifierOrContextual())
+
+			// Parse type annotation if present
+			if p.peekTokenIs(lexer.COLON) {
+				p.nextToken() // consume identifier
+				p.nextToken() // consume :
+				decl.Types = append(decl.Types, p.parseType())
+			} else {
+				decl.Types = append(decl.Types, nil)
+			}
+		}
+
+		// Expect closing paren
+		if !p.expectPeek(lexer.RPAREN) {
+			p.addError("expected ) after tuple destructuring", p.curToken)
+			return nil
+		}
+	} else {
+		// Regular variable declaration: local a, b = 1, 2
+		// Parse first identifier (name) - allows context-aware keywords
+		if !p.expectPeekIdentOrContextual() {
+			return nil
+		}
 		decl.Names = append(decl.Names, p.parseIdentifierOrContextual())
 
 		// Parse type annotation if present
@@ -772,9 +804,29 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 			p.nextToken() // consume :
 			p.nextToken() // move to type
 			decl.Types = append(decl.Types, p.parseType())
-		} else {
-			// No type for this variable
-			decl.Types = append(decl.Types, nil)
+		}
+
+		// Parse additional variables after commas
+		for p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // consume previous token/type
+			p.nextToken() // consume comma, now on next identifier
+
+			if !p.curTokenIs(lexer.IDENT) {
+				p.addError(fmt.Sprintf("expected identifier after comma, got %s", p.curToken.Type), p.curToken)
+				return nil
+			}
+
+			decl.Names = append(decl.Names, p.parseIdentifierOrContextual())
+
+			// Parse type annotation if present
+			if p.peekTokenIs(lexer.COLON) {
+				p.nextToken() // consume :
+				p.nextToken() // move to type
+				decl.Types = append(decl.Types, p.parseType())
+			} else {
+				// No type for this variable
+				decl.Types = append(decl.Types, nil)
+			}
 		}
 	}
 

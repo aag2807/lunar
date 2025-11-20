@@ -3831,11 +3831,25 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 	case *ast.FunctionDeclaration:
 		// Register the function signature without checking the body
 		params := make([]Type, len(decl.Parameters))
+		hasRestParam := false
 		for i, param := range decl.Parameters {
 			if param.Type != nil {
-				params[i] = c.resolveTypeExpression(param.Type)
+				paramType := c.resolveTypeExpression(param.Type)
+				// If this is a rest parameter, wrap in array type if not already
+				if param.IsRest {
+					hasRestParam = true
+					if _, ok := paramType.(*ArrayType); !ok {
+						paramType = &ArrayType{ElementType: paramType}
+					}
+				}
+				params[i] = paramType
 			} else {
-				params[i] = Any
+				if param.IsRest {
+					hasRestParam = true
+					params[i] = &ArrayType{ElementType: Any}
+				} else {
+					params[i] = Any
+				}
 			}
 		}
 
@@ -3845,9 +3859,10 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 		}
 
 		funcType := &FunctionType{
-			Parameters:    params,
-			ReturnType:    returnType,
-			GenericParams: []string{}, // Ambient function declarations are not generic
+			Parameters:       params,
+			ReturnType:       returnType,
+			GenericParams:    []string{}, // Ambient function declarations are not generic
+			HasRestParameter: hasRestParam,
 		}
 
 		// Check if function with same name already exists (for method overloading)

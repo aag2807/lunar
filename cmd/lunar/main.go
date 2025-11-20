@@ -39,6 +39,7 @@ func main() {
 	replMode := flag.Bool("repl", false, "Start interactive REPL mode")
 	watchMode := flag.Bool("watch", false, "Watch files for changes and recompile")
 	watchInterval := flag.Int("watch-interval", 500, "Watch interval in milliseconds")
+	watchClear := flag.Bool("watch-clear", false, "Clear console before each rebuild in watch mode")
 	formatMode := flag.Bool("format", false, "Format the source file")
 	formatInPlace := flag.Bool("format-write", false, "Format and write back to file")
 	lintMode := flag.Bool("lint", false, "Run linter to check for issues")
@@ -56,6 +57,7 @@ func main() {
 	// Optimization flags
 	minifyMode := flag.Bool("minify", false, "Minify output (remove whitespace and comments)")
 	optimizeMode := flag.Bool("optimize", false, "Enable optimizations (constant folding, dead code elimination)")
+	buildMode := flag.String("mode", "", "Build mode: 'dev' (fast, debug info) or 'production' (optimized, minified)")
 	noCache := flag.Bool("no-cache", false, "Disable incremental compilation cache")
 	clearCache := flag.Bool("clear-cache", false, "Clear compilation cache and exit")
 	cacheStats := flag.Bool("cache-stats", false, "Show cache statistics and exit")
@@ -98,6 +100,38 @@ func main() {
 	if *replMode {
 		runREPL()
 		os.Exit(0)
+	}
+
+	// Apply build mode presets (only if flags weren't explicitly set)
+	if *buildMode != "" {
+		switch *buildMode {
+		case "dev", "development":
+			// Development mode: fast builds, debugging support
+			if !*optimizeMode {
+				// Keep optimize off for dev mode
+			}
+			if !*minifyMode {
+				// Keep minify off for dev mode
+			}
+			if !*sourceMap && !*noCache {
+				// Enable source maps in dev mode if not explicitly disabled
+				*sourceMap = true
+			}
+			fmt.Println("Build mode: Development (fast builds, source maps enabled)")
+		case "prod", "production":
+			// Production mode: optimized, minified, no debug info
+			if !*optimizeMode {
+				*optimizeMode = true
+			}
+			if !*minifyMode {
+				*minifyMode = true
+			}
+			// Note: Don't disable source-map if user explicitly enabled it
+			fmt.Println("Build mode: Production (optimized, minified)")
+		default:
+			fmt.Fprintf(os.Stderr, "Error: Unknown build mode '%s'. Use 'dev' or 'production'\n", *buildMode)
+			os.Exit(1)
+		}
 	}
 
 	// Get input file
@@ -216,7 +250,7 @@ func main() {
 	// Bundle mode
 	if *bundleMode || cfg.CompilerOptions.Bundle {
 		if *watchMode {
-			runBundleWatchMode(inputFile, output, !*noTypeCheck, *runMode, *watchInterval, cfg)
+			runBundleWatchMode(inputFile, output, !*noTypeCheck, *runMode, *watchInterval, *watchClear, cfg)
 		} else {
 			if err := bundleFile(inputFile, output, !*noTypeCheck, cfg); err != nil {
 				fmt.Fprintf(os.Stderr, "Bundle failed:\n%v\n", err)
@@ -238,7 +272,7 @@ func main() {
 	// Watch mode or single compilation
 	if *watchMode {
 		useCache := !*noCache
-		runWatchMode(inputFile, output, !*noTypeCheck, *sourceMap, *watchInterval, *runMode, cfg.CompilerOptions.Target, useCache, *optimizeMode, *minifyMode)
+		runWatchMode(inputFile, output, !*noTypeCheck, *sourceMap, *watchInterval, *runMode, cfg.CompilerOptions.Target, useCache, *optimizeMode, *minifyMode, *watchClear)
 	} else {
 		// Compile the file
 		useCache := !*noCache
@@ -308,7 +342,7 @@ func runLuaFile(luaFile string) error {
 }
 
 // runBundleWatchMode watches files and rebundles/reruns on changes
-func runBundleWatchMode(inputFile, outputFile string, typeCheck, runAfter bool, intervalMs int, cfg *config.Config) {
+func runBundleWatchMode(inputFile, outputFile string, typeCheck, runAfter bool, intervalMs int, clearConsole bool, cfg *config.Config) {
 	fmt.Printf("Watching %s and dependencies for changes (Ctrl+C to stop)\n", inputFile)
 
 	// Track modification times for all files
@@ -342,9 +376,13 @@ func runBundleWatchMode(inputFile, outputFile string, typeCheck, runAfter bool, 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Watch loop
+	// Watch loop with smart debouncing
 	ticker := time.NewTicker(time.Duration(intervalMs) * time.Millisecond)
 	defer ticker.Stop()
+
+	var debounceTimer *time.Timer
+	var pendingCompile bool
+	var lastChangedFile string
 
 	for {
 		select {
@@ -368,34 +406,49 @@ func runBundleWatchMode(inputFile, outputFile string, typeCheck, runAfter bool, 
 			}
 
 			if changed {
-				// Get relative path for cleaner output
-				relPath, err := filepath.Rel(filepath.Dir(inputFile), changedFile)
-				if err != nil {
-					relPath = changedFile
-				}
-				fmt.Printf("[%s] %s changed, rebundling...\n", time.Now().Format("15:04:05"), relPath)
+				pendingCompile = true
+				lastChangedFile = changedFile
 
-				files, err := bundleFileWithDeps(inputFile, outputFile, typeCheck, cfg)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "[%s] Bundle failed:\n%v\n", time.Now().Format("15:04:05"), err)
-				} else {
-					// Update watched files list (dependencies may have changed)
-					watchedFiles = files
-					// Update mod times for new files
-					for _, file := range watchedFiles {
-						if _, exists := fileModTimes[file]; !exists {
-							fileModTimes[file] = getFileModTime(file)
+				// Reset debounce timer - wait for files to stabilize
+				if debounceTimer != nil {
+					debounceTimer.Stop()
+				}
+				debounceTimer = time.AfterFunc(200*time.Millisecond, func() {
+					if pendingCompile {
+						pendingCompile = false
+						if clearConsole {
+							clearScreen()
+						}
+						// Get relative path for cleaner output
+						relPath, err := filepath.Rel(filepath.Dir(inputFile), lastChangedFile)
+						if err != nil {
+							relPath = lastChangedFile
+						}
+						fmt.Printf("[%s] %s changed, rebundling...\n", time.Now().Format("15:04:05"), relPath)
+
+						files, err := bundleFileWithDeps(inputFile, outputFile, typeCheck, cfg)
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "[%s] Bundle failed:\n%v\n", time.Now().Format("15:04:05"), err)
+						} else {
+							// Update watched files list (dependencies may have changed)
+							watchedFiles = files
+							// Update mod times for new files
+							for _, file := range watchedFiles {
+								if _, exists := fileModTimes[file]; !exists {
+									fileModTimes[file] = getFileModTime(file)
+								}
+							}
+
+							fmt.Printf("[%s] Successfully bundled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
+							if runAfter {
+								fmt.Printf("[%s] Running %s...\n", time.Now().Format("15:04:05"), outputFile)
+								if err := runLuaFile(outputFile); err != nil {
+									fmt.Fprintf(os.Stderr, "[%s] Run failed: %v\n", time.Now().Format("15:04:05"), err)
+								}
+							}
 						}
 					}
-
-					fmt.Printf("[%s] Successfully bundled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
-					if runAfter {
-						fmt.Printf("[%s] Running %s...\n", time.Now().Format("15:04:05"), outputFile)
-						if err := runLuaFile(outputFile); err != nil {
-							fmt.Fprintf(os.Stderr, "[%s] Run failed: %v\n", time.Now().Format("15:04:05"), err)
-						}
-					}
-				}
+				})
 			}
 		}
 	}
@@ -734,7 +787,7 @@ func lintFile(inputFile string) error {
 }
 
 // runWatchMode watches files for changes and recompiles automatically
-func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap bool, intervalMs int, runAfter bool, target string, useCache, useOptimize, useMinify bool) {
+func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap bool, intervalMs int, runAfter bool, target string, useCache, useOptimize, useMinify, clearConsole bool) {
 	fmt.Printf("Watching %s for changes (Ctrl+C to stop)\n", inputFile)
 
 	// Get initial modification time
@@ -757,9 +810,12 @@ func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap boo
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Watch loop
+	// Watch loop with smart debouncing
 	ticker := time.NewTicker(time.Duration(intervalMs) * time.Millisecond)
 	defer ticker.Stop()
+
+	var debounceTimer *time.Timer
+	var pendingCompile bool
 
 	for {
 		select {
@@ -770,18 +826,32 @@ func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap boo
 			currentModTime := getFileModTime(inputFile)
 			if !currentModTime.Equal(lastModTime) {
 				lastModTime = currentModTime
-				fmt.Printf("[%s] File changed, recompiling...\n", time.Now().Format("15:04:05"))
-				if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target, useCache, useOptimize, useMinify); err != nil {
-					fmt.Fprintf(os.Stderr, "[%s] Compilation failed:\n%v\n", time.Now().Format("15:04:05"), err)
-				} else {
-					fmt.Printf("[%s] Successfully compiled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
-					if runAfter {
-						fmt.Printf("[%s] Running %s...\n", time.Now().Format("15:04:05"), outputFile)
-						if err := runLuaFile(outputFile); err != nil {
-							fmt.Fprintf(os.Stderr, "[%s] Run failed: %v\n", time.Now().Format("15:04:05"), err)
+				pendingCompile = true
+
+				// Reset debounce timer - wait for file to stabilize
+				if debounceTimer != nil {
+					debounceTimer.Stop()
+				}
+				debounceTimer = time.AfterFunc(200*time.Millisecond, func() {
+					if pendingCompile {
+						pendingCompile = false
+						if clearConsole {
+							clearScreen()
+						}
+						fmt.Printf("[%s] File changed, recompiling...\n", time.Now().Format("15:04:05"))
+						if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target, useCache, useOptimize, useMinify); err != nil {
+							fmt.Fprintf(os.Stderr, "[%s] Compilation failed:\n%v\n", time.Now().Format("15:04:05"), err)
+						} else {
+							fmt.Printf("[%s] Successfully compiled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
+							if runAfter {
+								fmt.Printf("[%s] Running %s...\n", time.Now().Format("15:04:05"), outputFile)
+								if err := runLuaFile(outputFile); err != nil {
+									fmt.Fprintf(os.Stderr, "[%s] Run failed: %v\n", time.Now().Format("15:04:05"), err)
+								}
+							}
 						}
 					}
-				}
+				})
 			}
 		}
 	}
@@ -794,6 +864,13 @@ func getFileModTime(filename string) time.Time {
 		return time.Time{}
 	}
 	return info.ModTime()
+}
+
+// clearScreen clears the console/terminal screen
+func clearScreen() {
+	// ANSI escape codes work on Unix/Linux/Mac and Windows 10+
+	fmt.Print("\033[H\033[2J")
+	fmt.Print("\033[3J") // Clear scrollback buffer on some terminals
 }
 
 // printHelp prints help information
@@ -811,10 +888,12 @@ func printHelp() {
 	fmt.Println("  --target <version>  Target Lua version: lua51, lua52, lua53, lua54, luajit")
 	fmt.Println("  --watch             Watch files for changes and recompile")
 	fmt.Println("  --watch-interval    Watch interval in ms (default: 500)")
+	fmt.Println("  --watch-clear       Clear console before each rebuild in watch mode")
 	fmt.Println("  --format            Format source code and print to stdout")
 	fmt.Println("  --format-write      Format source code and write back to file")
 	fmt.Println()
 	fmt.Println("Optimization Options:")
+	fmt.Println("  --mode <mode>       Build mode: 'dev' (fast, debug info) or 'production' (optimized)")
 	fmt.Println("  --optimize          Enable AST optimizations (constant folding, dead code elimination)")
 	fmt.Println("  --minify            Minify output (remove whitespace and comments)")
 	fmt.Println("  --no-cache          Disable incremental compilation cache")

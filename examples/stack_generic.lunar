@@ -16,7 +16,14 @@ class Stack<T>
     end
 end
 
--- Generic function
-function map<T, U>(item: T): U
-    return item
+-- Generic function example - transforms T to U using a mapper function
+function map<T, U>(item: T, mapper: (val: T) => U): U
+    return mapper(item)
 end
+
+-- Example usage with a simple transformation
+local numberToString: (n: number) => string = function(n: number): string
+    return tostring(n)
+end
+
+local result: string = map<number, string>(42, numberToString)

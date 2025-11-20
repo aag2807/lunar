@@ -18,27 +18,30 @@ local result: string = table.concat(numbers, ", ")
 
 print("Numbers: " .. result)
 
--- Context-aware keywords can even be used as variable names!
+-- Context-aware keywords can even be used as LOCAL variable names!
+-- (Note: can't shadow global stdlib modules, but locals are fine)
 local myString: string = "I'm a string variable"
-local myTable: number = 42
+local myTable: table<number, string> = { [1] = "value" }
 
--- And in function names
-function string(): void
-    print("Function named 'string'")
+-- You can use them in custom function names (not shadowing globals)
+function processString(input: string): string
+    return "Processed: " .. input
 end
 
-function table(x: number): number
-    local two: number = 2
-    return x * two
+function createTable(): table<number, number>
+    local result: table<number, number> = {}
+    return result
 end
 
 -- Call our custom functions
-string()
-local doubled: number = table(21)
-print("Doubled: " .. tostring(doubled))
+local processed: string = processString("data")
+print(processed)
+
+local newTable: table<number, number> = createTable()
 
 -- This demonstrates the power of context-aware keywords:
 -- - In type annotations (: string), 'string' refers to the primitive type
 -- - In expressions (string.len), 'string' refers to the stdlib module
--- - As identifiers (function string()), it can be used as a name
--- All three contexts work seamlessly together!
+-- - As local variable names, they work just fine
+-- - Can use them in function parameter/return types freely
+-- All contexts work seamlessly together!

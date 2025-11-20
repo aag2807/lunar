@@ -52,7 +52,7 @@ end
 ### Developer Experience
 ✅ **Bundler** - Bundle all dependencies into a single file with `--bundle`
 ✅ **Run Mode** - Compile and execute with `--run`
-✅ **Test Runner** - Discover and run tests with `--test`
+✅ **Modern Test Runner** - Colored output, test filtering, timing, pass/fail statistics
 ✅ **Watch Mode** - Auto-recompile on file changes with `--watch`
 ✅ **REPL** - Interactive mode for rapid prototyping with `--repl`
 ✅ **Language Server Protocol (LSP)** - Full IDE integration with diagnostics, hover, completions, go-to-definition
@@ -188,6 +188,9 @@ lunar --run input.lunar
 
 # Run tests in a directory
 lunar --test ./tests
+
+# Run tests with filtering
+lunar --test ./tests --filter "Math"
 
 # Format code (print to stdout)
 lunar --format input.lunar
@@ -642,15 +645,20 @@ lunar/
 - [x] Advanced type features (mapped, conditional, template literal types)
 - [x] VS Code extension and Neovim plugin
 
-### v2.0 (Future)
-- [ ] Null coalescing assignment (`??=`)
-- [ ] Better test runner (colored output, filtering, coverage)
+### v1.6 (In Progress) 🚧
+- [x] Better test runner with colored output
+- [x] Test filtering by pattern (`--filter`)
+- [x] Test timing and statistics
 - [ ] More LSP features (find references, rename, code actions, inlay hints)
 - [ ] Documentation generator (`--docs` flag)
+
+### v2.0 (Future)
+- [ ] Null coalescing assignment (`??=`)
 - [ ] Package manager integration
 - [ ] Incremental compilation
 - [ ] Performance optimizations (dead code elimination, minification)
 - [ ] REPL improvements (LSP-powered auto-completion, persistent history)
+- [ ] Test coverage reporting
 
 ## Configuration
 

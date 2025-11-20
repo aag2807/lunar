@@ -41,6 +41,7 @@ func main() {
 	bundleMode := flag.Bool("bundle", false, "Bundle all dependencies into a single file")
 	runMode := flag.Bool("run", false, "Run the compiled Lua file after compilation")
 	testMode := flag.Bool("test", false, "Run tests in the specified directory")
+	testFilter := flag.String("filter", "", "Run only tests matching this pattern (regex)")
 	targetLua := flag.String("target", "", "Target Lua version: lua51, lua52, lua53, lua54, luajit")
 	configFile := flag.String("config", "", "Path to lunar.config.json (auto-detected if not specified)")
 
@@ -101,7 +102,7 @@ func main() {
 
 	// Handle test mode
 	if *testMode {
-		if err := runTests(inputFile); err != nil {
+		if err := runTests(inputFile, *testFilter); err != nil {
 			fmt.Fprintf(os.Stderr, "Tests failed: %v\n", err)
 			os.Exit(1)
 		}
@@ -698,6 +699,7 @@ func printHelp() {
 	fmt.Println("  --bundle            Bundle all dependencies into a single file")
 	fmt.Println("  --run               Run the compiled Lua file after compilation")
 	fmt.Println("  --test              Run tests in directory (*_test.lunar files)")
+	fmt.Println("  --filter <pattern>  Run only tests matching pattern (with --test)")
 	fmt.Println("  --config <file>     Path to lunar.config.json")
 	fmt.Println("  --repl              Start interactive REPL mode")
 	fmt.Println("  --version           Show version information")
@@ -713,6 +715,7 @@ func printHelp() {
 	fmt.Println("  lunar main.lunar --bundle --run")
 	fmt.Println("  lunar main.lunar --bundle --watch --run")
 	fmt.Println("  lunar --test ./tests")
+	fmt.Println("  lunar --test ./tests --filter \"Math\"")
 	fmt.Println("  lunar --repl")
 	fmt.Println()
 	fmt.Println("For more information about the Lunar language:")
@@ -862,7 +865,7 @@ func printREPLHelp() {
 }
 
 // runTests discovers and runs all test files in a directory
-func runTests(path string) error {
+func runTests(path string, filter string) error {
 	// Check if path is a directory or file
 	info, err := os.Stat(path)
 	if err != nil {
@@ -888,7 +891,28 @@ func runTests(path string) error {
 		return nil
 	}
 
-	fmt.Printf("Found %d test file(s):\n", len(testFiles))
+	// Apply filter if specified
+	if filter != "" {
+		filteredFiles := []string{}
+		for _, f := range testFiles {
+			relPath, _ := filepath.Rel(testDir, f)
+			if strings.Contains(strings.ToLower(relPath), strings.ToLower(filter)) {
+				filteredFiles = append(filteredFiles, f)
+			}
+		}
+		testFiles = filteredFiles
+
+		if len(testFiles) == 0 {
+			fmt.Printf("No test files match filter: %s\n", filter)
+			return nil
+		}
+	}
+
+	fmt.Printf("Found %d test file(s)", len(testFiles))
+	if filter != "" {
+		fmt.Printf(" (filtered by: %s)", filter)
+	}
+	fmt.Println(":")
 	for _, f := range testFiles {
 		relPath, _ := filepath.Rel(testDir, f)
 		fmt.Printf("  - %s\n", relPath)
@@ -919,17 +943,26 @@ func runTests(path string) error {
 	defer os.Remove(outputFile)
 
 	// Run the tests
-	fmt.Println("Running tests...")
-	fmt.Println(strings.Repeat("-", 50))
+	// Try lua5.4, lua5.3, lua5.1, luajit, then lua
+	luaCommands := []string{"lua5.4", "lua5.3", "lua5.1", "luajit", "lua"}
+	var cmd *exec.Cmd
+	for _, luaCmd := range luaCommands {
+		if _, err := exec.LookPath(luaCmd); err == nil {
+			// Pass just the filename since we're running from testDir
+			cmd = exec.Command(luaCmd, "__test_runner__.lua")
+			break
+		}
+	}
 
-	cmd := exec.Command("lua", outputFile)
+	if cmd == nil {
+		return fmt.Errorf("no Lua interpreter found. Please install lua")
+	}
+
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Dir = testDir
 
 	err = cmd.Run()
-
-	fmt.Println(strings.Repeat("-", 50))
 
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -938,7 +971,6 @@ func runTests(path string) error {
 		return fmt.Errorf("failed to run tests: %w", err)
 	}
 
-	fmt.Println("All tests passed!")
 	return nil
 }
 
@@ -977,7 +1009,7 @@ func generateTestRunner(testFiles []string, baseDir string) string {
 	var sb strings.Builder
 
 	sb.WriteString("-- Auto-generated test runner\n")
-	sb.WriteString("import { runTests } from \"vendor/testing\"\n\n")
+	sb.WriteString("import { runTests, printResults } from \"vendor/testing\"\n\n")
 
 	// Import each test file (wildcard import to execute the file)
 	for _, testFile := range testFiles {
@@ -989,8 +1021,15 @@ func generateTestRunner(testFiles []string, baseDir string) string {
 		sb.WriteString(fmt.Sprintf("import * from \"%s\"\n", importPath))
 	}
 
-	sb.WriteString("\n-- Run all tests\n")
-	sb.WriteString("runTests()\n")
+	sb.WriteString("\n-- Run all tests and print results\n")
+	sb.WriteString("local results: any = runTests()\n")
+	sb.WriteString("printResults(results)\n\n")
+
+	// Exit with appropriate code
+	sb.WriteString("-- Exit with appropriate code\n")
+	sb.WriteString("if results.failed > 0 then\n")
+	sb.WriteString("    os.exit(1)\n")
+	sb.WriteString("end\n")
 
 	return sb.String()
 }

@@ -58,7 +58,8 @@ end
 
 ### Lua Targets
 ✅ **Multi-Target Support** - Compile for Lua 5.1, 5.2, 5.3, 5.4, or LuaJIT
-✅ **Automatic Compatibility** - Integer division (`//`) converts to `math.floor()` for older Lua
+✅ **Automatic Compatibility** - Integer division (`//`) and bitwise ops auto-convert per target
+✅ **Bitwise Operators** - `&`, `|`, `^`, `~`, `<<`, `>>` work across all Lua versions
 ✅ **Tree Shaking** - Remove unused exports from bundles
 
 ### Lua Compatibility
@@ -314,6 +315,29 @@ print(person.name)  -- "Alice" (public)
 -- person.id = 456  -- Error: cannot assign to readonly property
 ```
 
+### Bitwise Operations (Multi-Target)
+
+```lunar
+-- Bitwise operators work across all Lua versions!
+local flags: number = 0x0F  -- 0b00001111
+
+-- Bitwise AND, OR, XOR
+local masked: number = flags & 0x0C     -- 0b00001100
+local combined: number = flags | 0x30   -- 0b00111111
+local flipped: number = flags ^ 0xFF    -- 0b11110000
+
+-- Bitwise NOT
+local inverted: number = ~flags         -- 0b11110000
+
+-- Bit shifts
+local shifted_left: number = flags << 2 -- 0b00111100
+local shifted_right: number = flags >> 2 -- 0b00000011
+
+-- Compiles to native operators on Lua 5.3/5.4
+-- Auto-converts to bit32.* on Lua 5.2
+-- Auto-converts to bit.* on LuaJIT/Lua 5.1
+```
+
 ### Bundling Multiple Files
 
 ```lunar
@@ -524,13 +548,13 @@ lunar/
 - [x] Built-in vendor libraries (testing, json, http)
 - [x] Test runner (`--test` for discovering and running tests)
 - [x] Multi-target support (`--target lua51/lua52/lua53/lua54/luajit`)
-- [x] LuaJIT/Lua 5.1 compatibility (auto-convert `//` to `math.floor`)
+- [x] Integer division compatibility (auto-convert `//` to `math.floor`)
+- [x] Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`) with target-specific conversion
 - [x] Variadic function support in type system
 - [x] VS Code extension
 
 ### v2.0 (Future)
 - [ ] Optional parameters (`param?: type`)
-- [ ] Bitwise operators for Lua 5.1/LuaJIT
 - [ ] Package manager integration
 - [ ] Incremental compilation
 - [ ] More LSP features (find references, rename, code actions)

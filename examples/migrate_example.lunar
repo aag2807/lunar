@@ -1,0 +1,39 @@
+local name: string = "Alice"
+local age: number = 30
+local isActive: boolean = true
+local items: array<number> = {1, 2, 3, 4, 5}
+function greet(person): string
+	return ("Hello, " .. person)
+end
+function add(a, b): number
+	return (a + b)
+end
+function processData(data)
+	local result = {}
+	for i, value in ipairs(data) do
+	result[i] = (value * 2)
+end
+	return result
+end
+function checkAge(person_age)
+	if (person_age >= 18) then
+	return "adult"
+else
+	return "minor"
+end
+end
+function sum(numbers)
+	local total = 0
+	for i = 1, (#numbers) do
+	total = (total + numbers[i])
+end
+	return total
+end
+function createPerson(name, age): table<string, any>
+	return {age = age, greet = function()     print(("Hello, I'm " .. name)) end, name = name}
+end
+print(greet(name))
+print("Age check:", checkAge(age))
+print("Sum:", sum(items))
+local person = createPerson("Bob", 25)
+person.greet()

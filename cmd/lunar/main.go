@@ -15,6 +15,7 @@ import (
 	"lunar/internal/lexer"
 	"lunar/internal/linter"
 	"lunar/internal/luarocks"
+	"lunar/internal/migrate"
 	"lunar/internal/minify"
 	"lunar/internal/optimizer"
 	"lunar/internal/parser"
@@ -72,6 +73,12 @@ func main() {
 	rocksInit := flag.Bool("rocks-init", false, "Initialize lunarocks.json config file")
 	rocksInstallDeps := flag.Bool("rocks-deps", false, "Install dependencies from lunarocks.json")
 
+	// Migration tool flags
+	migrateFile := flag.String("migrate", "", "Migrate Lua file to Lunar")
+	migrateNoTypes := flag.Bool("migrate-no-types", false, "Don't add type annotations during migration")
+	migrateUseConst := flag.Bool("migrate-const", true, "Use const for immutable variables")
+	migrateOutput := flag.String("migrate-output", "", "Output file for migrated code (default: <input>.lunar)")
+
 	flag.Parse()
 
 	// Handle cache commands first
@@ -97,6 +104,12 @@ func main() {
 	// Handle LuaRocks commands
 	if *rocksInstall != "" || *rocksRemove != "" || *rocksList || *rocksSearch != "" || *rocksGenTypes != "" || *rocksInit || *rocksInstallDeps {
 		handleLuaRocksCommands(rocksInstall, rocksRemove, rocksList, rocksSearch, rocksGenTypes, rocksInit, rocksInstallDeps)
+		os.Exit(0)
+	}
+
+	// Handle migration command
+	if *migrateFile != "" {
+		handleMigration(*migrateFile, *migrateOutput, *migrateNoTypes, *migrateUseConst)
 		os.Exit(0)
 	}
 
@@ -937,6 +950,12 @@ func printHelp() {
 	fmt.Println("  --rocks-init            Initialize lunarocks.json config file")
 	fmt.Println("  --rocks-deps            Install dependencies from lunarocks.json")
 	fmt.Println()
+	fmt.Println("Migration Tool:")
+	fmt.Println("  --migrate <file>        Migrate Lua file to Lunar with type annotations")
+	fmt.Println("  --migrate-output <file> Specify output file (default: <input>.lunar)")
+	fmt.Println("  --migrate-no-types      Don't add type annotations")
+	fmt.Println("  --migrate-const         Use const for immutable variables (default: true)")
+	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  lunar main.lunar")
 	fmt.Println("  lunar main.lunar -o output.lua")
@@ -1743,4 +1762,61 @@ func handleLuaRocksCommands(install, remove *string, list *bool, search, genType
 		}
 		return
 	}
+}
+
+// handleMigration handles the Lua to Lunar migration process
+func handleMigration(inputFile, outputFile string, noTypes, useConst bool) {
+	// Read input file
+	source, err := ioutil.ReadFile(inputFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Configure migration options
+	options := migrate.Options{
+		AddTypes:           !noTypes,
+		UseConst:           useConst,
+		GenerateInterfaces: true,
+		PreserveComments:   true,
+		Modernize:          true,
+	}
+
+	// Create migrator
+	migrator := migrate.New(options)
+
+	// Migrate code
+	fmt.Printf("Migrating %s to Lunar...\n", inputFile)
+	lunarCode, err := migrator.Migrate(string(source))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Migration failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Determine output file
+	output := outputFile
+	if output == "" {
+		// Replace .lua extension with .lunar or add .lunar
+		if strings.HasSuffix(inputFile, ".lua") {
+			output = strings.TrimSuffix(inputFile, ".lua") + ".lunar"
+		} else {
+			output = inputFile + ".lunar"
+		}
+	}
+
+	// Write output
+	if err := ioutil.WriteFile(output, []byte(lunarCode), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing output: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✓ Successfully migrated to %s\n", output)
+
+	// Print summary
+	fmt.Println("\nMigration Summary:")
+	fmt.Printf("  Input:  %s\n", inputFile)
+	fmt.Printf("  Output: %s\n", output)
+	fmt.Printf("  Type annotations: %v\n", !noTypes)
+	fmt.Printf("  Use const: %v\n", useConst)
+	fmt.Println("\nPlease review the migrated code and adjust type annotations as needed.")
 }

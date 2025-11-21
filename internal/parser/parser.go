@@ -11,6 +11,7 @@ import (
 const (
 	_            int = iota
 	LOWEST
+	PIPE_PREC    // |> pipeline operator
 	OR_PREC      // or
 	BITWISE_OR   // |
 	BITWISE_XOR  // ^
@@ -27,8 +28,9 @@ const (
 )
 
 var precedences = map[lexer.TokenType]int{
-	lexer.AS:               PREFIX,  // type assertions have same precedence as prefix operators
-	lexer.NULLISH_COALESCE: OR_PREC, // ?? has same precedence as ||
+	lexer.AS:               PREFIX,    // type assertions have same precedence as prefix operators
+	lexer.PIPE_OP:          PIPE_PREC, // |> pipeline operator
+	lexer.NULLISH_COALESCE: OR_PREC,   // ?? has same precedence as ||
 	lexer.OR:               OR_PREC,
 	lexer.PIPE:             BITWISE_OR,
 	lexer.CARET:            BITWISE_XOR,
@@ -131,6 +133,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.RIGHT_SHIFT, p.parseInfixExpression)
 	p.registerInfix(lexer.AMPERSAND, p.parseInfixExpression)
 	p.registerInfix(lexer.PIPE, p.parseInfixExpression)
+	p.registerInfix(lexer.PIPE_OP, p.parsePipeExpression)
 	p.registerInfix(lexer.CARET, p.parseInfixExpression)
 	p.registerInfix(lexer.AND, p.parseInfixExpression)
 	p.registerInfix(lexer.OR, p.parseInfixExpression)
@@ -525,6 +528,37 @@ func (p *Parser) parseDotExpression(left ast.Expression) ast.Expression {
 	exp.Right = p.parseIdentifierOrContextual()
 
 	return exp
+}
+
+// parsePipeExpression handles the pipeline operator (|>)
+// Transforms: value |> func(args) into func(value, args)
+func (p *Parser) parsePipeExpression(left ast.Expression) ast.Expression {
+	// Parse the right side with current precedence
+	precedence := p.curPrecedence()
+	p.nextToken()
+	right := p.parseExpression(precedence)
+
+	// If right is a call expression, prepend left as first argument
+	if callExpr, ok := right.(*ast.CallExpression); ok {
+		// Insert left expression as first argument by creating new call expression
+		newArgs := make([]ast.Expression, 0, len(callExpr.Arguments)+1)
+		newArgs = append(newArgs, left)
+		newArgs = append(newArgs, callExpr.Arguments...)
+
+		return &ast.CallExpression{
+			Token:     callExpr.Token,
+			Function:  callExpr.Function,
+			Arguments: newArgs,
+		}
+	}
+
+	// If right is just an identifier (function name without parens)
+	// Create a call expression with left as the only argument
+	return &ast.CallExpression{
+		Token:     p.curToken,
+		Function:  right,
+		Arguments: []ast.Expression{left},
+	}
 }
 
 func (p *Parser) peekError(t lexer.TokenType) {

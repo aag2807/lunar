@@ -1,0 +1,303 @@
+-- Pipe Operator (|>) in Lunar
+-- Functional programming pipelines for readable data transformation
+
+-- ============================================
+-- What is the Pipe Operator?
+-- ============================================
+-- The pipe operator (|>) allows you to chain function calls in a readable way.
+-- Instead of nested function calls, you can write a linear pipeline.
+
+-- Traditional nested style (hard to read):
+-- const result = multiply(add(double(5), 3), 2)
+
+-- Pipeline style (easy to read):
+-- const result = 5 |> double |> add(3) |> multiply(2)
+
+-- ============================================
+-- Basic Examples
+-- ============================================
+
+-- Helper functions
+function double(x: number): number
+    return x * 2
+end
+
+function add(x: number, y: number): number
+    return x + y
+end
+
+function multiply(x: number, y: number): number
+    return x * y
+end
+
+function square(x: number): number
+    return x * x
+end
+
+-- Example 1: Simple pipe with single function
+const result1 = 5 |> double
+print("Example 1:", result1)  -- 10
+
+-- Example 2: Pipe with function that takes additional arguments
+-- The piped value becomes the FIRST argument
+const result2 = 5 |> add(3)  -- Becomes: add(5, 3)
+print("Example 2:", result2)  -- 8
+
+-- Example 3: Chaining multiple operations
+const result3 = 5
+    |> double      -- 10
+    |> add(3)      -- 13
+    |> multiply(2) -- 26
+print("Example 3:", result3)  -- 26
+
+-- ============================================
+-- Array/Table Processing
+-- ============================================
+
+function map(arr: any[], fn: function): any[]
+    const result: any[] = {}
+    for _, value in ipairs(arr) do
+        table.insert(result, fn(value))
+    end
+    return result
+end
+
+function filter(arr: any[], predicate: function): any[]
+    const result: any[] = {}
+    for _, value in ipairs(arr) do
+        if predicate(value) then
+            table.insert(result, value)
+        end
+    end
+    return result
+end
+
+function reduce(arr: any[], fn: function, initial: any): any
+    local acc = initial
+    for _, value in ipairs(arr) do
+        acc = fn(acc, value)
+    end
+    return acc
+end
+
+function is_even(x: number): boolean
+    return x % 2 == 0
+end
+
+function sum(acc: number, x: number): number
+    return acc + x
+end
+
+-- Example 4: Functional data pipeline
+const numbers = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+
+const pipeline_result = numbers
+    |> filter(is_even)           -- {2, 4, 6, 8, 10}
+    |> map(square)                -- {4, 16, 36, 64, 100}
+    |> reduce(sum, 0)             -- 220
+print("Example 4 (pipeline):", pipeline_result)
+
+-- Compare with nested version (harder to read):
+const nested_result = reduce(map(filter(numbers, is_even), square), sum, 0)
+print("Example 4 (nested):", nested_result)
+
+-- ============================================
+-- String Processing
+-- ============================================
+
+function trim(s: string): string
+    return s:match("^%s*(.-)%s*$")
+end
+
+function uppercase(s: string): string
+    return s:upper()
+end
+
+function replace_spaces(s: string, replacement: string): string
+    return s:gsub("%s", replacement)
+end
+
+function add_prefix(s: string, prefix: string): string
+    return prefix .. s
+end
+
+-- Example 5: String transformation pipeline
+const text_result = "  hello world  "
+    |> trim
+    |> uppercase
+    |> replace_spaces("-")
+    |> add_prefix(">>> ")
+print("Example 5:", text_result)  -- ">>> HELLO-WORLD"
+
+-- ============================================
+-- Object/Table Transformations
+-- ============================================
+
+function get_property(obj: any, key: string): any
+    return obj[key]
+end
+
+function default_value(val: any, default: any): any
+    if val == nil then
+        return default
+    end
+    return val
+end
+
+function to_string(val: any): string
+    return tostring(val)
+end
+
+-- Example 6: Safe property access with defaults
+const user = {
+    profile = {
+        name = "Alice",
+        age = 30
+    }
+}
+
+const user_name = user
+    |> get_property("profile")
+    |> get_property("name")
+    |> default_value("Unknown")
+    |> to_string
+print("Example 6:", user_name)  -- "Alice"
+
+-- ============================================
+-- Validation and Error Handling
+-- ============================================
+
+interface Result {
+    success: boolean,
+    value: any,
+    error: string | nil
+}
+
+function validate_positive(x: number): Result
+    if x > 0 then
+        return {success = true, value = x, error = nil}
+    end
+    return {success = false, value = nil, error = "Must be positive"}
+end
+
+function validate_range(result: Result, min: number, max: number): Result
+    if not result.success then
+        return result
+    end
+    if result.value >= min and result.value <= max then
+        return result
+    end
+    return {success = false, value = nil, error = "Out of range"}
+end
+
+function extract_value(result: Result, default: any): any
+    if result.success then
+        return result.value
+    end
+    return default
+end
+
+-- Example 7: Validation pipeline
+const validated = 50
+    |> validate_positive
+    |> validate_range(1, 100)
+    |> extract_value(0)
+print("Example 7:", validated)  -- 50
+
+-- ============================================
+-- Async-like Patterns
+-- ============================================
+
+function log_step(value: any, message: string): any
+    print("[Log]", message, "->", value)
+    return value
+end
+
+function debug_pipeline(value: any): any
+    print("[Debug] Current value:", value)
+    return value
+end
+
+-- Example 8: Debugging pipelines
+const debug_result = 5
+    |> log_step("Start")
+    |> double
+    |> log_step("After double")
+    |> add(10)
+    |> log_step("After add")
+    |> debug_pipeline
+print("Example 8 final:", debug_result)  -- 20
+
+-- ============================================
+-- Mathematical Computations
+-- ============================================
+
+function negate(x: number): number
+    return -x
+end
+
+function abs_value(x: number): number
+    if x < 0 then
+        return -x
+    end
+    return x
+end
+
+function clamp(x: number, min: number, max: number): number
+    if x < min then
+        return min
+    elseif x > max then
+        return max
+    end
+    return x
+end
+
+-- Example 9: Math pipeline
+const math_result = -150
+    |> abs_value       -- 150
+    |> clamp(0, 100)   -- 100
+    |> square          -- 10000
+    |> negate          -- -10000
+print("Example 9:", math_result)  -- -10000
+
+-- ============================================
+-- Best Practices
+-- ============================================
+
+-- ✅ DO: Use pipes for linear data transformations
+const good_example = data
+    |> validate
+    |> transform
+    |> format
+    |> send
+
+-- ✅ DO: Use pipes to avoid deep nesting
+const also_good = value
+    |> step1
+    |> step2
+    |> step3
+
+-- ✅ DO: Break long pipelines across multiple lines for readability
+const readable = input
+    |> sanitize
+    |> parse
+    |> validate
+    |> process
+    |> serialize
+    |> save
+
+-- ❌ DON'T: Overuse pipes for simple operations
+-- Bad: const x = 5 |> double  (just do: const x = double(5))
+-- Good: const x = double(5)
+
+-- ❌ DON'T: Use pipes when you need to reuse intermediate values
+-- If you need intermediate results, use variables instead
+
+-- ✅ DO: Combine with other operators
+const combined = user?.profile?.email
+    ?? "no-email"
+    |> trim
+    |> lowercase
+
+print("=== Pipe Operator Examples Complete ===")
+print("The pipe operator makes functional pipelines readable and maintainable!")

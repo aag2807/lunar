@@ -84,7 +84,12 @@ func (l *Lexer) NextToken() Token {
 			tok = newToken(QUESTION, l.ch, l.line, l.column)
 		}
 	case '|':
-		tok = newToken(PIPE, l.ch, l.line, l.column)
+		if l.peekChar() == '>' {
+			l.readChar()
+			tok = Token{Type: PIPE_OP, Literal: "|>", Line: l.line, Column: l.column}
+		} else {
+			tok = newToken(PIPE, l.ch, l.line, l.column)
+		}
 	case '<':
 		if l.peekChar() == '<' {
 			l.readChar()

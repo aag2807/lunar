@@ -118,6 +118,7 @@ const (
 	QUESTION = "?"
 	TABLE    = "table"
 	PIPE     = "|"
+	PIPE_OP  = "|>" // Pipeline operator
 
 	// Optional chaining and nullish coalescing
 	OPTIONAL_CHAIN     = "?."

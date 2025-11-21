@@ -47,8 +47,12 @@ func (l *Lexer) NextToken() Token {
 		if l.peekChar() == '-' {
 			l.skipComment()
 			return l.NextToken()
+		} else if l.peekChar() == '>' {
+			l.readChar()
+			tok = Token{Type: THIN_ARROW, Literal: "->", Line: l.line, Column: l.column}
+		} else {
+			tok = newToken(MINUS, l.ch, l.line, l.column)
 		}
-		tok = newToken(MINUS, l.ch, l.line, l.column)
 	case '~':
 		if l.peekChar() == '=' {
 			l.readChar()

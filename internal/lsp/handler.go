@@ -40,6 +40,20 @@ func (s *Server) handleInitialize(content json.RawMessage) error {
 			},
 			ReferencesProvider: true,
 			RenameProvider:     true,
+			CodeActionProvider: &CodeActionOptions{
+				CodeActionKinds: []string{
+					CodeActionKindQuickFix,
+					CodeActionKindRefactor,
+					CodeActionKindRefactorExtract,
+					CodeActionKindRefactorInline,
+					CodeActionKindRefactorRewrite,
+					CodeActionKindSource,
+					CodeActionKindSourceOrganizeImports,
+				},
+			},
+			InlayHintProvider: &InlayHintOptions{
+				ResolveProvider: false,
+			},
 		},
 	}
 
@@ -313,6 +327,365 @@ func (s *Server) handleCompletion(content json.RawMessage, id interface{}) error
 	}
 
 	return s.sendResponse(id, result)
+}
+
+// handleCodeAction handles textDocument/codeAction
+func (s *Server) handleCodeAction(content json.RawMessage, id interface{}) error {
+	var request struct {
+		Params CodeActionParams `json:"params"`
+	}
+
+	if err := json.Unmarshal(content, &request); err != nil {
+		return s.sendError(id, InvalidParams, err.Error())
+	}
+
+	doc := s.documents.Get(request.Params.TextDocument.URI)
+	if doc == nil {
+		return s.sendResponse(id, []CodeAction{})
+	}
+
+	actions := s.getCodeActions(doc, request.Params)
+
+	return s.sendResponse(id, actions)
+}
+
+// getCodeActions returns code actions for a range
+func (s *Server) getCodeActions(doc *Document, params CodeActionParams) []CodeAction {
+	actions := []CodeAction{}
+
+	// Get diagnostics in the range
+	for _, diag := range params.Context.Diagnostics {
+		// Check if diagnostic is in the requested range
+		if rangesOverlap(diag.Range, params.Range) {
+			actions = append(actions, s.getQuickFixesForDiagnostic(doc, diag, params.TextDocument.URI)...)
+		}
+	}
+
+	// Add general refactoring actions
+	actions = append(actions, s.getRefactoringActions(doc, params)...)
+
+	return actions
+}
+
+// getQuickFixesForDiagnostic returns quick fixes for a diagnostic
+func (s *Server) getQuickFixesForDiagnostic(doc *Document, diag Diagnostic, uri string) []CodeAction {
+	actions := []CodeAction{}
+
+	// Check for undefined variable errors
+	if strings.Contains(diag.Message, "undefined") {
+		// Extract variable name from diagnostic message
+		if varName := extractUndefinedVariable(diag.Message); varName != "" {
+			// Quick fix: Add local declaration
+			action := CodeAction{
+				Title: fmt.Sprintf("Declare local variable '%s'", varName),
+				Kind:  CodeActionKindQuickFix,
+				Edit: &WorkspaceEdit{
+					Changes: map[string][]TextEdit{
+						uri: {
+							{
+								Range: Range{
+									Start: Position{Line: diag.Range.Start.Line, Character: 0},
+									End:   Position{Line: diag.Range.Start.Line, Character: 0},
+								},
+								NewText: fmt.Sprintf("local %s\n", varName),
+							},
+						},
+					},
+				},
+			}
+			actions = append(actions, action)
+
+			// Quick fix: Add type annotation
+			action2 := CodeAction{
+				Title: fmt.Sprintf("Declare '%s: any'", varName),
+				Kind:  CodeActionKindQuickFix,
+				Edit: &WorkspaceEdit{
+					Changes: map[string][]TextEdit{
+						uri: {
+							{
+								Range: Range{
+									Start: Position{Line: diag.Range.Start.Line, Character: 0},
+									End:   Position{Line: diag.Range.Start.Line, Character: 0},
+								},
+								NewText: fmt.Sprintf("local %s: any\n", varName),
+							},
+						},
+					},
+				},
+			}
+			actions = append(actions, action2)
+		}
+	}
+
+	// Check for type mismatch errors
+	if strings.Contains(diag.Message, "type mismatch") || strings.Contains(diag.Message, "expected") {
+		// Quick fix: Add type cast
+		lineContent := doc.GetLineContent(diag.Range.Start.Line)
+		word := getWordAtRange(lineContent, diag.Range)
+		if word != "" {
+			action := CodeAction{
+				Title: "Add explicit type cast",
+				Kind:  CodeActionKindQuickFix,
+				Edit: &WorkspaceEdit{
+					Changes: map[string][]TextEdit{
+						uri: {
+							{
+								Range:   diag.Range,
+								NewText: fmt.Sprintf("(%s as any)", word),
+							},
+						},
+					},
+				},
+			}
+			actions = append(actions, action)
+		}
+	}
+
+	// Check for missing import errors
+	if strings.Contains(diag.Message, "module") && strings.Contains(diag.Message, "not found") {
+		if moduleName := extractModuleName(diag.Message); moduleName != "" {
+			action := CodeAction{
+				Title: fmt.Sprintf("Import module '%s'", moduleName),
+				Kind:  CodeActionKindQuickFix,
+				Edit: &WorkspaceEdit{
+					Changes: map[string][]TextEdit{
+						uri: {
+							{
+								Range: Range{
+									Start: Position{Line: 0, Character: 0},
+									End:   Position{Line: 0, Character: 0},
+								},
+								NewText: fmt.Sprintf("import \"%s\"\n", moduleName),
+							},
+						},
+					},
+				},
+			}
+			actions = append(actions, action)
+		}
+	}
+
+	return actions
+}
+
+// getRefactoringActions returns general refactoring actions
+func (s *Server) getRefactoringActions(doc *Document, params CodeActionParams) []CodeAction {
+	actions := []CodeAction{}
+
+	// Only provide refactoring actions if a range is selected
+	if params.Range.Start.Line == params.Range.End.Line &&
+		params.Range.Start.Character == params.Range.End.Character {
+		return actions
+	}
+
+	// Extract to function
+	action := CodeAction{
+		Title: "Extract to function",
+		Kind:  CodeActionKindRefactorExtract,
+		Edit: &WorkspaceEdit{
+			Changes: map[string][]TextEdit{
+				params.TextDocument.URI: {
+					{
+						Range:   params.Range,
+						NewText: "extracted()",
+					},
+					{
+						Range: Range{
+							Start: Position{Line: params.Range.End.Line + 1, Character: 0},
+							End:   Position{Line: params.Range.End.Line + 1, Character: 0},
+						},
+						NewText: "\nfunction extracted()\n    -- TODO: extracted code\nend\n",
+					},
+				},
+			},
+		},
+	}
+	actions = append(actions, action)
+
+	return actions
+}
+
+// handleInlayHint handles textDocument/inlayHint
+func (s *Server) handleInlayHint(content json.RawMessage, id interface{}) error {
+	var request struct {
+		Params InlayHintParams `json:"params"`
+	}
+
+	if err := json.Unmarshal(content, &request); err != nil {
+		return s.sendError(id, InvalidParams, err.Error())
+	}
+
+	doc := s.documents.Get(request.Params.TextDocument.URI)
+	if doc == nil {
+		return s.sendResponse(id, []InlayHint{})
+	}
+
+	hints := s.getInlayHints(doc, request.Params)
+
+	return s.sendResponse(id, hints)
+}
+
+// getInlayHints returns inlay hints for a range
+func (s *Server) getInlayHints(doc *Document, params InlayHintParams) []InlayHint {
+	hints := []InlayHint{}
+
+	// Parse the document
+	l := lexer.New(doc.Content)
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		// Return empty hints if parsing fails
+		return hints
+	}
+
+	// Run type checker
+	checker := types.NewChecker()
+	checker.Check(statements)
+
+	// Get all type information
+	env := checker.GetEnv()
+
+	// Add type hints for variables with inferred types
+	lines := strings.Split(doc.Content, "\n")
+	for lineNum, line := range lines {
+		// Skip lines outside the requested range
+		if lineNum < params.Range.Start.Line || lineNum > params.Range.End.Line {
+			continue
+		}
+
+		// Add hints for variable declarations without explicit types
+		hints = append(hints, s.getVariableTypeHints(line, lineNum, env)...)
+	}
+
+	return hints
+}
+
+// getVariableTypeHints returns type hints for variable declarations
+func (s *Server) getVariableTypeHints(line string, lineNum int, env *types.Environment) []InlayHint {
+	hints := []InlayHint{}
+
+	// Check for variable declarations without type annotations
+	// Pattern: local name = value (without : type)
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "local ") && !strings.Contains(trimmed, ":") {
+		// Extract variable name
+		rest := strings.TrimPrefix(trimmed, "local ")
+		parts := strings.Fields(rest)
+		if len(parts) > 0 {
+			varName := parts[0]
+			// Remove any trailing = or ,
+			varName = strings.TrimSuffix(varName, "=")
+			varName = strings.TrimSuffix(varName, ",")
+
+			// Look up the type in the environment
+			if typ, ok := env.Get(varName); ok {
+				typeStr := types.TypeString(typ)
+				// Skip if type is 'any' or 'unknown'
+				if typeStr != "any" && typeStr != "unknown" {
+					// Find position after variable name
+					idx := strings.Index(line, varName)
+					if idx != -1 {
+						pos := idx + len(varName)
+						hint := InlayHint{
+							Position: Position{
+								Line:      lineNum,
+								Character: pos,
+							},
+							Label:        fmt.Sprintf(": %s", typeStr),
+							Kind:         InlayHintKindType,
+							PaddingLeft:  false,
+							PaddingRight: true,
+						}
+						hints = append(hints, hint)
+					}
+				}
+			}
+		}
+	}
+
+	// Check for function return types
+	if strings.Contains(trimmed, "function ") && !strings.Contains(trimmed, "):") {
+		// Function declaration without explicit return type
+		if strings.Contains(trimmed, "function ") {
+			// Extract function name
+			start := strings.Index(trimmed, "function ") + 9
+			rest := trimmed[start:]
+			nameEnd := strings.Index(rest, "(")
+			if nameEnd > 0 {
+				funcName := strings.TrimSpace(rest[:nameEnd])
+				if typ, ok := env.Get(funcName); ok {
+					if fnType, ok := typ.(*types.FunctionType); ok {
+						returnTypeStr := types.TypeString(fnType.ReturnType)
+						if returnTypeStr != "void" && returnTypeStr != "any" {
+							// Find position after closing parenthesis
+							parenIdx := strings.Index(line, ")")
+							if parenIdx != -1 {
+								hint := InlayHint{
+									Position: Position{
+										Line:      lineNum,
+										Character: parenIdx + 1,
+									},
+									Label:        fmt.Sprintf(": %s", returnTypeStr),
+									Kind:         InlayHintKindType,
+									PaddingLeft:  false,
+									PaddingRight: true,
+								}
+								hints = append(hints, hint)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return hints
+}
+
+// Helper functions for code actions
+
+func rangesOverlap(r1, r2 Range) bool {
+	// Check if ranges overlap
+	if r1.End.Line < r2.Start.Line || r2.End.Line < r1.Start.Line {
+		return false
+	}
+	if r1.End.Line == r2.Start.Line && r1.End.Character < r2.Start.Character {
+		return false
+	}
+	if r2.End.Line == r1.Start.Line && r2.End.Character < r1.Start.Character {
+		return false
+	}
+	return true
+}
+
+func extractUndefinedVariable(message string) string {
+	// Extract variable name from "undefined variable 'x'" or similar
+	if strings.Contains(message, "'") {
+		parts := strings.Split(message, "'")
+		if len(parts) >= 2 {
+			return parts[1]
+		}
+	}
+	return ""
+}
+
+func extractModuleName(message string) string {
+	// Extract module name from error messages
+	if strings.Contains(message, "'") {
+		parts := strings.Split(message, "'")
+		if len(parts) >= 2 {
+			return parts[1]
+		}
+	}
+	return ""
+}
+
+func getWordAtRange(line string, r Range) string {
+	if r.Start.Character >= len(line) || r.End.Character > len(line) {
+		return ""
+	}
+	return line[r.Start.Character:r.End.Character]
 }
 
 // getTypeInfo returns type information for a symbol

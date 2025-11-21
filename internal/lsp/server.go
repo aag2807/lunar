@@ -202,6 +202,10 @@ func (s *Server) handleMessage(content json.RawMessage) error {
 		return s.handleReferences(content, baseMsg.ID)
 	case "textDocument/rename":
 		return s.handleRename(content, baseMsg.ID)
+	case "textDocument/codeAction":
+		return s.handleCodeAction(content, baseMsg.ID)
+	case "textDocument/inlayHint":
+		return s.handleInlayHint(content, baseMsg.ID)
 
 	default:
 		s.logger.Printf("Unhandled method: %s", baseMsg.Method)

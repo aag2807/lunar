@@ -296,10 +296,20 @@ func (b *Bundler) resolveModule(importPath, fromFile string) (string, string, er
 		return absPath, moduleID, nil
 	}
 
+	// Handle .lunar imports (installed packages)
+	// Try .lunar directory first (user-installed packages)
+	projectRoot := b.findProjectRoot()
+	lunarModulePath := filepath.Join(projectRoot, ".lunar", importPath)
+
+	absPath, err := b.resolveFile(lunarModulePath)
+	if err == nil {
+		// Successfully resolved from .lunar directory
+		moduleID := ".lunar/" + importPath
+		return absPath, moduleID, nil
+	}
+
 	// Handle vendor imports (e.g., "vendor/testing", "vendor/http")
 	if strings.HasPrefix(importPath, "vendor/") {
-		// Find project root (look for lunar.config.json or use base directory)
-		projectRoot := b.findProjectRoot()
 		vendorPath := filepath.Join(projectRoot, importPath)
 
 		// Try to resolve vendor module
@@ -321,11 +331,24 @@ func (b *Bundler) resolveModule(importPath, fromFile string) (string, string, er
 
 // findProjectRoot finds the project root directory
 func (b *Bundler) findProjectRoot() string {
-	// Start from base directory and look for lunar.config.json
+	// Start from base directory and look for lunar.config.json or lunar.json
 	dir := b.baseDir
 	for {
+		// Check for lunar.config.json
 		configPath := filepath.Join(dir, "lunar.config.json")
 		if _, err := os.Stat(configPath); err == nil {
+			return dir
+		}
+
+		// Check for lunar.json (package manifest)
+		manifestPath := filepath.Join(dir, "lunar.json")
+		if _, err := os.Stat(manifestPath); err == nil {
+			return dir
+		}
+
+		// Check for .lunar directory (installed packages)
+		lunarDir := filepath.Join(dir, ".lunar")
+		if info, err := os.Stat(lunarDir); err == nil && info.IsDir() {
 			return dir
 		}
 

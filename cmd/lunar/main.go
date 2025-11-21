@@ -198,6 +198,28 @@ func main() {
 			scriptArgs := args[2:]
 			handleRun(scriptName, scriptArgs)
 			os.Exit(0)
+		case "add":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "Error: No package specified")
+				fmt.Fprintln(os.Stderr, "Usage: lunar add <package> [--dev]")
+				os.Exit(1)
+			}
+			packageSpec := args[1]
+			dev := len(args) > 2 && args[2] == "--dev"
+			handleAdd(packageSpec, dev)
+			os.Exit(0)
+		case "remove":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "Error: No package specified")
+				fmt.Fprintln(os.Stderr, "Usage: lunar remove <package>")
+				os.Exit(1)
+			}
+			packageName := args[1]
+			handleRemove(packageName)
+			os.Exit(0)
+		case "install":
+			handleInstall()
+			os.Exit(0)
 		}
 	}
 
@@ -978,12 +1000,24 @@ func printHelp() {
 	fmt.Println("  lunar run <script>              Run a script from lunar.json")
 	fmt.Println()
 	fmt.Println("Package Manager:")
-	fmt.Println("  lunar init                Create lunar.json interactively")
-	fmt.Println("  lunar init -y             Create lunar.json with defaults (skip prompts)")
-	fmt.Println("  lunar init --name <name>  Set project name")
-	fmt.Println("  lunar init --strict       Enable strict mode")
-	fmt.Println("  lunar run <script>        Run a script defined in lunar.json")
-	fmt.Println("  lunar run <script> [args] Pass arguments to the script")
+	fmt.Println("  lunar init                    Create lunar.json interactively")
+	fmt.Println("  lunar init -y                 Create lunar.json with defaults (skip prompts)")
+	fmt.Println("  lunar init --name <name>      Set project name")
+	fmt.Println("  lunar init --strict           Enable strict mode")
+	fmt.Println("  lunar add <package>           Add a package dependency")
+	fmt.Println("  lunar add <package> --dev     Add a dev dependency")
+	fmt.Println("  lunar remove <package>        Remove a package dependency")
+	fmt.Println("  lunar install                 Install all dependencies from lunar.json")
+	fmt.Println("  lunar run <script>            Run a script defined in lunar.json")
+	fmt.Println("  lunar run <script> [args]     Pass arguments to the script")
+	fmt.Println()
+	fmt.Println("Package Specifiers:")
+	fmt.Println("  name                          Install from lunar-lang GitHub org")
+	fmt.Println("  user/repo                     Install from GitHub user/repo")
+	fmt.Println("  https://github.com/user/repo  Install from git URL")
+	fmt.Println("  name@version                  Install specific version (if supported)")
+	fmt.Println()
+	fmt.Println("Note: Packages are installed in .lunar/ directory")
 	fmt.Println()
 	fmt.Println("Options:")
 	fmt.Println("  -o <file>           Output file (default: replaces .lunar with .lua)")
@@ -1960,6 +1994,84 @@ func handleRun(scriptName string, args []string) {
 
 	// Run the script
 	if err := pkgmgr.RunScript(projectDir, scriptName, args); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// handleAdd adds a package to the project
+func handleAdd(packageSpec string, dev bool) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Find lunar.json
+	projectDir, _, err := pkgmgr.FindManifest(cwd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error: No lunar.json found in current directory or parent directories")
+		fmt.Fprintln(os.Stderr, "Hint: Run 'lunar init' to create a lunar.json file")
+		os.Exit(1)
+	}
+
+	// Create package manager
+	pm := pkgmgr.NewPackageManager(projectDir)
+
+	// Add the package
+	if err := pm.Add(packageSpec, dev); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// handleRemove removes a package from the project
+func handleRemove(packageName string) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Find lunar.json
+	projectDir, _, err := pkgmgr.FindManifest(cwd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error: No lunar.json found in current directory or parent directories")
+		fmt.Fprintln(os.Stderr, "Hint: Run 'lunar init' to create a lunar.json file")
+		os.Exit(1)
+	}
+
+	// Create package manager
+	pm := pkgmgr.NewPackageManager(projectDir)
+
+	// Remove the package
+	if err := pm.Remove(packageName); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// handleInstall installs all packages from lunar.json
+func handleInstall() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Find lunar.json
+	projectDir, _, err := pkgmgr.FindManifest(cwd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error: No lunar.json found in current directory or parent directories")
+		fmt.Fprintln(os.Stderr, "Hint: Run 'lunar init' to create a lunar.json file")
+		os.Exit(1)
+	}
+
+	// Create package manager
+	pm := pkgmgr.NewPackageManager(projectDir)
+
+	// Install all packages
+	if err := pm.Install(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

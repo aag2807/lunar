@@ -19,6 +19,7 @@ import (
 	"lunar/internal/minify"
 	"lunar/internal/optimizer"
 	"lunar/internal/parser"
+	"lunar/internal/pkgmgr"
 	"lunar/internal/types"
 	"os"
 	"os/exec"
@@ -78,6 +79,11 @@ func main() {
 	migrateNoTypes := flag.Bool("migrate-no-types", false, "Don't add type annotations during migration")
 	migrateUseConst := flag.Bool("migrate-const", true, "Use const for immutable variables")
 	migrateOutput := flag.String("migrate-output", "", "Output file for migrated code (default: <input>.lunar)")
+
+	// Package manager flags (for init command)
+	initYes := flag.Bool("y", false, "Skip prompts and use defaults (for init)")
+	initName := flag.String("name", "", "Project name (for init)")
+	initStrict := flag.Bool("strict", false, "Enable strict mode (for init)")
 
 	flag.Parse()
 
@@ -163,8 +169,30 @@ func main() {
 		}
 	}
 
-	// Get input file
+	// Get arguments
 	args := flag.Args()
+
+	// Handle subcommands (init, run, add, remove, install)
+	if len(args) > 0 {
+		subcommand := args[0]
+		switch subcommand {
+		case "init":
+			handleInit(*initYes, *initName, *targetLua, *initStrict)
+			os.Exit(0)
+		case "run":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "Error: No script name specified")
+				fmt.Fprintln(os.Stderr, "Usage: lunar run <script>")
+				os.Exit(1)
+			}
+			scriptName := args[1]
+			scriptArgs := args[2:]
+			handleRun(scriptName, scriptArgs)
+			os.Exit(0)
+		}
+	}
+
+	// Get input file
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "Error: No input file specified")
 		fmt.Fprintln(os.Stderr, "Usage: lunar [options] <input.lunar>")
@@ -909,6 +937,16 @@ func printHelp() {
 	fmt.Println("Usage:")
 	fmt.Println("  lunar [options] <input.lunar>")
 	fmt.Println("  lunar --repl")
+	fmt.Println("  lunar init                      Initialize a new Lunar project")
+	fmt.Println("  lunar run <script>              Run a script from lunar.json")
+	fmt.Println()
+	fmt.Println("Package Manager:")
+	fmt.Println("  lunar init                Create lunar.json interactively")
+	fmt.Println("  lunar init -y             Create lunar.json with defaults (skip prompts)")
+	fmt.Println("  lunar init --name <name>  Set project name")
+	fmt.Println("  lunar init --strict       Enable strict mode")
+	fmt.Println("  lunar run <script>        Run a script defined in lunar.json")
+	fmt.Println("  lunar run <script> [args] Pass arguments to the script")
 	fmt.Println()
 	fmt.Println("Options:")
 	fmt.Println("  -o <file>           Output file (default: replaces .lunar with .lua)")
@@ -957,6 +995,13 @@ func printHelp() {
 	fmt.Println("  --migrate-const         Use const for immutable variables (default: true)")
 	fmt.Println()
 	fmt.Println("Examples:")
+	fmt.Println("  # Package Management")
+	fmt.Println("  lunar init                           # Create lunar.json interactively")
+	fmt.Println("  lunar init -y                        # Create with defaults")
+	fmt.Println("  lunar run build                      # Run 'build' script from lunar.json")
+	fmt.Println("  lunar run dev                        # Run 'dev' script")
+	fmt.Println()
+	fmt.Println("  # Compilation")
 	fmt.Println("  lunar main.lunar")
 	fmt.Println("  lunar main.lunar -o output.lua")
 	fmt.Println("  lunar main.lunar --no-typecheck")
@@ -965,11 +1010,15 @@ func printHelp() {
 	fmt.Println("  lunar main.lunar --watch")
 	fmt.Println("  lunar main.lunar --bundle --run")
 	fmt.Println("  lunar main.lunar --bundle --watch --run")
+	fmt.Println()
+	fmt.Println("  # Testing & Docs")
 	fmt.Println("  lunar --test ./tests")
 	fmt.Println("  lunar --test ./tests --filter \"Math\"")
 	fmt.Println("  lunar --test ./tests --test-watch")
 	fmt.Println("  lunar --docs ./src")
 	fmt.Println("  lunar --docs ./src --docs-output ./api-docs")
+	fmt.Println()
+	fmt.Println("  # Interactive")
 	fmt.Println("  lunar --repl")
 	fmt.Println()
 	fmt.Println("For more information about the Lunar language:")
@@ -1819,4 +1868,56 @@ func handleMigration(inputFile, outputFile string, noTypes, useConst bool) {
 	fmt.Printf("  Type annotations: %v\n", !noTypes)
 	fmt.Printf("  Use const: %v\n", useConst)
 	fmt.Println("\nPlease review the migrated code and adjust type annotations as needed.")
+}
+
+// handleInit handles the 'lunar init' command
+func handleInit(skipPrompts bool, name, target string, strict bool) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Check if lunar.json already exists
+	manifestPath := filepath.Join(cwd, "lunar.json")
+	if _, err := os.Stat(manifestPath); err == nil {
+		fmt.Fprintln(os.Stderr, "Error: lunar.json already exists in current directory")
+		fmt.Fprintln(os.Stderr, "Hint: Remove it first or run this command in a different directory")
+		os.Exit(1)
+	}
+
+	opts := &pkgmgr.InitOptions{
+		Name:        name,
+		Target:      target,
+		Strict:      strict,
+		SkipPrompts: skipPrompts,
+	}
+
+	if err := pkgmgr.Init(cwd, opts); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// handleRun handles the 'lunar run <script>' command
+func handleRun(scriptName string, args []string) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Find lunar.json
+	projectDir, _, err := pkgmgr.FindManifest(cwd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error: No lunar.json found in current directory or parent directories")
+		fmt.Fprintln(os.Stderr, "Hint: Run 'lunar init' to create a lunar.json file")
+		os.Exit(1)
+	}
+
+	// Run the script
+	if err := pkgmgr.RunScript(projectDir, scriptName, args); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 }

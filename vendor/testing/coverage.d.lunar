@@ -1,0 +1,36 @@
+-- Coverage tracking declarations for Lunar
+-- Usage: import * as coverage from "vendor/testing/coverage"
+
+declare interface FileStats {
+    total: number
+    covered: number
+    percentage: number
+}
+
+declare interface CoverageModule {
+    -- Initialize coverage for a file
+    init: function(filename: string): void
+
+    -- Record a line hit
+    hit: function(filename: string, line: number): void
+
+    -- Enable coverage tracking
+    start: function(): void
+
+    -- Disable coverage tracking
+    stop: function(): void
+
+    -- Get coverage data
+    getData: function(): table
+
+    -- Calculate coverage statistics for a file
+    getFileStats: function(filename: string, totalLines: number): FileStats
+
+    -- Print coverage report
+    report: function(): void
+
+    -- Reset coverage data
+    reset: function(): void
+}
+
+declare const coverage: CoverageModule

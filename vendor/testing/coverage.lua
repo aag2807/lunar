@@ -31,16 +31,37 @@ function coverage.hit(filename, line)
     coverageData[filename][line] = (coverageData[filename][line] or 0) + 1
 end
 
--- Enable coverage tracking
+-- Enable coverage tracking with debug hook
 function coverage.start()
     enabled = true
     coverageData = {}
     activeFiles = {}
+
+    -- Set up debug hook to track line execution
+    debug.sethook(function(event, line)
+        if event == "line" then
+            local info = debug.getinfo(2, "S")
+            if info and info.source then
+                local filename = info.source
+                -- Remove @ prefix if present
+                if filename:sub(1, 1) == "@" then
+                    filename = filename:sub(2)
+                end
+
+                -- Track all files except coverage itself
+                -- Don't filter out test runner - we want to see what's being executed
+                if not filename:match("coverage%.lua$") then
+                    coverage.hit(filename, line)
+                end
+            end
+        end
+    end, "l")
 end
 
--- Disable coverage tracking
+-- Disable coverage tracking and remove debug hook
 function coverage.stop()
     enabled = false
+    debug.sethook()  -- Remove hook
 end
 
 -- Get coverage data

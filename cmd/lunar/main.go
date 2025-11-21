@@ -1678,7 +1678,10 @@ func generateTestRunner(testFiles []string, baseDir string, withCoverage bool) s
 	sb.WriteString("import { runTests, printResults } from \"vendor/testing\"\n")
 
 	if withCoverage {
-		sb.WriteString("import * as coverage from \"vendor/testing/coverage\"\n\n")
+		// Import coverage module using standard Lua require
+		sb.WriteString("\n-- Load coverage module\n")
+		sb.WriteString("package.path = package.path .. ';vendor/?.lua;vendor/?/init.lua'\n")
+		sb.WriteString("local coverage = require(\"testing.coverage\")\n\n")
 		sb.WriteString("-- Start coverage tracking\n")
 		sb.WriteString("coverage.start()\n\n")
 	} else {
@@ -1701,8 +1704,12 @@ func generateTestRunner(testFiles []string, baseDir string, withCoverage bool) s
 
 	if withCoverage {
 		sb.WriteString("\n-- Print coverage report\n")
-		sb.WriteString("coverage.stop()\n")
-		sb.WriteString("coverage.report()\n")
+		sb.WriteString("if coverage then\n")
+		sb.WriteString("    coverage.stop()\n")
+		sb.WriteString("    coverage.report()\n")
+		sb.WriteString("else\n")
+		sb.WriteString("    print(\"Warning: Coverage module not loaded\")\n")
+		sb.WriteString("end\n")
 	}
 
 	sb.WriteString("\n")

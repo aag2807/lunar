@@ -12,6 +12,7 @@ import (
 	"lunar/internal/config"
 	"lunar/internal/docgen"
 	"lunar/internal/formatter"
+	"lunar/internal/jit"
 	"lunar/internal/lexer"
 	"lunar/internal/linter"
 	"lunar/internal/luarocks"
@@ -20,7 +21,9 @@ import (
 	"lunar/internal/optimizer"
 	"lunar/internal/parser"
 	"lunar/internal/pkgmgr"
+	"lunar/internal/plugin"
 	"lunar/internal/types"
+	"lunar/internal/wasm"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -84,6 +87,12 @@ func main() {
 	initYes := flag.Bool("y", false, "Skip prompts and use defaults (for init)")
 	initName := flag.String("name", "", "Project name (for init)")
 	initStrict := flag.Bool("strict", false, "Enable strict mode (for init)")
+
+	// Advanced features flags
+	wasmMode := flag.Bool("wasm", false, "Compile to WebAssembly")
+	wasmOutput := flag.String("wasm-output", "", "WASM output directory (default: build/wasm)")
+	jitHints := flag.Bool("jit-hints", false, "Add JIT optimization hints to output")
+	pluginLoad := flag.String("plugin-load", "", "Load a compiler plugin (.so file)")
 
 	flag.Parse()
 
@@ -253,6 +262,28 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Handle WASM compilation mode
+	if *wasmMode {
+		output := *wasmOutput
+		if output == "" {
+			output = "build/wasm"
+		}
+		if err := compileToWasm(inputFile, output, !*noTypeCheck); err != nil {
+			fmt.Fprintf(os.Stderr, "WASM compilation failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	// Handle plugin loading
+	if *pluginLoad != "" {
+		if err := loadPlugin(*pluginLoad); err != nil {
+			fmt.Fprintf(os.Stderr, "Plugin load failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Plugin loaded successfully: %s\n", *pluginLoad)
+	}
+
 	// Validate input file extension
 	if !strings.HasSuffix(inputFile, ".lunar") {
 		fmt.Fprintf(os.Stderr, "Warning: Input file '%s' does not have .lunar extension\n", inputFile)
@@ -329,11 +360,11 @@ func main() {
 	// Watch mode or single compilation
 	if *watchMode {
 		useCache := !*noCache
-		runWatchMode(inputFile, output, !*noTypeCheck, *sourceMap, *watchInterval, *runMode, cfg.CompilerOptions.Target, useCache, *optimizeMode, *minifyMode, *watchClear)
+		runWatchMode(inputFile, output, !*noTypeCheck, *sourceMap, *watchInterval, *runMode, cfg.CompilerOptions.Target, useCache, *optimizeMode, *minifyMode, *jitHints, *watchClear)
 	} else {
 		// Compile the file
 		useCache := !*noCache
-		if err := compile(inputFile, output, !*noTypeCheck, *sourceMap, cfg.CompilerOptions.Target, useCache, *optimizeMode, *minifyMode); err != nil {
+		if err := compile(inputFile, output, !*noTypeCheck, *sourceMap, cfg.CompilerOptions.Target, useCache, *optimizeMode, *minifyMode, *jitHints); err != nil {
 			fmt.Fprintf(os.Stderr, "Compilation failed:\n%v\n", err)
 			os.Exit(1)
 		}
@@ -512,7 +543,7 @@ func runBundleWatchMode(inputFile, outputFile string, typeCheck, runAfter bool, 
 }
 
 // compile compiles a Lunar source file to Lua
-func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool, target string, useCache, useOptimize, useMinify bool) error {
+func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool, target string, useCache, useOptimize, useMinify, useJitHints bool) error {
 	// Check cache if enabled
 	var compCache *cache.Cache
 	if useCache {
@@ -609,6 +640,12 @@ func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool, ta
 	} else {
 		// Generate without source map
 		luaCode = codegen.GenerateWithTarget(statements, target)
+	}
+
+	// JIT Hints: Add optimization hints (if enabled)
+	if useJitHints {
+		jitPreamble := jit.GenerateOptimizationCode(jit.DefaultConfig())
+		luaCode = jitPreamble + luaCode
 	}
 
 	// Minifier: Reduce code size (if enabled)
@@ -844,14 +881,14 @@ func lintFile(inputFile string) error {
 }
 
 // runWatchMode watches files for changes and recompiles automatically
-func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap bool, intervalMs int, runAfter bool, target string, useCache, useOptimize, useMinify, clearConsole bool) {
+func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap bool, intervalMs int, runAfter bool, target string, useCache, useOptimize, useMinify, useJitHints, clearConsole bool) {
 	fmt.Printf("Watching %s for changes (Ctrl+C to stop)\n", inputFile)
 
 	// Get initial modification time
 	lastModTime := getFileModTime(inputFile)
 
 	// Initial compilation
-	if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target, useCache, useOptimize, useMinify); err != nil {
+	if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target, useCache, useOptimize, useMinify, useJitHints); err != nil {
 		fmt.Fprintf(os.Stderr, "[%s] Compilation failed:\n%v\n", time.Now().Format("15:04:05"), err)
 	} else {
 		fmt.Printf("[%s] Successfully compiled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
@@ -896,7 +933,7 @@ func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap boo
 							clearScreen()
 						}
 						fmt.Printf("[%s] File changed, recompiling...\n", time.Now().Format("15:04:05"))
-						if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target, useCache, useOptimize, useMinify); err != nil {
+						if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target, useCache, useOptimize, useMinify, useJitHints); err != nil {
 							fmt.Fprintf(os.Stderr, "[%s] Compilation failed:\n%v\n", time.Now().Format("15:04:05"), err)
 						} else {
 							fmt.Printf("[%s] Successfully compiled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
@@ -978,6 +1015,12 @@ func printHelp() {
 	fmt.Println("  --repl              Start interactive REPL mode")
 	fmt.Println("  --version           Show version information")
 	fmt.Println("  --help              Show this help message")
+	fmt.Println()
+	fmt.Println("Advanced Features:")
+	fmt.Println("  --wasm              Compile to WebAssembly")
+	fmt.Println("  --wasm-output <dir> WASM output directory (default: build/wasm)")
+	fmt.Println("  --jit-hints         Add JIT optimization hints to Lua output")
+	fmt.Println("  --plugin-load <.so> Load a compiler plugin")
 	fmt.Println()
 	fmt.Println("LuaRocks Integration:")
 	fmt.Println("  --rocks-install <pkg>   Install a LuaRocks package (e.g., lfs@1.8.0)")
@@ -1920,4 +1963,86 @@ func handleRun(scriptName string, args []string) {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// compileToWasm compiles Lunar code to WebAssembly
+func compileToWasm(inputFile, outputDir string, typeCheck bool) error {
+	fmt.Printf("Compiling %s to WebAssembly...\n", inputFile)
+
+	// Read input file
+	source, err := ioutil.ReadFile(inputFile)
+	if err != nil {
+		return fmt.Errorf("failed to read input file: %w", err)
+	}
+
+	// Parse Lunar code
+	l := lexer.New(string(source))
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		for _, err := range p.Errors() {
+			fmt.Fprintf(os.Stderr, "Parse error: %s\n", err)
+		}
+		return fmt.Errorf("parsing failed with %d errors", len(p.Errors()))
+	}
+
+	// Type check if enabled
+	if typeCheck {
+		checker := types.NewChecker()
+		typeErrors := checker.Check(statements)
+		if len(typeErrors) > 0 {
+			for _, err := range typeErrors {
+				fmt.Fprintf(os.Stderr, "Type error: %s\n", err)
+			}
+			return fmt.Errorf("type checking failed with %d errors", len(typeErrors))
+		}
+	}
+
+	// Generate Lua code
+	luaCode := codegen.Generate(statements)
+
+	// Create WASM compiler
+	wasmCompiler := wasm.NewCompiler(wasm.CompilerOptions{
+		OutputDir:      outputDir,
+		Optimization:   wasm.OptSize,
+		IncludeRuntime: true,
+	})
+
+	// Get module name from input file
+	moduleName := strings.TrimSuffix(filepath.Base(inputFile), ".lunar")
+
+	// Compile to WASM
+	wasmFile, err := wasmCompiler.CompileToWasm(luaCode, moduleName)
+	if err != nil {
+		return fmt.Errorf("WASM compilation failed: %w", err)
+	}
+
+	fmt.Printf("✓ Successfully compiled to WebAssembly\n")
+	fmt.Printf("  Output: %s\n", wasmFile)
+	fmt.Printf("  Module: %s\n", moduleName)
+	fmt.Println("\nTo test in browser:")
+	fmt.Printf("  cd %s && python3 -m http.server 8000\n", outputDir)
+	fmt.Println("  Then open http://localhost:8000/")
+
+	return nil
+}
+
+// loadPlugin loads a compiler plugin
+func loadPlugin(pluginPath string) error {
+	fmt.Printf("Loading plugin: %s\n", pluginPath)
+
+	// Check if plugin file exists
+	if _, err := os.Stat(pluginPath); os.IsNotExist(err) {
+		return fmt.Errorf("plugin file not found: %s", pluginPath)
+	}
+
+	// Load the plugin
+	pluginSystem := plugin.NewPluginSystem(nil)
+	if err := pluginSystem.LoadPlugin(pluginPath); err != nil {
+		return fmt.Errorf("failed to load plugin: %w", err)
+	}
+
+	fmt.Println("✓ Plugin loaded successfully")
+	return nil
 }

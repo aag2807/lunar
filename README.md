@@ -41,6 +41,7 @@ end
 ✅ **Generics** - Write reusable, type-safe code
 ✅ **Union Types** - Flexible type combinations (`string | number`)
 ✅ **Intersection Types** - Combine multiple types (`T1 & T2`)
+✅ **Pattern Matching** - Powerful match expressions with discriminated unions, guards, and destructuring
 ✅ **Optional Parameters** - Optional function parameters (`param: Type?`)
 ✅ **Multiple Return Values** - Tuple types for multi-value returns (`(boolean, string)`)
 ✅ **Advanced Types** - Mapped types, conditional types, template literal types
@@ -326,6 +327,42 @@ end
 
 local sum: number = add(1, 2)      -- Returns 3
 local concat: string = add("a", "b")  -- Returns "ab"
+```
+
+### Pattern Matching
+
+```lunar
+-- Powerful pattern matching for discriminated unions
+function handleResult(result: any): string
+    return match result with
+        | { type: "success", value: v } -> "Got value: " .. tostring(v)
+        | { type: "error", message: msg } -> "Error: " .. msg
+        | _ -> "Unknown result"
+    end
+end
+
+-- Guards for conditional matching
+function classify(n: number): string
+    return match n with
+        | x when x > 100 -> "large"
+        | x when x > 10 -> "medium"
+        | x when x > 0 -> "small"
+        | 0 -> "zero"
+        | _ -> "negative"
+    end
+end
+
+-- Literal patterns and wildcards
+function describe(value: any): string
+    return match value with
+        | 0 -> "zero"
+        | 42 -> "the answer"
+        | "hello" -> "greeting"
+        | true -> "yes"
+        | nil -> "nothing"
+        | _ -> "something else"
+    end
+end
 ```
 
 ### Optional Parameters
@@ -649,6 +686,9 @@ lunar/
 - [x] Better test runner with colored output
 - [x] Test filtering by pattern (`--filter`)
 - [x] Test timing and statistics
+- [x] Pattern matching with discriminated unions, guards, and destructuring
+- [x] Optional chaining (`?.`) and nullish coalescing (`??`)
+- [x] Pipe operator (`|>`) for functional programming
 - [ ] More LSP features (find references, rename, code actions, inlay hints)
 - [ ] Documentation generator (`--docs` flag)
 

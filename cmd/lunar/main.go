@@ -22,6 +22,7 @@ import (
 	"lunar/internal/parser"
 	"lunar/internal/pkgmgr"
 	"lunar/internal/plugin"
+	"lunar/internal/scaffold"
 	"lunar/internal/types"
 	"lunar/internal/wasm"
 	"os"
@@ -87,6 +88,9 @@ func main() {
 	initYes := flag.Bool("y", false, "Skip prompts and use defaults (for init)")
 	initName := flag.String("name", "", "Project name (for init)")
 	initStrict := flag.Bool("strict", false, "Enable strict mode (for init)")
+
+	// Scaffolding flags (for create command)
+	createTemplate := flag.String("template", "basic", "Template to use: basic, cli, web, library (for create)")
 
 	// Advanced features flags
 	wasmMode := flag.Bool("wasm", false, "Compile to WebAssembly")
@@ -187,6 +191,15 @@ func main() {
 		switch subcommand {
 		case "init":
 			handleInit(*initYes, *initName, *targetLua, *initStrict)
+			os.Exit(0)
+		case "create":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "Error: No project name specified")
+				fmt.Fprintln(os.Stderr, "Usage: lunar create <project-name> [--template <type>]")
+				os.Exit(1)
+			}
+			projectName := args[1]
+			handleCreate(projectName, *createTemplate)
 			os.Exit(0)
 		case "run":
 			if len(args) < 2 {
@@ -997,7 +1010,15 @@ func printHelp() {
 	fmt.Println("  lunar [options] <input.lunar>")
 	fmt.Println("  lunar --repl")
 	fmt.Println("  lunar init                      Initialize a new Lunar project")
+	fmt.Println("  lunar create <name>             Create a new project from template")
 	fmt.Println("  lunar run <script>              Run a script from lunar.json")
+	fmt.Println()
+	fmt.Println("Scaffolding:")
+	fmt.Println("  lunar create <name>                    Create project with basic template")
+	fmt.Println("  lunar create <name> --template cli     Create CLI application")
+	fmt.Println("  lunar create <name> --template web     Create web server project")
+	fmt.Println("  lunar create <name> --template library Create library/module")
+	fmt.Println("  lunar create list                      List available templates")
 	fmt.Println()
 	fmt.Println("Package Manager:")
 	fmt.Println("  lunar init                    Create lunar.json interactively")
@@ -2072,6 +2093,31 @@ func handleInstall() {
 
 	// Install all packages
 	if err := pm.Install(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// handleCreate scaffolds a new project from a template
+func handleCreate(projectName, templateName string) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// List available templates if requested
+	if projectName == "list" || templateName == "list" {
+		fmt.Println("Available templates:")
+		templates := scaffold.GetAvailableTemplates()
+		for name, template := range templates {
+			fmt.Printf("  %-10s - %s\n", name, template.Description)
+		}
+		return
+	}
+
+	// Create project from template
+	if err := scaffold.CreateProject(projectName, templateName, cwd); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

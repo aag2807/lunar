@@ -3112,16 +3112,26 @@ func (p *Parser) parseMatchCase() *ast.MatchCase {
 	p.nextToken() // move past pattern
 
 	// Check for optional guard (when clause)
+	hasGuard := false
 	if p.curTokenIs(lexer.IDENT) && p.curToken.Literal == "when" {
+		hasGuard = true
 		p.nextToken() // move to guard condition
 		matchCase.Guard = p.parseExpression(LOWEST)
-		p.nextToken() // move past guard
+		// parseExpression leaves us on last token of guard, -> is in peek
 	}
 
 	// Expect ->
-	if !p.curTokenIs(lexer.THIN_ARROW) {
-		p.addError(fmt.Sprintf("expected '->' in match case, got %s", p.curToken.Type), p.curToken)
-		return nil
+	// If we parsed a guard, curToken is on last token of guard, -> is next
+	// If no guard, curToken should already be on ->
+	if hasGuard {
+		if !p.expectPeek(lexer.THIN_ARROW) {
+			return nil
+		}
+	} else {
+		if !p.curTokenIs(lexer.THIN_ARROW) {
+			p.addError(fmt.Sprintf("expected '->' in match case, got %s", p.curToken.Type), p.curToken)
+			return nil
+		}
 	}
 
 	p.nextToken() // move to body expression
@@ -3156,14 +3166,28 @@ func (p *Parser) parsePattern() ast.Pattern {
 			p.nextToken() // move to :
 			p.nextToken() // move to type name
 
-			if !p.curTokenIs(lexer.IDENT) {
+			// Accept IDENT or type keywords (number, string, boolean, etc.)
+			var typeName string
+			if p.curTokenIs(lexer.IDENT) {
+				typeName = p.curToken.Literal
+			} else if p.curTokenIs(lexer.NUMBER_TYPE) {
+				typeName = "number"
+			} else if p.curTokenIs(lexer.STRING_TYPE) {
+				typeName = "string"
+			} else if p.curTokenIs(lexer.BOOLEAN) {
+				typeName = "boolean"
+			} else if p.curTokenIs(lexer.ANY) {
+				typeName = "any"
+			} else if p.curTokenIs(lexer.TABLE) {
+				typeName = "table"
+			} else {
 				p.addError(fmt.Sprintf("expected type name after ':', got %s", p.curToken.Type), p.curToken)
 				return nil
 			}
 
 			return &ast.TypePattern{
 				Token:    p.curToken,
-				TypeName: p.curToken.Literal,
+				TypeName: typeName,
 				Binding:  name,
 			}
 		}

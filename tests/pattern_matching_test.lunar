@@ -1,0 +1,157 @@
+-- Comprehensive pattern matching tests for Lunar
+
+print("=== Pattern Matching Tests ===\n")
+
+-- Test 1: Literal patterns
+print("Test 1: Literal patterns")
+function testLiterals(x: number): string
+    return match x with
+        | 0 -> "zero"
+        | 1 -> "one"
+        | 42 -> "forty-two"
+        | _ -> "other"
+    end
+end
+
+assert(testLiterals(0) == "zero", "literal 0 failed")
+assert(testLiterals(1) == "one", "literal 1 failed")
+assert(testLiterals(42) == "forty-two", "literal 42 failed")
+assert(testLiterals(99) == "other", "literal wildcard failed")
+print("✓ Literal patterns passed\n")
+
+-- Test 2: Wildcard pattern
+print("Test 2: Wildcard pattern")
+function testWildcard(x: any): string
+    return match x with
+        | _ -> "matched"
+    end
+end
+
+assert(testWildcard(1) == "matched", "wildcard number failed")
+assert(testWildcard("test") == "matched", "wildcard string failed")
+print("✓ Wildcard pattern passed\n")
+
+-- Test 3: Binding patterns
+print("Test 3: Binding patterns")
+function testBinding(x: number): number
+    return match x with
+        | val -> val * 2
+    end
+end
+
+assert(testBinding(10) == 20, "binding pattern failed")
+assert(testBinding(21) == 42, "binding pattern 21 failed")
+print("✓ Binding patterns passed\n")
+
+-- Test 4: Guards with > operator
+print("Test 4: Guards")
+function testGuards(x: number): string
+    return match x with
+        | val when val > 10 -> "large"
+        | val when val > 0 -> "small"
+        | 0 -> "zero"
+        | _ -> "negative"
+    end
+end
+
+assert(testGuards(20) == "large", "guard > 10 failed")
+assert(testGuards(5) == "small", "guard > 0 failed")
+assert(testGuards(0) == "zero", "guard zero failed")
+assert(testGuards(-5) == "negative", "guard negative failed")
+print("✓ Guards passed\n")
+
+-- Test 5: String patterns
+print("Test 5: String patterns")
+function testStrings(s: string): string
+    return match s with
+        | "hello" -> "greeting"
+        | "goodbye" -> "farewell"
+        | _ -> "other"
+    end
+end
+
+assert(testStrings("hello") == "greeting", "string hello failed")
+assert(testStrings("goodbye") == "farewell", "string goodbye failed")
+assert(testStrings("test") == "other", "string other failed")
+print("✓ String patterns passed\n")
+
+-- Test 6: Boolean patterns
+print("Test 6: Boolean patterns")
+function testBooleans(b: boolean): string
+    return match b with
+        | true -> "yes"
+        | false -> "no"
+    end
+end
+
+assert(testBooleans(true) == "yes", "boolean true failed")
+assert(testBooleans(false) == "no", "boolean false failed")
+print("✓ Boolean patterns passed\n")
+
+-- Test 7: Nil patterns
+print("Test 7: Nil patterns")
+function testNil(v: any): string
+    return match v with
+        | nil -> "nothing"
+        | _ -> "something"
+    end
+end
+
+assert(testNil(nil) == "nothing", "nil pattern failed")
+assert(testNil(0) == "something", "nil 0 failed")
+assert(testNil("test") == "something", "nil string failed")
+print("✓ Nil patterns passed\n")
+
+-- Test 8: Discriminated unions
+print("Test 8: Discriminated unions")
+function getArea(shape: any): number
+    return match shape with
+        | Circle -> 3.14 * shape.radius * shape.radius
+        | Rectangle -> shape.width * shape.height
+        | _ -> 0
+    end
+end
+
+local circle = { type = "Circle", radius = 5 }
+local rect = { type = "Rectangle", width = 10, height = 20 }
+local otherShape = { type = "Triangle" }
+
+assert(getArea(circle) > 78 and getArea(circle) <= 79, "circle area failed")
+assert(getArea(rect) == 200, "rectangle area failed")
+assert(getArea(otherShape) == 0, "other shape failed")
+print("✓ Discriminated unions passed\n")
+
+-- Test 9: Struct patterns with destructuring
+print("Test 9: Struct patterns")
+function greetPerson(person: any): string
+    return match person with
+        | { name: n, age: a } -> n .. " is " .. tostring(a)
+        | _ -> "unknown"
+    end
+end
+
+local alice = { name = "Alice", age = 30 }
+local incomplete = { name = "Bob" }
+
+assert(greetPerson(alice) == "Alice is 30", "struct pattern failed")
+assert(greetPerson(incomplete) == "unknown", "incomplete struct failed")
+print("✓ Struct patterns passed\n")
+
+-- Test 10: Type patterns with binding
+print("Test 10: Type patterns with binding")
+function describeValue(val: any): string
+    return match val with
+        | n: number -> "number: " .. tostring(n)
+        | s: string -> "string: " .. s
+        | b: boolean -> "bool: " .. tostring(b)
+        | _ -> "unknown type"
+    end
+end
+
+assert(describeValue(42) == "number: 42", "type number failed")
+assert(describeValue("hello") == "string: hello", "type string failed")
+assert(describeValue(true) == "bool: true", "type boolean failed")
+assert(describeValue({}) == "unknown type", "type table failed")
+print("✓ Type patterns with binding passed\n")
+
+print("\n=== All Pattern Matching Tests Passed! ===")

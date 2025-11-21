@@ -1,0 +1,152 @@
+-- Test discriminated unions with type narrowing
+
+print("=== Testing Discriminated Unions ===")
+print("")
+
+-- Define interfaces for a Result type (success or error)
+interface Success
+    status: "success"
+    data: string
+end
+
+interface Failure
+    status: "error"
+    code: number
+    message: string
+end
+
+-- Result is a discriminated union with "status" as the discriminant
+type Result = Success | Failure
+
+-- Test 1: Basic discriminated union narrowing
+print("Test 1: Basic discriminated union narrowing")
+
+function handleResult(result: Result): void
+    if result.status == "success" then
+        -- In this block, result should be narrowed to Success
+        local data: string = result.data
+        print("Success! Data:", data)
+    else
+        -- In this block, result should be narrowed to Failure
+        local code: number = result.code
+        local msg: string = result.message
+        print("Error", code, ":", msg)
+    end
+end
+
+local success: Success = {status = "success", data = "Hello World"}
+local failure: Failure = {status = "error", code = 404, message = "Not Found"}
+
+handleResult(success)
+handleResult(failure)
+print("")
+
+-- Test 2: Multiple discriminant values
+print("Test 2: Multiple discriminant values")
+
+interface Loading
+    state: "loading"
+end
+
+interface Ready
+    state: "ready"
+    value: number
+end
+
+interface Error
+    state: "error"
+    error: string
+end
+
+type AsyncState = Loading | Ready | Error
+
+function displayState(state: AsyncState): void
+    if state.state == "loading" then
+        print("Loading...")
+    elseif state.state == "ready" then
+        local val: number = state.value
+        print("Ready with value:", val)
+    elseif state.state == "error" then
+        local err: string = state.error
+        print("Error:", err)
+    end
+end
+
+local loading: Loading = {state = "loading"}
+local ready: Ready = {state = "ready", value = 42}
+local error: Error = {state = "error", error = "Connection timeout"}
+
+displayState(loading)
+displayState(ready)
+displayState(error)
+print("")
+
+-- Test 3: Numeric discriminant
+print("Test 3: Numeric discriminant")
+
+interface Circle
+    kind: 1
+    radius: number
+end
+
+interface Rectangle
+    kind: 2
+    width: number
+    height: number
+end
+
+type Shape = Circle | Rectangle
+
+function getArea(shape: Shape): number
+    if shape.kind == 1 then
+        -- Narrowed to Circle
+        local r: number = shape.radius
+        return 3.14 * r * r
+    else
+        -- Narrowed to Rectangle
+        local w: number = shape.width
+        local h: number = shape.height
+        return w * h
+    end
+end
+
+local circle: Circle = {kind = 1, radius = 5}
+local rect: Rectangle = {kind = 2, width = 10, height = 20}
+
+print("Circle area:", getArea(circle))
+print("Rectangle area:", getArea(rect))
+print("")
+
+-- Test 4: Boolean discriminant
+print("Test 4: Boolean discriminant")
+
+interface Enabled
+    active: true
+    config: string
+end
+
+interface Disabled
+    active: false
+    reason: string
+end
+
+type Feature = Enabled | Disabled
+
+function checkFeature(feature: Feature): void
+    if feature.active == true then
+        local cfg: string = feature.config
+        print("Feature enabled with config:", cfg)
+    else
+        local rsn: string = feature.reason
+        print("Feature disabled:", rsn)
+    end
+end
+
+local enabled: Enabled = {active = true, config = "advanced"}
+local disabled: Disabled = {active = false, reason = "maintenance"}
+
+checkFeature(enabled)
+checkFeature(disabled)
+print("")
+
+print("=== All Discriminated Union Tests Complete ===")

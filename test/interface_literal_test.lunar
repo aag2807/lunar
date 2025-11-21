@@ -1,0 +1,8 @@
+-- Test if interfaces support literal types
+
+interface Success
+    status: "success"
+end
+
+local s: Success = {status = "success"}
+print("OK")

@@ -1,0 +1,242 @@
+-- Async/Await in Lunar
+-- Coroutine-based async support similar to JavaScript
+
+-- ============================================
+-- How Async/Await Works in Lunar
+-- ============================================
+
+-- async functions return Lua coroutines
+-- await expressions use coroutine.yield
+
+-- Generated pattern:
+-- async function foo(): string
+--     return "hello"
+-- end
+--
+-- Becomes:
+-- function foo()
+--     return coroutine.create(function()
+--         return "hello"
+--     end)
+-- end
+
+-- ============================================
+-- Example 1: Simple Async Function
+-- ============================================
+
+async function fetchUserData(userId: number): string
+    print("Fetching user data for ID:", userId)
+    -- Simulate async operation
+    return "User data for ID: " .. tostring(userId)
+end
+
+-- Returns a coroutine that can be resumed later
+
+-- ============================================
+-- Example 2: Using Await
+-- ============================================
+
+async function getUserProfile(userId: number): string
+    print("Getting user profile...")
+
+    -- await suspends execution until the async operation completes
+    local userData = await fetchUserData(userId)
+
+    return "Profile: " .. userData
+end
+
+-- Generated Lua:
+-- function getUserProfile(userId)
+--     return coroutine.create(function()
+--         print("Getting user profile...")
+--         local userData = coroutine.yield(fetchUserData(userId))
+--         return "Profile: " .. userData
+--     end)
+-- end
+
+-- ============================================
+-- Example 3: Multiple Awaits
+-- ============================================
+
+async function fetchPosts(userId: number): string
+    print("Fetching posts...")
+    return "Posts for user " .. tostring(userId)
+end
+
+async function loadUserDashboard(userId: number): string
+    print("Loading dashboard...")
+
+    -- Multiple async operations
+    local userData = await fetchUserData(userId)
+    local posts = await fetchPosts(userId)
+
+    return userData .. " | " .. posts
+end
+
+-- ============================================
+-- Example 4: Async with Conditionals
+-- ============================================
+
+async function validateAndFetch(userId: number): string
+    if userId <= 0 then
+        return "Invalid user ID"
+    end
+
+    local data = await fetchUserData(userId)
+
+    if data ~= nil then
+        return "Valid: " .. data
+    else
+        return "User not found"
+    end
+end
+
+-- ============================================
+-- Example 5: Async with Loops
+-- ============================================
+
+async function fetchMultipleUsers(count: number): string
+    local results: string = ""
+
+    for i = 1, count do
+        local userData = await fetchUserData(i)
+        results = results .. userData .. "; "
+    end
+
+    return results
+end
+
+-- ============================================
+-- Example 6: Async Error Handling Pattern
+-- ============================================
+
+async function safeAPICall(endpoint: string): string
+    print("Calling API:", endpoint)
+
+    -- Simulate API call
+    if endpoint == "error" then
+        return "ERROR: API call failed"
+    end
+
+    return "SUCCESS: Data from " .. endpoint
+end
+
+async function handleAPIRequest(endpoint: string): string
+    local result = await safeAPICall(endpoint)
+
+    -- Check for errors
+    if result:find("ERROR") ~= nil then
+        return "Handled error: " .. result
+    end
+
+    return result
+end
+
+-- ============================================
+-- Example 7: Async with Calculations
+-- ============================================
+
+async function calculateHeavy(x: number): number
+    print("Computing heavy calculation...")
+    local result: number = 0
+    for i = 1, x do
+        result = result + i
+    end
+    return result
+end
+
+async function combineCalculations(a: number, b: number): number
+    local result1 = await calculateHeavy(a)
+    local result2 = await calculateHeavy(b)
+
+    return result1 + result2
+end
+
+-- ============================================
+-- Example 8: Practical Use Case - Data Pipeline
+-- ============================================
+
+async function fetchRawData(source: string): string
+    print("Step 1: Fetching raw data from", source)
+    return "raw:" .. source
+end
+
+async function transformData(data: string): string
+    print("Step 2: Transforming data")
+    return "transformed:" .. data
+end
+
+async function saveData(data: string): string
+    print("Step 3: Saving data")
+    return "saved:" .. data
+end
+
+async function dataPipeline(source: string): string
+    local raw = await fetchRawData(source)
+    local transformed = await transformData(raw)
+    local saved = await saveData(transformed)
+
+    return "Pipeline complete: " .. saved
+end
+
+-- ============================================
+-- Running Async Examples
+-- ============================================
+
+print("=== Async/Await Examples ===")
+print("")
+
+-- Note: To actually run async functions, you need to resume the coroutines
+-- This is a basic demonstration of the syntax
+
+print("Example 1: Simple async function")
+local co1 = fetchUserData(123)
+print("Created coroutine:", co1)
+
+print("")
+print("Example 2: Async with await")
+local co2 = getUserProfile(456)
+print("Created coroutine:", co2)
+
+print("")
+print("Example 3: Multiple awaits")
+local co3 = loadUserDashboard(789)
+print("Created coroutine:", co3)
+
+print("")
+print("Example 4: Async with conditional")
+local co4 = validateAndFetch(999)
+print("Created coroutine:", co4)
+
+print("")
+print("Example 5: Data pipeline")
+local co5 = dataPipeline("database")
+print("Created coroutine:", co5)
+
+print("")
+print("To execute async functions, resume the coroutines:")
+print("  local success, result = coroutine.resume(co1)")
+print("  print(result)")
+
+-- ============================================
+-- Async Runtime Helper (Example)
+-- ============================================
+
+-- A simple async runtime to execute async functions
+function runAsync(asyncFn: any): void
+    local co = asyncFn()
+    local success: boolean = true
+    local result = nil
+
+    while success do
+        success, result = coroutine.resume(co, result)
+        if not success then
+            print("Error:", result)
+            break
+        end
+        if coroutine.status(co) == "dead" then
+            print("Final result:", result)
+            break
+        end
+    end
+end

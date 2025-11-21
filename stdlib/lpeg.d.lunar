@@ -1,0 +1,100 @@
+-- LPeg - Parsing Expression Grammars for Lua
+-- Type declarations for pattern matching and parsing
+-- http://www.inf.puc-rio.br/~roberto/lpeg/
+
+-- Pattern object
+declare interface Pattern
+    -- Match the pattern against a subject string
+    match: function(subject: string, init: number?): number | nil, ...any
+end
+
+-- Locale helper for character classes
+declare interface Locale
+    alnum: Pattern
+    alpha: Pattern
+    cntrl: Pattern
+    digit: Pattern
+    graph: Pattern
+    lower: Pattern
+    print: Pattern
+    punct: Pattern
+    space: Pattern
+    upper: Pattern
+    xdigit: Pattern
+end
+
+-- LPeg library
+declare interface LPegLib
+    -- Pattern Constructors
+    -- Match a literal string
+    P: function(value: string | number | boolean | table<any, any> | Pattern): Pattern
+
+    -- Match any character in the set
+    S: function(set: string): Pattern
+
+    -- Match a range of characters
+    R: function(...: string): Pattern
+
+    -- Character class (locale-based)
+    locale: function(table: table<string, any>?): Locale
+
+    -- Combinators
+    -- Concatenation (e1 * e2)
+    -- Alternative (e1 + e2)
+    -- Repetition (e^n, e^-n)
+
+    -- Captures
+    -- Simple capture: captures the matched substring
+    C: function(patt: Pattern): Pattern
+
+    -- Argument capture: captures given values
+    Cc: function(...: any): Pattern
+
+    -- Table capture: creates a capture table
+    Ct: function(patt: Pattern): Pattern
+
+    -- Group capture: captures all values from nested captures
+    Cg: function(patt: Pattern, name: string?): Pattern
+
+    -- Substitution capture: replaces captured string
+    Cs: function(patt: Pattern): Pattern
+
+    -- Back capture: matches the most recent capture
+    Cb: function(name: string): Pattern
+
+    -- Constant capture: produces constant values
+    Cp: function(): Pattern  -- Captures current position
+
+    -- Match-time capture: calls function during match
+    Cmt: function(patt: Pattern, fn: function(...: any): boolean, ...any): Pattern
+
+    -- Folding capture: folds captures using a function
+    Cf: function(patt: Pattern, fn: function(acc: any, ...any): any): Pattern
+
+    -- Predicates
+    -- And-predicate: matches without consuming input
+    B: function(patt: Pattern): Pattern  -- Behind (lookbehind)
+
+    -- Grammar
+    -- Defines a grammar with multiple rules
+    V: function(name: string): Pattern
+
+    -- Utilities
+    -- Match pattern against string
+    match: function(pattern: Pattern, subject: string, init: number?): number | nil, ...any
+
+    -- Get pattern type
+    type: function(value: any): "pattern" | nil
+
+    -- Get version
+    version: function(): string
+
+    -- Set maximum stack size for pattern matching
+    setmaxstack: function(max: number): void
+
+    -- Pre-defined patterns
+    -- Match end of string
+    EOF: Pattern
+end
+
+declare const lpeg: LPegLib

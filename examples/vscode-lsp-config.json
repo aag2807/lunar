@@ -1,0 +1,150 @@
+{
+  "//": "VSCode Language Server Configuration for Lunar",
+  "//": "This configuration shows how to set up the Lunar LSP in VSCode",
+  "//": "",
+  "//": "Step 1: Create a VSCode extension or use a generic LSP client",
+  "//": "For generic LSP, install: https://marketplace.visualstudio.com/items?itemName=llvm-vs-code-extensions.vscode-clangd",
+  "//": "",
+  "//": "Step 2: Add this to your settings.json or create a workspace settings file",
+
+  "//": "==================================================================",
+  "//": "Option 1: Using settings.json",
+  "//": "File location: ~/.config/Code/User/settings.json (Linux/Mac)",
+  "//": "              %APPDATA%/Code/User/settings.json (Windows)",
+  "//": "==================================================================",
+
+  "lunar.languageServer": {
+    "enabled": true,
+    "path": "/home/user/lunar/lunar-lsp",
+    "args": [],
+    "trace.server": "verbose"
+  },
+
+  "lunar.diagnostics": {
+    "enable": true,
+    "severity": {
+      "error": "error",
+      "warning": "warning",
+      "hint": "hint"
+    }
+  },
+
+  "lunar.completion": {
+    "enable": true,
+    "triggerCharacters": [".", ":"]
+  },
+
+  "lunar.hover": {
+    "enable": true
+  },
+
+  "lunar.rename": {
+    "enable": true
+  },
+
+  "lunar.references": {
+    "enable": true
+  },
+
+  "files.associations": {
+    "*.lunar": "lunar"
+  },
+
+  "//": "==================================================================",
+  "//": "Keybindings (add to keybindings.json)",
+  "//": "File location: ~/.config/Code/User/keybindings.json",
+  "//": "==================================================================",
+
+  "keybindings_example": [
+    {
+      "key": "f12",
+      "command": "editor.action.revealDefinition",
+      "when": "editorLangId == lunar"
+    },
+    {
+      "key": "shift+f12",
+      "command": "editor.action.goToReferences",
+      "when": "editorLangId == lunar"
+    },
+    {
+      "key": "f2",
+      "command": "editor.action.rename",
+      "when": "editorLangId == lunar"
+    },
+    {
+      "key": "ctrl+space",
+      "command": "editor.action.triggerSuggest",
+      "when": "editorLangId == lunar"
+    }
+  ],
+
+  "//": "==================================================================",
+  "//": "Example package.json for a custom VSCode extension",
+  "//": "==================================================================",
+
+  "extension_example": {
+    "name": "lunar-language-support",
+    "displayName": "Lunar Language Support",
+    "description": "Language support for Lunar programming language",
+    "version": "1.0.0",
+    "engines": {
+      "vscode": "^1.75.0"
+    },
+    "categories": [
+      "Programming Languages"
+    ],
+    "activationEvents": [
+      "onLanguage:lunar"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+      "languages": [
+        {
+          "id": "lunar",
+          "aliases": [
+            "Lunar",
+            "lunar"
+          ],
+          "extensions": [
+            ".lunar"
+          ],
+          "configuration": "./language-configuration.json"
+        }
+      ],
+      "grammars": [
+        {
+          "language": "lunar",
+          "scopeName": "source.lunar",
+          "path": "./syntaxes/lunar.tmLanguage.json"
+        }
+      ],
+      "configuration": {
+        "type": "object",
+        "title": "Lunar",
+        "properties": {
+          "lunar.languageServer.path": {
+            "type": "string",
+            "default": "lunar-lsp",
+            "description": "Path to the Lunar language server executable"
+          },
+          "lunar.trace.server": {
+            "type": "string",
+            "enum": [
+              "off",
+              "messages",
+              "verbose"
+            ],
+            "default": "off",
+            "description": "Traces the communication between VS Code and the language server"
+          }
+        }
+      }
+    }
+  },
+
+  "//": "==================================================================",
+  "//": "Example extension.ts for VSCode extension",
+  "//": "==================================================================",
+
+  "extension_code_example": "See examples/vscode-extension.ts"
+}

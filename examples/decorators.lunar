@@ -1,0 +1,192 @@
+-- Decorators in Lunar
+-- TypeScript-like decorators for functions and classes
+
+-- ============================================
+-- Example 1: Simple Function Decorator
+-- ============================================
+
+-- A simple logging decorator
+function logCalls(fn: any): any
+    print("[Decorator] logCalls applied")
+    return fn
+end
+
+@logCalls
+function sayHello(name: string): string
+    return "Hello, " .. name
+end
+
+-- Generated Lua:
+-- function sayHello(name)
+--     return "Hello, " .. name
+-- end
+-- sayHello = logCalls(sayHello)
+
+-- ============================================
+-- Example 2: Decorator with Arguments
+-- ============================================
+
+-- Decorator factory that takes arguments
+function memoize(maxSize: number): any
+    return function(fn: any): any
+        print("[Decorator] memoize applied with max size:", maxSize)
+        -- In a real implementation, this would cache results
+        return fn
+    end
+end
+
+@memoize(100)
+function fibonacci(n: number): number
+    if n <= 1 then
+        return n
+    end
+    return fibonacci(n - 1) + fibonacci(n - 2)
+end
+
+-- Generated Lua:
+-- function fibonacci(n)
+--     -- implementation
+-- end
+-- fibonacci = memoize(100)(fibonacci)
+
+-- ============================================
+-- Example 3: Multiple Decorators
+-- ============================================
+
+-- Decorators are applied from bottom to top
+function authenticate(fn: any): any
+    print("[Decorator] authenticate applied")
+    return fn
+end
+
+function rateLimit(fn: any): any
+    print("[Decorator] rateLimit applied")
+    return fn
+end
+
+@authenticate
+@rateLimit
+function sensitiveOperation(data: string): string
+    return "Processing: " .. data
+end
+
+-- Applied order: rateLimit first, then authenticate
+-- sensitiveOperation = authenticate(rateLimit(sensitiveOperation))
+
+-- ============================================
+-- Example 4: Deprecated Decorator
+-- ============================================
+
+function deprecated(message: string): any
+    return function(fn: any): any
+        print("[WARNING] Deprecated:", message)
+        return fn
+    end
+end
+
+@deprecated("Use newAPI() instead")
+function oldAPI(x: number): number
+    return x * 2
+end
+
+-- ============================================
+-- Example 5: Class Decorator
+-- ============================================
+
+-- Decorator for classes
+function singleton(cls: any): any
+    print("[Decorator] singleton applied to class")
+    -- In a real implementation, this would ensure only one instance exists
+    return cls
+end
+
+@singleton
+class Database
+    connection: string
+
+    function constructor(conn: string)
+        self.connection = conn
+    end
+
+    function query(sql: string): string
+        return "Result from: " .. sql
+    end
+end
+
+-- Generated Lua:
+-- local Database = {}
+-- -- class implementation
+-- Database = singleton(Database)
+
+-- ============================================
+-- Example 6: Method Decorator Pattern
+-- ============================================
+
+-- While Lunar doesn't support method decorators directly,
+-- you can achieve similar effects:
+
+function timing(fn: any): any
+    return function(...: any): any
+        local start: number = os.clock()
+        local result = fn(...)
+        local duration: number = os.clock() - start
+        print("Execution time:", duration, "seconds")
+        return result
+    end
+end
+
+-- Apply decorator to a standalone function
+@timing
+function expensiveOperation(n: number): number
+    local sum: number = 0
+    for i = 1, n do
+        sum = sum + i
+    end
+    return sum
+end
+
+-- ============================================
+-- Example 7: Validation Decorator
+-- ============================================
+
+function validatePositive(fn: any): any
+    return function(x: number): any
+        if x < 0 then
+            print("[ERROR] Value must be positive")
+            return nil
+        end
+        return fn(x)
+    end
+end
+
+@validatePositive
+function squareRoot(x: number): number
+    return x ^ 0.5
+end
+
+-- ============================================
+-- Running Examples
+-- ============================================
+
+print("=== Decorator Examples ===")
+print("")
+
+-- Test decorated functions
+local result1: string = sayHello("World")
+print("sayHello result:", result1)
+
+local result2: number = fibonacci(5)
+print("fibonacci result:", result2)
+
+local result3: string = sensitiveOperation("secret")
+print("sensitiveOperation result:", result3)
+
+local result4: number = oldAPI(21)
+print("oldAPI result:", result4)
+
+-- Test decorated class
+local db: Database = Database.new("localhost:5432")
+print("Database connection:", db.connection)
+
+local result5: number = expensiveOperation(1000)
+print("expensiveOperation result:", result5)

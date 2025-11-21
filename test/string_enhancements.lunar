@@ -1,0 +1,75 @@
+-- Testing enhanced escape sequences and long strings
+
+print("=== Testing Enhanced Escape Sequences ===")
+print("")
+
+-- Basic escape sequences (already supported)
+local basic: string = "Hello\nWorld\tTab"
+print("Basic escapes:", basic)
+
+-- New escape sequences
+local carriage: string = "Line1\rLine2"
+print("Carriage return:", carriage)
+
+local backspace: string = "ABC\bD"
+print("Backspace:", backspace)
+
+local formfeed: string = "Page1\fPage2"
+print("Form feed:", formfeed)
+
+local vertical: string = "Line1\vLine2"
+print("Vertical tab:", vertical)
+
+local null: string = "Null\0Char"
+print("Null character length:", #null)
+
+-- Hexadecimal escapes
+local hex: string = "\x48\x65\x6C\x6C\x6F"  -- "Hello"
+print("Hex escape:", hex)
+
+-- Unicode escapes
+local unicode1: string = "\u0048\u0065\u006C\u006C\u006F"  -- "Hello"
+print("Unicode escape (\\uHHHH):", unicode1)
+
+local unicode2: string = "\u{1F4A9}"  -- 💩 emoji
+print("Unicode escape (\\u{HHHHHH}):", unicode2)
+
+local unicode3: string = "\u{0041}\u{0042}\u{0043}"  -- "ABC"
+print("Unicode multi-char:", unicode3)
+
+-- Template strings with new escapes
+local name: string = "World"
+local template: string = `Hello\n${name}\tTab`
+print("Template with escapes:", template)
+
+print("")
+print("=== Testing Long Strings ===")
+print("")
+
+-- Basic long string
+local long1: string = [[This is a long string
+that spans multiple lines
+without any escape sequences]]
+print("Long string 1:", long1)
+
+-- Long string with equals
+local long2: string = [=[This string can contain [[brackets]] inside]=]
+print("Long string 2:", long2)
+
+-- Long string with more equals
+local long3: string = [==[This can contain [=[ nested ]=] brackets]==]
+print("Long string 3:", long3)
+
+-- Long string with special characters (no escapes processed)
+local long4: string = [[Raw string with \n \t \r (not escaped)]]
+print("Long string 4:", long4)
+
+-- Long string in template
+local longInVar: string = [[Multi
+Line
+String]]
+local combined: string = `Start: ${longInVar} :End`
+print("Long string in template:", combined)
+
+print("")
+print("=== All String Enhancement Tests Passed ===")

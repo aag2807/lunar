@@ -113,15 +113,18 @@ type InitializeResult struct {
 
 // ServerCapabilities represents server capabilities
 type ServerCapabilities struct {
-	TextDocumentSync           *TextDocumentSyncOptions `json:"textDocumentSync,omitempty"`
-	HoverProvider              bool                     `json:"hoverProvider,omitempty"`
-	CompletionProvider         *CompletionOptions       `json:"completionProvider,omitempty"`
-	DefinitionProvider         bool                     `json:"definitionProvider,omitempty"`
-	ReferencesProvider         bool                     `json:"referencesProvider,omitempty"`
-	DocumentSymbolProvider     bool                     `json:"documentSymbolProvider,omitempty"`
-	WorkspaceSymbolProvider    bool                     `json:"workspaceSymbolProvider,omitempty"`
-	DocumentFormattingProvider bool                     `json:"documentFormattingProvider,omitempty"`
-	RenameProvider             bool                     `json:"renameProvider,omitempty"`
+	TextDocumentSync           *TextDocumentSyncOptions   `json:"textDocumentSync,omitempty"`
+	HoverProvider              bool                       `json:"hoverProvider,omitempty"`
+	CompletionProvider         *CompletionOptions         `json:"completionProvider,omitempty"`
+	DefinitionProvider         bool                       `json:"definitionProvider,omitempty"`
+	ReferencesProvider         bool                       `json:"referencesProvider,omitempty"`
+	DocumentSymbolProvider     bool                       `json:"documentSymbolProvider,omitempty"`
+	WorkspaceSymbolProvider    bool                       `json:"workspaceSymbolProvider,omitempty"`
+	DocumentFormattingProvider bool                       `json:"documentFormattingProvider,omitempty"`
+	RenameProvider             bool                       `json:"renameProvider,omitempty"`
+	CodeActionProvider         *CodeActionOptions         `json:"codeActionProvider,omitempty"`
+	InlayHintProvider          *InlayHintOptions          `json:"inlayHintProvider,omitempty"`
+	SemanticTokensProvider     *SemanticTokensOptions     `json:"semanticTokensProvider,omitempty"`
 }
 
 // TextDocumentSyncOptions represents text document sync options
@@ -320,3 +323,164 @@ type CompletionList struct {
 	IsIncomplete bool             `json:"isIncomplete"`
 	Items        []CompletionItem `json:"items"`
 }
+
+// ReferenceParams represents references parameters
+type ReferenceParams struct {
+	TextDocumentPositionParams
+	Context ReferenceContext `json:"context"`
+}
+
+// ReferenceContext represents reference context
+type ReferenceContext struct {
+	IncludeDeclaration bool `json:"includeDeclaration"`
+}
+
+// RenameParams represents rename parameters
+type RenameParams struct {
+	TextDocumentPositionParams
+	NewName string `json:"newName"`
+}
+
+// WorkspaceEdit represents changes to many resources
+type WorkspaceEdit struct {
+	Changes map[string][]TextEdit `json:"changes,omitempty"`
+}
+
+// TextEdit represents a change to a text document
+type TextEdit struct {
+	Range   Range  `json:"range"`
+	NewText string `json:"newText"`
+}
+
+// CodeActionOptions represents code action options
+type CodeActionOptions struct {
+	CodeActionKinds []string `json:"codeActionKinds,omitempty"`
+}
+
+// CodeActionParams represents code action parameters
+type CodeActionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Range        Range                  `json:"range"`
+	Context      CodeActionContext      `json:"context"`
+}
+
+// CodeActionContext represents code action context
+type CodeActionContext struct {
+	Diagnostics []Diagnostic `json:"diagnostics"`
+}
+
+// CodeAction represents a code action
+type CodeAction struct {
+	Title       string         `json:"title"`
+	Kind        string         `json:"kind,omitempty"`
+	Diagnostics []Diagnostic   `json:"diagnostics,omitempty"`
+	Edit        *WorkspaceEdit `json:"edit,omitempty"`
+	Command     *Command       `json:"command,omitempty"`
+}
+
+// Command represents a command
+type Command struct {
+	Title     string        `json:"title"`
+	Command   string        `json:"command"`
+	Arguments []interface{} `json:"arguments,omitempty"`
+}
+
+// InlayHintOptions represents inlay hint options
+type InlayHintOptions struct {
+	ResolveProvider bool `json:"resolveProvider,omitempty"`
+}
+
+// InlayHintParams represents inlay hint parameters
+type InlayHintParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Range        Range                  `json:"range"`
+}
+
+// InlayHint represents an inlay hint
+type InlayHint struct {
+	Position     Position               `json:"position"`
+	Label        string                 `json:"label"`
+	Kind         int                    `json:"kind,omitempty"`
+	PaddingLeft  bool                   `json:"paddingLeft,omitempty"`
+	PaddingRight bool                   `json:"paddingRight,omitempty"`
+	Tooltip      *MarkupContent         `json:"tooltip,omitempty"`
+}
+
+// InlayHint kinds
+const (
+	InlayHintKindType      = 1
+	InlayHintKindParameter = 2
+)
+
+// SemanticTokensOptions represents semantic tokens options
+type SemanticTokensOptions struct {
+	Legend SemanticTokensLegend `json:"legend"`
+	Range  bool                 `json:"range,omitempty"`
+	Full   bool                 `json:"full,omitempty"`
+}
+
+// SemanticTokensLegend represents semantic tokens legend
+type SemanticTokensLegend struct {
+	TokenTypes     []string `json:"tokenTypes"`
+	TokenModifiers []string `json:"tokenModifiers"`
+}
+
+// SemanticTokensParams represents semantic tokens parameters
+type SemanticTokensParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+// SemanticTokens represents semantic tokens
+type SemanticTokens struct {
+	Data []uint32 `json:"data"`
+}
+
+// Semantic token types
+const (
+	SemanticTokenTypeNamespace        = "namespace"
+	SemanticTokenTypeType             = "type"
+	SemanticTokenTypeClass            = "class"
+	SemanticTokenTypeEnum             = "enum"
+	SemanticTokenTypeInterface        = "interface"
+	SemanticTokenTypeStruct           = "struct"
+	SemanticTokenTypeTypeParameter    = "typeParameter"
+	SemanticTokenTypeParameter        = "parameter"
+	SemanticTokenTypeVariable         = "variable"
+	SemanticTokenTypeProperty         = "property"
+	SemanticTokenTypeEnumMember       = "enumMember"
+	SemanticTokenTypeFunction         = "function"
+	SemanticTokenTypeMethod           = "method"
+	SemanticTokenTypeMacro            = "macro"
+	SemanticTokenTypeKeyword          = "keyword"
+	SemanticTokenTypeModifier         = "modifier"
+	SemanticTokenTypeComment          = "comment"
+	SemanticTokenTypeString           = "string"
+	SemanticTokenTypeNumber           = "number"
+	SemanticTokenTypeRegexp           = "regexp"
+	SemanticTokenTypeOperator         = "operator"
+)
+
+// Semantic token modifiers
+const (
+	SemanticTokenModifierDeclaration    = "declaration"
+	SemanticTokenModifierDefinition     = "definition"
+	SemanticTokenModifierReadonly       = "readonly"
+	SemanticTokenModifierStatic         = "static"
+	SemanticTokenModifierDeprecated     = "deprecated"
+	SemanticTokenModifierAbstract       = "abstract"
+	SemanticTokenModifierAsync          = "async"
+	SemanticTokenModifierModification   = "modification"
+	SemanticTokenModifierDocumentation  = "documentation"
+	SemanticTokenModifierDefaultLibrary = "defaultLibrary"
+)
+
+// Code action kinds
+const (
+	CodeActionKindQuickFix      = "quickfix"
+	CodeActionKindRefactor      = "refactor"
+	CodeActionKindRefactorExtract = "refactor.extract"
+	CodeActionKindRefactorInline  = "refactor.inline"
+	CodeActionKindRefactorRewrite = "refactor.rewrite"
+	CodeActionKindSource          = "source"
+	CodeActionKindSourceOrganizeImports = "source.organizeImports"
+)

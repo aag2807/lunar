@@ -215,11 +215,15 @@ function testing.afterAll(fn)
 end
 
 function testing.runTests()
+    local startTime = os.clock()
     local ctx = {
         name = "Test Results",
         passed = 0,
         failed = 0,
-        errors = {}
+        errors = {},
+        startTime = startTime,
+        suiteCount = 0,
+        testCount = 0
     }
 
     -- Run beforeAll hooks
@@ -229,20 +233,26 @@ function testing.runTests()
 
     -- Run all suites
     for _, suite in ipairs(suites) do
+        ctx.suiteCount = ctx.suiteCount + 1
         print(string.format("\n%s", suite.name))
 
         for _, test in ipairs(suite.tests) do
+            ctx.testCount = ctx.testCount + 1
+
             -- Run beforeEach hooks
             for _, hook in ipairs(suite.beforeEach) do
                 hook()
             end
 
-            -- Run test
+            -- Run test with timing
+            local testStartTime = os.clock()
             local success, err = pcall(test.fn)
+            local testDuration = os.clock() - testStartTime
 
             if success then
                 ctx.passed = ctx.passed + 1
-                print(string.format("  %s %s", color("green", "✓"), test.name))
+                local durationStr = testDuration > 0.001 and string.format(" (%.0fms)", testDuration * 1000) or ""
+                print(string.format("  %s %s%s", color("green", "✓"), test.name, color("reset", durationStr)))
             else
                 ctx.failed = ctx.failed + 1
                 print(string.format("  %s %s", color("red", "✗"), test.name))
@@ -262,6 +272,9 @@ function testing.runTests()
         hook()
     end
 
+    -- Calculate total duration
+    ctx.duration = os.clock() - startTime
+
     -- Reset state for next run
     suites = {}
     beforeEachFns = {}
@@ -273,18 +286,43 @@ function testing.runTests()
 end
 
 function testing.printResults(ctx)
-    print(string.format("\n%s", string.rep("-", 40)))
-    print(string.format("Tests: %s passed, %s failed",
+    print(string.format("\n%s", string.rep("=", 50)))
+
+    -- Test summary
+    local total = ctx.passed + ctx.failed
+    local passRate = total > 0 and string.format("%.1f%%", (ctx.passed / total) * 100) or "0%"
+
+    if ctx.failed == 0 then
+        print(string.format("%s All tests passed! %s", color("green", "✓"), color("green", passRate)))
+    else
+        print(string.format("%s Some tests failed", color("red", "✗")))
+    end
+
+    print(string.format("\nSuites:  %d passed, %d total", ctx.suiteCount, ctx.suiteCount))
+    print(string.format("Tests:   %s passed, %s failed, %d total",
         color("green", tostring(ctx.passed)),
-        ctx.failed > 0 and color("red", tostring(ctx.failed)) or tostring(ctx.failed)
+        ctx.failed > 0 and color("red", tostring(ctx.failed)) or tostring(ctx.failed),
+        total
     ))
 
+    -- Duration
+    if ctx.duration then
+        local durationMs = ctx.duration * 1000
+        local timeStr = durationMs >= 1000
+            and string.format("%.2fs", ctx.duration)
+            or string.format("%.0fms", durationMs)
+        print(string.format("Time:    %s", timeStr))
+    end
+
+    -- Failed tests summary
     if ctx.failed > 0 then
-        print(color("red", "\nFailed tests:"))
+        print(color("red", "\nFailed Tests:"))
         for _, err in ipairs(ctx.errors) do
-            print(string.format("  %s > %s", err.suite, err.test))
+            print(string.format("  %s %s > %s", color("red", "✗"), err.suite, err.test))
         end
     end
+
+    print(string.rep("=", 50))
 end
 
 return testing

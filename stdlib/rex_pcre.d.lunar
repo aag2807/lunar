@@ -1,0 +1,92 @@
+-- Rex PCRE - Perl Compatible Regular Expressions
+-- Type declarations for PCRE regex operations
+-- https://rrthomas.github.io/lrexlib/
+
+-- Compiled regex pattern
+declare interface RegexPattern
+    -- Execute match on subject string
+    exec: function(subject: string, init: number?, ef: number?): number?, number?, ...any
+
+    -- Find all matches
+    gmatch: function(subject: string, ef: number?): function(): number, number, ...any
+
+    -- Test if pattern matches
+    test: function(subject: string, init: number?, ef: number?): boolean
+
+    -- Split string by pattern
+    split: function(subject: string, sep: RegexPattern?, ef: number?): table<number, string>
+
+    -- Get pattern info
+    fullinfo: function(what: number): any
+    dfa_exec: function(subject: string, init: number?, ef: number?, ovecsize: number?, wscount: number?): number?, table<number, number>
+end
+
+-- Match object with captured groups
+declare interface Match
+    -- Captured groups
+    captures: table<number, string>
+
+    -- Named captures
+    named: table<string, string>
+
+    -- Match positions
+    start: number
+    finish: number
+end
+
+-- PCRE library
+declare interface RexPCRELib
+    -- Compile a pattern
+    new: function(pattern: string, cflags: number?): RegexPattern | nil, string
+
+    -- Quick match (without compiling)
+    match: function(subject: string, pattern: string, init: number?, cf: number?, ef: number?): number?, number?, ...any
+
+    -- Find pattern in string
+    find: function(subject: string, pattern: string, init: number?, cf: number?, ef: number?): number | nil, number | nil, ...any
+
+    -- Global match iterator
+    gmatch: function(subject: string, pattern: string, cf: number?, ef: number?): function(): number, number, ...any
+
+    -- Global substitution
+    gsub: function(subject: string, pattern: string, repl: string | table<any, any> | function(...: any): string, n: number?, cf: number?, ef: number?): string, number
+
+    -- Split string
+    split: function(subject: string, sep: string | RegexPattern, cf: number?, ef: number?): table<number, string>
+
+    -- Count matches
+    count: function(subject: string, pattern: string, cf: number?, ef: number?): number
+
+    -- Compilation flags (bitwise OR these)
+    flags: function(): table<string, number>
+
+    -- Common flags
+    CASELESS: number        -- Case insensitive matching
+    MULTILINE: number       -- ^ and $ match newlines
+    DOTALL: number          -- . matches newlines
+    EXTENDED: number        -- Ignore whitespace and # comments
+    ANCHORED: number        -- Match only at start
+    UNGREEDY: number        -- Make quantifiers non-greedy by default
+    UTF8: number            -- UTF-8 mode
+    NO_AUTO_CAPTURE: number -- Disable numbered capturing
+    DUPNAMES: number        -- Allow duplicate names for subpatterns
+
+    -- Execution flags
+    NOTBOL: number          -- Subject string is not beginning of line
+    NOTEOL: number          -- Subject string is not end of line
+    NOTEMPTY: number        -- Don't match empty string
+    PARTIAL: number         -- Enable partial matching
+
+    -- Get library version
+    version: function(): string
+
+    -- Utility functions
+    -- Escape special regex characters
+    escape: function(str: string): string
+
+    -- Configuration
+    config: function(what: number): any
+end
+
+declare const rex: RexPCRELib
+declare const rex_pcre: RexPCRELib

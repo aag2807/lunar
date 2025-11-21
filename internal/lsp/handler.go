@@ -38,6 +38,8 @@ func (s *Server) handleInitialize(content json.RawMessage) error {
 				TriggerCharacters: []string{".", ":"},
 				ResolveProvider:   false,
 			},
+			ReferencesProvider: true,
+			RenameProvider:     true,
 		},
 	}
 
@@ -218,6 +220,74 @@ func (s *Server) handleDefinition(content json.RawMessage, id interface{}) error
 	}
 
 	return s.sendResponse(id, location)
+}
+
+// handleReferences handles textDocument/references
+func (s *Server) handleReferences(content json.RawMessage, id interface{}) error {
+	var request struct {
+		Params ReferenceParams `json:"params"`
+	}
+
+	if err := json.Unmarshal(content, &request); err != nil {
+		return s.sendError(id, InvalidParams, err.Error())
+	}
+
+	doc := s.documents.Get(request.Params.TextDocument.URI)
+	if doc == nil {
+		return s.sendResponse(id, []Location{})
+	}
+
+	word := doc.GetWordAtPosition(request.Params.Position)
+	if word == "" {
+		return s.sendResponse(id, []Location{})
+	}
+
+	// Find all references to this symbol
+	locations := s.findReferences(doc.Content, word, request.Params.TextDocument.URI, request.Params.Context.IncludeDeclaration)
+
+	return s.sendResponse(id, locations)
+}
+
+// handleRename handles textDocument/rename
+func (s *Server) handleRename(content json.RawMessage, id interface{}) error {
+	var request struct {
+		Params RenameParams `json:"params"`
+	}
+
+	if err := json.Unmarshal(content, &request); err != nil {
+		return s.sendError(id, InvalidParams, err.Error())
+	}
+
+	doc := s.documents.Get(request.Params.TextDocument.URI)
+	if doc == nil {
+		return s.sendResponse(id, nil)
+	}
+
+	word := doc.GetWordAtPosition(request.Params.Position)
+	if word == "" {
+		return s.sendResponse(id, nil)
+	}
+
+	// Find all references to this symbol (including declaration)
+	locations := s.findReferences(doc.Content, word, request.Params.TextDocument.URI, true)
+
+	// Create text edits for all locations
+	edits := make([]TextEdit, len(locations))
+	for i, loc := range locations {
+		edits[i] = TextEdit{
+			Range:   loc.Range,
+			NewText: request.Params.NewName,
+		}
+	}
+
+	// Create workspace edit
+	workspaceEdit := WorkspaceEdit{
+		Changes: map[string][]TextEdit{
+			request.Params.TextDocument.URI: edits,
+		},
+	}
+
+	return s.sendResponse(id, workspaceEdit)
 }
 
 // handleCompletion handles textDocument/completion
@@ -457,4 +527,72 @@ func findDefinitionInStatement(stmt interface{}, word string, uri string) *Locat
 	}
 
 	return nil
+}
+
+// findReferences finds all references to a symbol in the document
+func (s *Server) findReferences(content string, symbol string, uri string, includeDeclaration bool) []Location {
+	locations := []Location{}
+	lines := strings.Split(content, "\n")
+
+	// Find all occurrences of the symbol
+	for lineNum, line := range lines {
+		// Simple approach: find all word occurrences
+		// This can be improved with proper AST traversal
+		startIdx := 0
+		for {
+			idx := strings.Index(line[startIdx:], symbol)
+			if idx == -1 {
+				break
+			}
+
+			actualIdx := startIdx + idx
+
+			// Check if this is a complete word (not part of another identifier)
+			beforeOK := actualIdx == 0 || !isIdentifierChar(line[actualIdx-1])
+			afterOK := actualIdx+len(symbol) >= len(line) || !isIdentifierChar(line[actualIdx+len(symbol)])
+
+			if beforeOK && afterOK {
+				// Check if this is a reference or declaration
+				isDecl := isDeclarationLine(line, actualIdx, symbol)
+
+				if includeDeclaration || !isDecl {
+					locations = append(locations, Location{
+						URI: uri,
+						Range: Range{
+							Start: Position{Line: lineNum, Character: actualIdx},
+							End:   Position{Line: lineNum, Character: actualIdx + len(symbol)},
+						},
+					})
+				}
+			}
+
+			startIdx = actualIdx + 1
+		}
+	}
+
+	return locations
+}
+
+// isIdentifierChar checks if a byte is a valid identifier character
+func isIdentifierChar(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9') || b == '_'
+}
+
+// isDeclarationLine checks if a line contains a declaration of the symbol
+func isDeclarationLine(line string, idx int, symbol string) bool {
+	// Simple heuristic: check for common declaration patterns
+	trimmedBefore := strings.TrimSpace(line[:idx])
+
+	// Check for variable declaration: local name, local name:, const name, name =
+	if strings.HasSuffix(trimmedBefore, "local") ||
+		strings.HasSuffix(trimmedBefore, "const") ||
+		strings.Contains(line, "function "+symbol) ||
+		strings.Contains(line, "class "+symbol) ||
+		strings.Contains(line, "interface "+symbol) ||
+		strings.Contains(line, "enum "+symbol) {
+		return true
+	}
+
+	return false
 }

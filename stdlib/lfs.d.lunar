@@ -1,0 +1,82 @@
+-- LuaFileSystem (lfs) - File System Operations
+-- Type declarations for filesystem manipulation
+-- https://lunarmodules.github.io/luafilesystem/
+
+-- File attributes table returned by lfs.attributes()
+declare interface FileAttributes
+    -- File type
+    mode: "file" | "directory" | "link" | "socket" | "named pipe" | "char device" | "block device" | "other"
+
+    -- Permissions and ownership
+    permissions: string
+    nlink: number
+    uid: number
+    gid: number
+
+    -- Size and blocks
+    size: number
+    blocks: number
+    blksize: number
+
+    -- Timestamps
+    access: number      -- Time of last access
+    modification: number -- Time of last modification
+    change: number      -- Time of last status change
+
+    -- Inode
+    ino: number
+    dev: number
+    rdev: number
+end
+
+-- Directory iterator object
+declare interface DirectoryIterator
+    -- Iterator function
+    next: function(): string | nil
+    close: function(): void
+end
+
+-- Symlink attributes (separate from regular attributes)
+declare interface SymlinkAttributes
+    mode: "link"
+    target: string
+end
+
+declare interface LFSLib
+    -- Directory Operations
+    -- Returns an iterator function that returns directory entries
+    dir: function(path: string): function(): string | nil
+
+    -- Current working directory
+    currentdir: function(): string | nil
+    chdir: function(path: string): boolean | nil, string
+
+    -- Directory manipulation
+    mkdir: function(dirname: string): boolean | nil, string
+    rmdir: function(dirname: string): boolean | nil, string
+
+    -- File Attributes
+    -- Get file attributes (follows symlinks by default)
+    attributes: function(filepath: string, aname: string?): FileAttributes | any | nil, string
+
+    -- Get symlink attributes (doesn't follow symlinks)
+    symlinkattributes: function(filepath: string, aname: string?): FileAttributes | SymlinkAttributes | any | nil, string
+
+    -- Set file modification time
+    touch: function(filepath: string, atime: number?, mtime: number?): boolean | nil, string
+
+    -- Create symbolic link
+    link: function(old: string, new: string, symlink: boolean?): boolean | nil, string
+
+    -- File locking (if supported)
+    lock: function(filehandle: any, mode: "r" | "w", start: number?, length: number?): boolean | nil, string
+    unlock: function(filehandle: any, start: number?, length: number?): boolean | nil, string
+
+    -- Lock directory (for exclusive access)
+    lock_dir: function(path: string, seconds_stale: number?): function() | nil, string
+
+    -- Utility functions
+    setmode: function(file: any, mode: "binary" | "text"): boolean, string
+end
+
+declare const lfs: LFSLib

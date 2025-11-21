@@ -1860,6 +1860,9 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 
 	// Create function type
 	params := make([]Type, len(node.Parameters))
+	optionalParams := make([]bool, len(node.Parameters))
+	hasOptional := false
+
 	for i, param := range node.Parameters {
 		// Validate rest parameters
 		if param.IsRest {
@@ -1882,6 +1885,15 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 				params[i] = &ArrayType{ElementType: Any}
 			}
 		} else {
+			// Validate optional parameter ordering
+			if param.IsOptional {
+				hasOptional = true
+				optionalParams[i] = true
+			} else if hasOptional && !param.IsRest {
+				// Required parameter after optional parameter
+				c.addError("Required parameters cannot follow optional parameters", param.Token)
+			}
+
 			if param.Type != nil {
 				params[i] = c.resolveTypeExpression(param.Type)
 			} else {
@@ -1912,6 +1924,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		ReturnType:       returnType,
 		GenericParams:    genericParams,
 		HasRestParameter: hasRestParam,
+		OptionalParams:   optionalParams,
 	}
 
 	// Restore environment and register function
@@ -2083,42 +2096,158 @@ func (c *Checker) checkIfStatement(node *ast.IfStatement) {
 	}
 }
 
-// extractTypeNarrowing checks if the expression is a type guard call and extracts narrowing info
-// Returns the variable name and the narrowed type, or empty string and nil if not a type guard
+// extractTypeNarrowing checks if the expression is a type guard call or discriminated union check
+// and extracts narrowing info. Returns the variable name and the narrowed type, or empty string and nil
 func (c *Checker) extractTypeNarrowing(expr ast.Expression) (string, Type) {
-	// Check if this is a call expression
-	callExpr, ok := expr.(*ast.CallExpression)
-	if !ok || len(callExpr.Arguments) != 1 {
-		return "", nil
+	// Check if this is a call expression (type guard function)
+	if callExpr, ok := expr.(*ast.CallExpression); ok && len(callExpr.Arguments) == 1 {
+		// Get the function being called
+		var funcType *FunctionType
+		if ident, ok := callExpr.Function.(*ast.Identifier); ok {
+			typ, exists := c.env.Get(ident.Value)
+			if exists {
+				funcType, ok = typ.(*FunctionType)
+				if ok {
+					// Check if return type is a type guard
+					guardType, ok := funcType.ReturnType.(*TypeGuardType)
+					if ok {
+						// Extract the variable being guarded from the argument
+						if argIdent, ok := callExpr.Arguments[0].(*ast.Identifier); ok {
+							return argIdent.Value, guardType.GuardedType
+						}
+					}
+				}
+			}
+		}
 	}
 
-	// Get the function being called
-	var funcType *FunctionType
-	if ident, ok := callExpr.Function.(*ast.Identifier); ok {
-		typ, exists := c.env.Get(ident.Value)
-		if !exists {
-			return "", nil
+	// Check if this is a discriminated union check (e.g., obj.status === "success")
+	if infixExpr, ok := expr.(*ast.InfixExpression); ok {
+		if infixExpr.Operator == "==" || infixExpr.Operator == "!=" {
+			// Try both directions: prop === literal or literal === prop
+			varName, narrowedType := c.extractDiscriminantNarrowing(infixExpr.Left, infixExpr.Right, infixExpr.Operator == "==")
+			if varName != "" && narrowedType != nil {
+				return varName, narrowedType
+			}
+			// Try reverse
+			varName, narrowedType = c.extractDiscriminantNarrowing(infixExpr.Right, infixExpr.Left, infixExpr.Operator == "==")
+			if varName != "" && narrowedType != nil {
+				return varName, narrowedType
+			}
 		}
-		funcType, ok = typ.(*FunctionType)
-		if !ok {
-			return "", nil
-		}
-	} else {
-		return "", nil
 	}
 
-	// Check if return type is a type guard
-	guardType, ok := funcType.ReturnType.(*TypeGuardType)
+	return "", nil
+}
+
+// extractDiscriminantNarrowing checks if we're comparing a property to a literal value
+// and narrows a union type based on that discriminant property
+func (c *Checker) extractDiscriminantNarrowing(propExpr, literalExpr ast.Expression, isEquality bool) (string, Type) {
+	// Check if propExpr is a property access (IndexExpression with identifier base)
+	indexExpr, ok := propExpr.(*ast.IndexExpression)
 	if !ok {
 		return "", nil
 	}
 
-	// Extract the variable being guarded from the argument
-	if argIdent, ok := callExpr.Arguments[0].(*ast.Identifier); ok {
-		return argIdent.Value, guardType.GuardedType
+	// Get the object being accessed (must be an identifier)
+	objIdent, ok := indexExpr.Left.(*ast.Identifier)
+	if !ok {
+		return "", nil
 	}
 
-	return "", nil
+	// Get the property name (must be a string literal or identifier used as property)
+	var propName string
+	if stringLit, ok := indexExpr.Index.(*ast.StringLiteral); ok {
+		propName = stringLit.Value
+	} else if ident, ok := indexExpr.Index.(*ast.Identifier); ok {
+		// Property access like obj.prop is parsed as obj[prop] with identifier
+		propName = ident.Value
+	} else {
+		return "", nil
+	}
+
+	// Get the literal value being compared
+	var literalType Type
+	switch lit := literalExpr.(type) {
+	case *ast.StringLiteral:
+		literalType = &StringLiteralType{Value: lit.Value}
+	case *ast.NumberLiteral:
+		literalType = &NumberLiteralType{Value: lit.Value}
+	case *ast.BooleanLiteral:
+		literalType = &BooleanLiteralType{Value: lit.Value}
+	default:
+		return "", nil
+	}
+
+	// Get the type of the object
+	objType, exists := c.env.Get(objIdent.Value)
+	if !exists {
+		return "", nil
+	}
+
+	// If it's a union type, narrow it based on the discriminant property
+	unionType, ok := objType.(*UnionType)
+	if !ok {
+		return "", nil
+	}
+
+	// Filter union variants that match the discriminant
+	narrowedTypes := []Type{}
+	for _, variantType := range unionType.Types {
+		// Check if this variant has the discriminant property with the matching value
+		if c.variantMatchesDiscriminant(variantType, propName, literalType, isEquality) {
+			narrowedTypes = append(narrowedTypes, variantType)
+		}
+	}
+
+	// If no variants match, return nil (this will cause a type error later)
+	if len(narrowedTypes) == 0 {
+		return "", nil
+	}
+
+	// If only one variant matches, return that type directly
+	if len(narrowedTypes) == 1 {
+		return objIdent.Value, narrowedTypes[0]
+	}
+
+	// Multiple variants match, return a narrowed union
+	return objIdent.Value, &UnionType{Types: narrowedTypes}
+}
+
+// variantMatchesDiscriminant checks if a type variant has a property with the expected value
+func (c *Checker) variantMatchesDiscriminant(variantType Type, propName string, expectedValue Type, isEquality bool) bool {
+	// Get the property type from the variant
+	var propType Type
+
+	switch v := variantType.(type) {
+	case *InterfaceType:
+		var exists bool
+		propType, exists = v.Properties[propName]
+		if !exists {
+			return false
+		}
+	case *ClassType:
+		// Check if the class has the property
+		var exists bool
+		propType, exists = v.Properties[propName]
+		if !exists {
+			return false
+		}
+	case *TableType:
+		// For tables, we can't determine the specific property value
+		return false
+	default:
+		return false
+	}
+
+	// Check if the property type matches the expected literal type
+	if isEquality {
+		// For ==, the property must equal the expected value
+		return propType.Equals(expectedValue)
+	} else {
+		// For !=, the property must NOT equal the expected value
+		return !propType.Equals(expectedValue)
+	}
 }
 
 // checkWhileStatement checks a while statement
@@ -2664,7 +2793,8 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 	case *ast.TemplateLiteral:
 		return c.checkTemplateLiteral(node)
 	case *ast.BooleanLiteral:
-		return Boolean
+		// Boolean literals infer as literal types for discriminated unions
+		return &BooleanLiteralType{Value: node.Value}
 	case *ast.NilLiteral:
 		return Nil
 	case *ast.TableLiteral:
@@ -3060,13 +3190,38 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 	// If the function is generic and called without explicit type arguments, try to infer them
 	if len(fnType.GenericParams) > 0 {
 		// Check argument count first (skip if there are spread arguments or function has rest parameter)
-		if !hasSpreadArgs && !fnType.HasRestParameter && len(node.Arguments) != len(fnType.Parameters) {
-			c.addError(
-				fmt.Sprintf("Function expects %d arguments, got %d",
-					len(fnType.Parameters), len(node.Arguments)),
-				node.Token,
-			)
-			return fnType.ReturnType
+		if !hasSpreadArgs && !fnType.HasRestParameter {
+			// Calculate minimum required arguments (non-optional parameters)
+			minArgs := len(fnType.Parameters)
+			if len(fnType.OptionalParams) > 0 {
+				// Find the first optional parameter
+				for i, isOptional := range fnType.OptionalParams {
+					if isOptional {
+						minArgs = i
+						break
+					}
+				}
+			}
+
+			maxArgs := len(fnType.Parameters)
+			argCount := len(node.Arguments)
+
+			if argCount < minArgs || argCount > maxArgs {
+				if minArgs == maxArgs {
+					c.addError(
+						fmt.Sprintf("Function expects %d arguments, got %d",
+							maxArgs, argCount),
+						node.Token,
+					)
+				} else {
+					c.addError(
+						fmt.Sprintf("Function expects %d-%d arguments, got %d",
+							minArgs, maxArgs, argCount),
+						node.Token,
+					)
+				}
+				return fnType.ReturnType
+			}
 		}
 
 		// If function has rest parameter, check minimum argument count
@@ -3125,13 +3280,39 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 	}
 
 	// Check argument count (skip if there are spread arguments or function has rest parameter)
-	if !hasSpreadArgs && !fnType.HasRestParameter && len(node.Arguments) != len(fnType.Parameters) {
-		c.addError(
-			fmt.Sprintf("Function expects %d arguments, got %d",
-				len(fnType.Parameters), len(node.Arguments)),
-			node.Token,
-		)
-		return fnType.ReturnType
+	if !hasSpreadArgs && !fnType.HasRestParameter {
+		// Calculate minimum required arguments (non-optional parameters)
+		minArgs := len(fnType.Parameters)
+		if len(fnType.OptionalParams) > 0 {
+			// Find the first optional parameter
+			for i, isOptional := range fnType.OptionalParams {
+				if isOptional {
+					minArgs = i
+					break
+				}
+			}
+		}
+
+		maxArgs := len(fnType.Parameters)
+		argCount := len(node.Arguments)
+
+		if argCount < minArgs {
+			c.addError(
+				fmt.Sprintf("Function expects at least %d arguments, got %d",
+					minArgs, argCount),
+				node.Token,
+			)
+			return fnType.ReturnType
+		}
+
+		if argCount > maxArgs {
+			c.addError(
+				fmt.Sprintf("Function expects at most %d arguments, got %d",
+					maxArgs, argCount),
+				node.Token,
+			)
+			return fnType.ReturnType
+		}
 	}
 
 	// If function has rest parameter, check minimum argument count
@@ -3551,6 +3732,12 @@ func (c *Checker) checkSpreadExpression(node *ast.SpreadExpression) Type {
 
 // checkTypeAssertion checks a type assertion (value as Type)
 func (c *Checker) checkTypeAssertion(node *ast.TypeAssertion) Type {
+	// Check if this is a const assertion (as const)
+	if ident, ok := node.TargetType.(*ast.Identifier); ok && ident.Value == "const" {
+		// This is a const assertion - apply literal type inference
+		return c.applyConstAssertion(node.Expression)
+	}
+
 	// Check the expression being asserted (ensures it's valid)
 	c.checkExpression(node.Expression)
 
@@ -3563,6 +3750,75 @@ func (c *Checker) checkTypeAssertion(node *ast.TypeAssertion) Type {
 
 	// Return the target type - that's what the assertion claims it is
 	return targetType
+}
+
+// applyConstAssertion applies const assertion logic to an expression
+// This makes literals as specific as possible and objects/arrays readonly
+func (c *Checker) applyConstAssertion(expr ast.Expression) Type {
+	switch e := expr.(type) {
+	case *ast.NumberLiteral:
+		// Already returns NumberLiteralType
+		return &NumberLiteralType{Value: e.Value}
+
+	case *ast.StringLiteral:
+		// Already returns StringLiteralType
+		return &StringLiteralType{Value: e.Value}
+
+	case *ast.BooleanLiteral:
+		// Already returns BooleanLiteralType
+		return &BooleanLiteralType{Value: e.Value}
+
+	case *ast.TableLiteral:
+		// For arrays: convert to readonly tuple with literal types
+		// For objects: make all properties readonly with literal types
+		return c.applyConstToTableLiteral(e)
+
+	default:
+		// For other expressions, just check normally
+		return c.checkExpression(expr)
+	}
+}
+
+// applyConstToTableLiteral applies const assertion to a table literal
+func (c *Checker) applyConstToTableLiteral(node *ast.TableLiteral) Type {
+	// Check if this is an array (only Values, no Pairs)
+	if len(node.Pairs) == 0 && len(node.Values) > 0 {
+		// Convert to readonly tuple with literal element types
+		elementTypes := make([]Type, len(node.Values))
+		for i, val := range node.Values {
+			elementTypes[i] = c.applyConstAssertion(val)
+		}
+		// Return a tuple type (which is like a readonly array with fixed length)
+		return &TupleType{Elements: elementTypes}
+	}
+
+	// For objects (key-value pairs), create an interface with readonly properties
+	if len(node.Pairs) > 0 {
+		properties := make(map[string]Type)
+		readonlyProps := make(map[string]bool)
+
+		for key, value := range node.Pairs {
+			// Check if key is an identifier (property name)
+			if ident, ok := key.(*ast.Identifier); ok {
+				// Apply const assertion to get literal type for the value
+				valueType := c.applyConstAssertion(value)
+				properties[ident.Value] = valueType
+				readonlyProps[ident.Value] = true
+			}
+		}
+
+		// Return an interface type with readonly properties
+		return &InterfaceType{
+			Name:          "<const table literal>",
+			Properties:    properties,
+			Methods:       make(map[string]*FunctionType),
+			Extends:       []*InterfaceType{},
+			ReadonlyProps: readonlyProps,
+		}
+	}
+
+	// Empty table - return as-is
+	return c.checkTableLiteral(node)
 }
 
 // checkAwaitExpression checks an await expression

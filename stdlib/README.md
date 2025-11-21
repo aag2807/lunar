@@ -6,6 +6,8 @@ This directory contains type declarations for Lua 5.1's standard library. These 
 
 ## Available Libraries
 
+### Lua Standard Library
+
 - **lua.d.lunar** - Core global functions (print, tonumber, etc.) ✓ Working
 - **math.d.lunar** - Mathematical functions (math.sin, math.random, etc.) ✓ Working
 - **io.d.lunar** - File I/O operations (io.open, io.read, etc.) ✓ Working
@@ -15,6 +17,14 @@ This directory contains type declarations for Lua 5.1's standard library. These 
 - **coroutine.d.lunar** - Coroutine functions (coroutine.create, coroutine.resume, etc.) ✓ Working
 - **debug.d.lunar** - Debug introspection functions (debug.getinfo, debug.traceback, etc.) ✓ Working
 - **package.d.lunar** - Module loading and package management (require, package.loaded, etc.) ✓ Working
+
+### Vendor Libraries (LuaRocks)
+
+- **lfs.d.lunar** - LuaFileSystem - File system operations (directory iteration, attributes, etc.)
+- **crypto.d.lunar** - LuaCrypto - Cryptographic functions (hashing, encryption, HMAC, etc.)
+- **date.d.lunar** - LuaDate - Advanced date/time utilities (parsing, formatting, arithmetic)
+- **lpeg.d.lunar** - LPeg - Parsing Expression Grammars (pattern matching and parsing)
+- **rex_pcre.d.lunar** - Rex PCRE - Perl Compatible Regular Expressions
 
 ## Context-Aware Keywords
 
@@ -117,6 +127,95 @@ These declarations cover the most commonly used functions from Lua 5.1's standar
 - **Lua 5.1** - Full coverage
 - **Lua 5.2/5.3** - Most functions work, some newer features not included
 - **LuaJIT** - Compatible with LuaJIT 2.x standard library
+
+## LuaRocks Integration
+
+Lunar now supports automatic installation and type generation for LuaRocks packages!
+
+### Quick Start
+
+```bash
+# Initialize LuaRocks configuration
+lunar --rocks-init
+
+# Install a package and auto-generate types
+lunar --rocks-install lfs@1.8.0
+
+# List installed packages
+lunar --rocks-list
+
+# Search for packages
+lunar --rocks-search "json"
+
+# Generate types for an already installed package
+lunar --rocks-types luasocket
+```
+
+### Using Vendor Libraries
+
+Once installed, vendor libraries work just like standard library modules:
+
+```lunar
+-- File system operations with LuaFileSystem
+local lfs = require("lfs")
+local attr: FileAttributes = lfs.attributes("/path/to/file")
+print("File size:", attr.size)
+
+-- Iterate directory
+for file in lfs.dir(".") do
+    print(file)
+end
+```
+
+```lunar
+-- Cryptography with LuaCrypto
+local crypto = require("crypto")
+local hash: string = crypto.digest("sha256", "Hello, World!")
+local hmac: string = crypto.hmac("sha256", "secret_key", "message")
+```
+
+```lunar
+-- Date manipulation with LuaDate
+local date = require("date")
+local now: Date = date.now()
+local tomorrow: Date = now:adddays(1)
+print("Tomorrow:", tomorrow:fmt("%Y-%m-%d"))
+```
+
+```lunar
+-- Regular expressions with Rex PCRE
+local rex = require("rex_pcre")
+local match_start, match_end = rex.find("hello world", "w\\w+")
+print("Found:", match_start, match_end)
+```
+
+### Managing Dependencies
+
+Create a `lunarocks.json` file to manage project dependencies:
+
+```json
+{
+  "dependencies": {
+    "lfs": "1.8.0",
+    "luasocket": "3.0.0",
+    "luasec": "1.0.0"
+  },
+  "devDependencies": {
+    "busted": "2.0.0"
+  }
+}
+```
+
+Then install all dependencies:
+
+```bash
+lunar --rocks-deps
+```
+
+This will:
+1. Install all packages from `lunarocks.json`
+2. Auto-generate `.d.lunar` type definition files
+3. Place type definitions in the `./types` directory
 
 ## Extending
 

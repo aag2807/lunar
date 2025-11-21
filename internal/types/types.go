@@ -438,11 +438,12 @@ func (t *TableType) IsAssignableTo(other Type) bool {
 
 // FunctionType represents a function type
 type FunctionType struct {
-	Parameters       []Type
-	ReturnType       Type
-	GenericParams    []string        // Generic type parameter names (e.g., ["T", "U"])
-	HasRestParameter bool            // True if the last parameter is a rest parameter
-	Overloads        []*FunctionType // Additional overload signatures (for method overloading)
+	Parameters        []Type
+	ReturnType        Type
+	GenericParams     []string        // Generic type parameter names (e.g., ["T", "U"])
+	HasRestParameter  bool            // True if the last parameter is a rest parameter
+	OptionalParams    []bool          // True for each parameter that is optional
+	Overloads         []*FunctionType // Additional overload signatures (for method overloading)
 }
 
 func (t *FunctionType) String() string {
@@ -940,7 +941,8 @@ type InterfaceType struct {
 	Methods        map[string]*FunctionType
 	Properties     map[string]Type
 	Extends        []*InterfaceType
-	IndexSignature *IndexSignature // [key: KeyType]: ValueType
+	IndexSignature *IndexSignature         // [key: KeyType]: ValueType
+	ReadonlyProps  map[string]bool         // Track readonly properties (for as const)
 }
 
 // IndexSignature represents an index signature like [key: string]: number
@@ -1018,6 +1020,17 @@ func (t *InterfaceType) IsAssignableTo(other Type) bool {
 		if len(t.Methods) == 0 {
 			return true
 		}
+	}
+
+	// Check if this interface is assignable to a union type
+	// An interface is assignable to a union if it's assignable to ANY of the union's members
+	if otherUnion, ok := other.(*UnionType); ok {
+		for _, memberType := range otherUnion.Types {
+			if t.IsAssignableTo(memberType) {
+				return true
+			}
+		}
+		return false
 	}
 
 	return false

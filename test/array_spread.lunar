@@ -1,0 +1,43 @@
+-- Testing spread operator for array literals (fully supported)
+
+print("=== Testing Spread Operator for Arrays ===")
+print("")
+
+-- Test 1: Spread arrays
+print("Test 1: Spread in arrays")
+local arr1: number[] = {1, 2, 3}
+local arr2: number[] = {4, 5, 6}
+local merged1: number[] = {...arr1, ...arr2}
+print("Merged arrays:", merged1[1], merged1[2], merged1[3], merged1[4], merged1[5], merged1[6])
+
+-- Test 2: Spread arrays with additional elements
+print("")
+print("Test 2: Spread with additional elements")
+local merged2: number[] = {0, ...arr1, 99, ...arr2, 100}
+print("With extras:", merged2[1], merged2[2], merged2[3], merged2[4], merged2[5], merged2[6], merged2[7], merged2[8], merged2[9])
+
+-- Test 3: Empty spread
+print("")
+print("Test 3: Empty spread")
+local empty: number[] = {}
+local withEmpty: number[] = {...empty, 1, 2, 3}
+print("With empty spread:", withEmpty[1], withEmpty[2], withEmpty[3])
+
+-- Test 4: Nested spread
+print("")
+print("Test 4: Nested spread")
+local inner: number[] = {5, 6}
+local outer: number[] = {1, 2, ...inner, 7, 8}
+print("Nested:", outer[1], outer[2], outer[3], outer[4], outer[5], outer[6])
+
+-- Test 5: Multiple spreads
+print("")
+print("Test 5: Multiple spreads")
+local a: number[] = {1}
+local b: number[] = {2, 3}
+local c: number[] = {4, 5, 6}
+local all: number[] = {...a, ...b, ...c}
+print("All:", all[1], all[2], all[3], all[4], all[5], all[6])
+
+print("")
+print("=== All Array Spread Tests Passed ===")

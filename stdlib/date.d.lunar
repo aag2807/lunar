@@ -1,0 +1,123 @@
+-- LuaDate - Date and Time Utilities
+-- Type declarations for advanced date/time manipulation
+-- https://github.com/Tieske/date
+
+-- Date object representing a specific point in time
+declare interface Date
+    -- Getters
+    getyear: function(): number
+    getmonth: function(): number
+    getday: function(): number
+    gethours: function(): number
+    getminutes: function(): number
+    getseconds: function(): number
+    getfracsec: function(): number
+    getwday: function(): number     -- Day of week (1-7, Sunday=1)
+    getyday: function(): number     -- Day of year (1-366)
+    getweeknum: function(): number  -- ISO 8601 week number
+
+    -- Setters
+    setyear: function(year: number): Date
+    setmonth: function(month: number): Date
+    setday: function(day: number): Date
+    sethours: function(hours: number): Date
+    setminutes: function(minutes: number): Date
+    setseconds: function(seconds: number): Date
+    setfracsec: function(fracsec: number): Date
+
+    -- Add/Subtract time spans
+    addyears: function(years: number): Date
+    addmonths: function(months: number): Date
+    adddays: function(days: number): Date
+    addhours: function(hours: number): Date
+    addminutes: function(minutes: number): Date
+    addseconds: function(seconds: number): Date
+
+    -- Formatting
+    fmt: function(format: string): string
+    tostring: function(): string
+    tolocal: function(): Date
+    toutc: function(): Date
+
+    -- Comparison
+    spandays: function(other: Date): number
+    spanhours: function(other: Date): number
+    spanminutes: function(other: Date): number
+    spanseconds: function(other: Date): number
+
+    -- Conversion
+    totable: function(): table<string, number>
+    getdate: function(): number     -- Days since epoch
+    gettime: function(): number     -- Seconds since midnight
+
+    -- Timezone
+    getbias: function(): number     -- Timezone offset in minutes
+    settimezone: function(tz: string): Date
+
+    -- ISO 8601
+    getisoweekday: function(): number
+    getisoweeknumber: function(): number
+    getisoyear: function(): number
+
+    -- Copy
+    copy: function(): Date
+end
+
+-- Time span/duration between two dates
+declare interface DateDiff
+    spandays: function(): number
+    spanhours: function(): number
+    spanminutes: function(): number
+    spanseconds: function(): number
+
+    -- Component access
+    getdays: function(): number
+    gethours: function(): number
+    getminutes: function(): number
+    getseconds: function(): number
+
+    -- Formatting
+    fmt: function(format: string): string
+    tostring: function(): string
+end
+
+-- Date parsing and construction
+declare interface DateLib
+    -- Constructors
+    -- Create date from various formats
+    new: function(year: number?, month: number?, day: number?, hour: number?, min: number?, sec: number?): Date
+    epoch: function(): Date         -- Unix epoch (1970-01-01)
+    now: function(): Date           -- Current date/time
+    today: function(): Date         -- Today at midnight
+
+    -- Parsing
+    parse: function(datestr: string, format: string?): Date | nil
+    isleapyear: function(year: number): boolean
+
+    -- Difference between dates
+    diff: function(date1: Date, date2: Date): DateDiff
+
+    -- Time span creation
+    days: function(n: number): DateDiff
+    hours: function(n: number): DateDiff
+    minutes: function(n: number): DateDiff
+    seconds: function(n: number): DateDiff
+
+    -- Constants for formatting
+    -- Common format strings
+    ISO_8601: string                -- "yyyy-mm-ddTHH:MM:SS"
+    RFC_850: string                 -- "Weekday, dd-Mon-yy HH:MM:SS GMT"
+    RFC_1123: string                -- "Wday, dd Mon yyyy HH:MM:SS GMT"
+
+    -- Utilities
+    daysto: function(date: Date): number
+    hoursto: function(date: Date): number
+    minutesto: function(date: Date): number
+    secondsto: function(date: Date): number
+
+    -- Timezone utilities
+    gettz: function(): string
+    settz: function(tz: string): void
+end
+
+declare const date: DateLib

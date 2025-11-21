@@ -1,0 +1,22 @@
+-- Simple test for discriminated unions
+
+interface Success {
+    status: "success",
+    data: string
+}
+
+interface Failure {
+    status: "error",
+    code: number
+}
+
+type Result = Success | Failure
+
+function test(result: Result): void
+    if result.status == "success" then
+        local d: string = result.data
+        print(d)
+    end
+end
+
+print("Test completed")

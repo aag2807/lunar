@@ -1,0 +1,89 @@
+-- Test const assertions (as const)
+
+print("=== Testing Const Assertions ===")
+print("")
+
+-- Test 1: Literal type inference with as const
+print("Test 1: Literal type inference")
+const x = 5 as const
+const y = "hello" as const
+const z = true as const
+print("Literals:", x, y, z)
+print("")
+
+-- Test 2: Array as const becomes readonly tuple
+print("Test 2: Array as const (readonly tuple)")
+const arr = {1, 2, 3} as const
+print("Tuple element 1:", arr[1])
+print("Tuple element 2:", arr[2])
+print("Tuple element 3:", arr[3])
+print("")
+
+-- Test 3: Object as const with readonly properties
+print("Test 3: Object as const (readonly properties)")
+const config = {
+    host = "localhost",
+    port = 8080,
+    enabled = true
+} as const
+print("Config host:", config.host)
+print("Config port:", config.port)
+print("Config enabled:", config.enabled)
+print("")
+
+-- Test 4: Nested as const
+print("Test 4: Nested as const")
+const nested = {
+    name = "Alice",
+    age = 30,
+    address = {
+        city = "NYC",
+        zip = 10001
+    }
+} as const
+print("Name:", nested.name)
+print("Age:", nested.age)
+print("")
+
+-- Test 5: Const with literals in discriminated unions
+print("Test 5: Const assertion with discriminated unions")
+
+interface StatusSuccess
+    status: "success"
+    value: number
+end
+
+interface StatusError
+    status: "error"
+    message: string
+end
+
+type Status = StatusSuccess | StatusError
+
+-- Using as const ensures literal types
+const successStatus = {
+    status = "success",
+    value = 42
+} as const
+
+const errorStatus = {
+    status = "error",
+    message = "Failed"
+} as const
+
+function processStatus(s: Status): void
+    if s.status == "success" then
+        local v: number = s.value
+        print("Success value:", v)
+    else
+        local m: string = s.message
+        print("Error message:", m)
+    end
+end
+
+-- These should work because as const gives us literal types
+processStatus(successStatus)
+processStatus(errorStatus)
+print("")
+
+print("=== All Const Assertion Tests Complete ===")

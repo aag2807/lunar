@@ -243,11 +243,12 @@ type Statement interface {
 }
 
 type VariableDeclaration struct {
-	Token      lexer.Token
-	Names      []*Identifier // Support multiple variables (e.g., local x, y = 1, 2)
-	Types      []Expression  // Type annotations for each variable
-	Values     []Expression  // Values for each variable
-	IsConstant bool
+	Token                lexer.Token
+	Names                []*Identifier // Support multiple variables (e.g., local x, y = 1, 2)
+	Types                []Expression  // Type annotations for each variable
+	Values               []Expression  // Values for each variable
+	IsConstant           bool
+	IsTupleDestructuring bool // True for (a, b) = func() syntax
 }
 
 func (vd *VariableDeclaration) statementNode()       {}
@@ -259,6 +260,11 @@ func (vd *VariableDeclaration) String() string {
 		out.WriteString("const ")
 	} else {
 		out.WriteString("local ")
+	}
+
+	// Tuple destructuring syntax
+	if vd.IsTupleDestructuring {
+		out.WriteString("(")
 	}
 
 	// Write all variable names with types
@@ -273,6 +279,11 @@ func (vd *VariableDeclaration) String() string {
 			out.WriteString(": ")
 			out.WriteString(vd.Types[i].String())
 		}
+	}
+
+	// Close tuple destructuring syntax
+	if vd.IsTupleDestructuring {
+		out.WriteString(")")
 	}
 
 	// Value assignment
@@ -514,6 +525,7 @@ type Parameter struct {
 	Name       *Identifier
 	Type       Expression
 	IsRest     bool   // true for ...param
+	IsOptional bool   // true for param?: type
 	Visibility string // "public", "private", "protected" for constructor parameter properties
 	IsReadonly bool   // true for readonly parameter properties
 }
@@ -526,6 +538,9 @@ func (p *Parameter) String() string {
 		out.WriteString("...")
 	}
 	out.WriteString(p.Name.String())
+	if p.IsOptional {
+		out.WriteString("?")
+	}
 	if p.Type != nil {
 		out.WriteString(": ")
 		out.WriteString(p.Type.String())

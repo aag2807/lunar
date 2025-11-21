@@ -1,0 +1,216 @@
+-- Optional Chaining (?.) and Nullish Coalescing (??) in Lunar
+-- Modern operators for safe property access and default values
+
+-- ============================================
+-- OPTIONAL CHAINING (?.)
+-- ============================================
+-- Safely access nested properties without manual nil checks
+
+-- Traditional way (verbose)
+function getTraditional(user: any): string
+    if user ~= nil then
+        if user.profile ~= nil then
+            if user.profile.name ~= nil then
+                return user.profile.name
+            end
+        end
+    end
+    return "Unknown"
+end
+
+-- Modern way with optional chaining (concise)
+function getModern(user: any): string
+    return user?.profile?.name ?? "Unknown"
+end
+
+-- ============================================
+-- Example 1: API Response Handling
+-- ============================================
+
+interface ApiResponse {
+    data: {
+        user: {
+            id: number,
+            profile: {
+                name: string,
+                email: string
+            }
+        }
+    } | nil
+}
+
+function processApiResponse(response: any): void
+    -- Safe access to deeply nested properties
+    const name = response?.data?.user?.profile?.name
+    const email = response?.data?.user?.profile?.email
+
+    print("Name:", name ?? "Not provided")
+    print("Email:", email ?? "Not provided")
+end
+
+-- ============================================
+-- Example 2: Configuration Objects
+-- ============================================
+
+interface Config {
+    database: {
+        host: string,
+        port: number,
+        credentials: {
+            username: string,
+            password: string
+        } | nil
+    } | nil
+}
+
+function connectDatabase(config: any): void
+    -- Get config values with defaults
+    const host = config?.database?.host ?? "localhost"
+    const port = config?.database?.port ?? 5432
+    const username = config?.database?.credentials?.username ?? "admin"
+
+    print("Connecting to:", host .. ":" .. tostring(port))
+    print("Username:", username)
+end
+
+-- ============================================
+-- Example 3: Event Handling
+-- ============================================
+
+function handleClick(event: any): void
+    -- Safe access to event properties
+    const target = event?.target?.id
+    const value = event?.target?.value ?? ""
+    const classList = event?.target?.classList
+
+    print("Clicked element:", target ?? "unknown")
+    print("Value:", value)
+
+    if classList?.contains ~= nil then
+        print("Has classList methods")
+    end
+end
+
+-- ============================================
+-- Example 4: Array/Table Operations
+-- ============================================
+
+function getFirstItem(items: any): any
+    -- Safe array access
+    return items?[1] ?? "No items"
+end
+
+function getNestedValue(data: any, key: string): any
+    -- Dynamic property access with optional chaining
+    return data?[key]?.value ?? nil
+end
+
+-- ============================================
+-- Example 5: Function Calls
+-- ============================================
+
+interface Service {
+    api: {
+        fetchUser: function(id: number): any
+    } | nil
+}
+
+function callService(service: any, userId: number): void
+    -- Safe function call
+    const result = service?.api?.fetchUser?.(userId)
+    print("Result:", result ?? "Service unavailable")
+end
+
+-- ============================================
+-- NULLISH COALESCING (??)
+-- ============================================
+-- Provide default values only for nil (not for false or 0)
+
+-- Example 6: Boolean Values
+function processFlag(flag: any): void
+    -- Using || would give wrong result for false
+    -- const enabled = flag || true  -- Always true if flag is false!
+
+    -- Using ?? correctly preserves false
+    const enabled = flag ?? true  -- Only uses default if flag is nil
+
+    print("Enabled:", enabled)
+end
+
+-- Example 7: Numeric Zero
+function processCount(count: any): void
+    -- Using || would give wrong result for 0
+    -- const value = count || 10  -- Uses 10 even if count is 0!
+
+    -- Using ?? correctly preserves 0
+    const value = count ?? 10  -- Only uses default if count is nil
+
+    print("Count:", value)
+end
+
+-- ============================================
+-- Example 8: Chaining Multiple Defaults
+-- ============================================
+
+function getUserDisplayName(user: any, fallbackName: string): string
+    -- Try multiple sources, fall back to default
+    return user?.displayName ??
+           user?.username ??
+           user?.email ??
+           fallbackName ??
+           "Anonymous"
+end
+
+-- ============================================
+-- Example 9: Complex Expressions
+-- ============================================
+
+function calculateTotal(order: any): number
+    const subtotal = order?.subtotal ?? 0
+    const tax = order?.tax ?? 0
+    const shipping = order?.shipping ?? 0
+    const discount = order?.discount ?? 0
+
+    return subtotal + tax + shipping - discount
+end
+
+-- ============================================
+-- Example 10: Combining with Other Features
+-- ============================================
+
+interface Repository {
+    findById: function(id: number): any
+}
+
+async function loadUser(repo: any, id: number): string
+    -- Combine optional chaining, nullish coalescing, and async
+    const user = await repo?.findById?.(id)
+    const name = user?.name ?? "Unknown User"
+    const status = user?.active ?? false
+
+    return name .. " (Active: " .. tostring(status) .. ")"
+end
+
+-- ============================================
+-- Best Practices
+-- ============================================
+
+-- ✅ DO: Use ?. for safe property access
+const safeName = user?.profile?.name
+
+-- ✅ DO: Use ?? for nil-specific defaults
+const port = config?.port ?? 8080
+
+-- ✅ DO: Combine them for robust code
+const email = user?.contact?.email ?? "no-email@example.com"
+
+-- ❌ DON'T: Use ?? when you want to check falsy values
+-- Use 'or' instead if you want false/0 to use the default
+const value = someValue or defaultValue  -- Uses default for false/nil/0
+
+-- ❌ DON'T: Chain too deeply without reason
+-- Consider restructuring if you need more than 3-4 levels
+const tooDeep = a?.b?.c?.d?.e?.f?.g  -- Maybe refactor?
+
+print("=== Optional Chaining & Nullish Coalescing Examples ===")
+print("These operators make Lunar code safer and more concise!")

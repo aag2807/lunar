@@ -11,6 +11,7 @@ import (
 const (
 	_            int = iota
 	LOWEST
+	PIPE_PREC    // |> pipeline operator
 	OR_PREC      // or
 	BITWISE_OR   // |
 	BITWISE_XOR  // ^
@@ -27,8 +28,9 @@ const (
 )
 
 var precedences = map[lexer.TokenType]int{
-	lexer.AS:               PREFIX,  // type assertions have same precedence as prefix operators
-	lexer.NULLISH_COALESCE: OR_PREC, // ?? has same precedence as ||
+	lexer.AS:               PREFIX,    // type assertions have same precedence as prefix operators
+	lexer.PIPE_OP:          PIPE_PREC, // |> pipeline operator
+	lexer.NULLISH_COALESCE: OR_PREC,   // ?? has same precedence as ||
 	lexer.OR:               OR_PREC,
 	lexer.PIPE:             BITWISE_OR,
 	lexer.CARET:            BITWISE_XOR,
@@ -111,6 +113,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.FUNCTION, p.parseFunctionExpression)
 	p.registerPrefix(lexer.ELLIPSIS, p.parseSpreadExpression)
 	p.registerPrefix(lexer.AWAIT, p.parseAwaitExpression)
+	p.registerPrefix(lexer.MATCH, p.parseMatchExpression)
 
 	//register infix operators
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
@@ -131,6 +134,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.RIGHT_SHIFT, p.parseInfixExpression)
 	p.registerInfix(lexer.AMPERSAND, p.parseInfixExpression)
 	p.registerInfix(lexer.PIPE, p.parseInfixExpression)
+	p.registerInfix(lexer.PIPE_OP, p.parsePipeExpression)
 	p.registerInfix(lexer.CARET, p.parseInfixExpression)
 	p.registerInfix(lexer.AND, p.parseInfixExpression)
 	p.registerInfix(lexer.OR, p.parseInfixExpression)
@@ -525,6 +529,37 @@ func (p *Parser) parseDotExpression(left ast.Expression) ast.Expression {
 	exp.Right = p.parseIdentifierOrContextual()
 
 	return exp
+}
+
+// parsePipeExpression handles the pipeline operator (|>)
+// Transforms: value |> func(args) into func(value, args)
+func (p *Parser) parsePipeExpression(left ast.Expression) ast.Expression {
+	// Parse the right side with current precedence
+	precedence := p.curPrecedence()
+	p.nextToken()
+	right := p.parseExpression(precedence)
+
+	// If right is a call expression, prepend left as first argument
+	if callExpr, ok := right.(*ast.CallExpression); ok {
+		// Insert left expression as first argument by creating new call expression
+		newArgs := make([]ast.Expression, 0, len(callExpr.Arguments)+1)
+		newArgs = append(newArgs, left)
+		newArgs = append(newArgs, callExpr.Arguments...)
+
+		return &ast.CallExpression{
+			Token:     callExpr.Token,
+			Function:  callExpr.Function,
+			Arguments: newArgs,
+		}
+	}
+
+	// If right is just an identifier (function name without parens)
+	// Create a call expression with left as the only argument
+	return &ast.CallExpression{
+		Token:     p.curToken,
+		Function:  right,
+		Arguments: []ast.Expression{left},
+	}
 }
 
 func (p *Parser) peekError(t lexer.TokenType) {
@@ -3000,4 +3035,269 @@ func (p *Parser) parseDecoratedStatement() ast.Statement {
 		p.addError(fmt.Sprintf("decorators can only be applied to classes and functions, got %s", p.curToken.Type), p.curToken)
 		return nil
 	}
+}
+
+// ============================================
+// Pattern Matching Parser
+// ============================================
+
+// parseMatchExpression parses a match expression
+// Syntax: match value | pattern -> expression | pattern -> expression end
+func (p *Parser) parseMatchExpression() ast.Expression {
+	matchExpr := &ast.MatchExpression{
+		Token: p.curToken, // 'match' token
+		Cases: []ast.MatchCase{},
+	}
+
+	p.nextToken() // move to value expression
+
+	// Parse the value being matched
+	matchExpr.Value = p.parseExpression(LOWEST)
+
+	if matchExpr.Value == nil {
+		p.addError("expected expression after 'match'", p.curToken)
+		return nil
+	}
+
+	// Expect 'with' keyword (check peek and advance)
+	if !p.expectPeek(lexer.WITH) {
+		return nil
+	}
+
+	p.nextToken() // move past 'with' to first case
+
+	// After advancing, curToken should be the first '|' or 'end'
+
+	// Parse match cases
+	// Each case starts with |
+	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+		// Expect | for case
+		if !p.curTokenIs(lexer.PIPE) {
+			p.addError(fmt.Sprintf("expected '|' or 'end' in match expression, got %s", p.curToken.Type), p.curToken)
+			return nil
+		}
+
+		matchCase := p.parseMatchCase()
+		if matchCase != nil {
+			matchExpr.Cases = append(matchExpr.Cases, *matchCase)
+		}
+		// parseMatchCase leaves us on the last token of the body expression
+		// Move to the next token (either next '|' or 'end')
+		p.nextToken()
+	}
+
+	if len(matchExpr.Cases) == 0 {
+		p.addError("match expression must have at least one case", matchExpr.Token)
+		return nil
+	}
+
+	return matchExpr
+}
+
+// parseMatchCase parses a single match case
+// Syntax: | pattern [when condition] -> expression
+func (p *Parser) parseMatchCase() *ast.MatchCase {
+	matchCase := &ast.MatchCase{
+		Token: p.curToken, // '|' token
+	}
+
+	p.nextToken() // move to pattern
+
+	// Parse the pattern
+	matchCase.Pattern = p.parsePattern()
+	if matchCase.Pattern == nil {
+		return nil
+	}
+
+	p.nextToken() // move past pattern
+
+	// Check for optional guard (when clause)
+	hasGuard := false
+	if p.curTokenIs(lexer.IDENT) && p.curToken.Literal == "when" {
+		hasGuard = true
+		p.nextToken() // move to guard condition
+		matchCase.Guard = p.parseExpression(LOWEST)
+		// parseExpression leaves us on last token of guard, -> is in peek
+	}
+
+	// Expect ->
+	// If we parsed a guard, curToken is on last token of guard, -> is next
+	// If no guard, curToken should already be on ->
+	if hasGuard {
+		if !p.expectPeek(lexer.THIN_ARROW) {
+			return nil
+		}
+	} else {
+		if !p.curTokenIs(lexer.THIN_ARROW) {
+			p.addError(fmt.Sprintf("expected '->' in match case, got %s", p.curToken.Type), p.curToken)
+			return nil
+		}
+	}
+
+	p.nextToken() // move to body expression
+
+	// Parse the body expression
+	// Use BITWISE_OR precedence to prevent consuming the next '|' as an operator
+	matchCase.Body = p.parseExpression(BITWISE_OR)
+	if matchCase.Body == nil {
+		p.addError("expected expression after '->' in match case", p.curToken)
+		return nil
+	}
+
+	return matchCase
+}
+
+// parsePattern parses a pattern for pattern matching
+func (p *Parser) parsePattern() ast.Pattern {
+	switch p.curToken.Type {
+	case lexer.IDENT:
+		// Could be: wildcard (_), binding (x), or type pattern
+		if p.curToken.Literal == "_" {
+			return &ast.WildcardPattern{
+				Token: p.curToken,
+			}
+		}
+
+		// Check if it's a type pattern (identifier followed by : or just a capitalized type name)
+		// For now, treat as binding pattern
+		// If peek is COLON, it's a type pattern with binding
+		if p.peekTokenIs(lexer.COLON) {
+			name := p.curToken.Literal
+			p.nextToken() // move to :
+			p.nextToken() // move to type name
+
+			// Accept IDENT or type keywords (number, string, boolean, etc.)
+			var typeName string
+			if p.curTokenIs(lexer.IDENT) {
+				typeName = p.curToken.Literal
+			} else if p.curTokenIs(lexer.NUMBER_TYPE) {
+				typeName = "number"
+			} else if p.curTokenIs(lexer.STRING_TYPE) {
+				typeName = "string"
+			} else if p.curTokenIs(lexer.BOOLEAN) {
+				typeName = "boolean"
+			} else if p.curTokenIs(lexer.ANY) {
+				typeName = "any"
+			} else if p.curTokenIs(lexer.TABLE) {
+				typeName = "table"
+			} else {
+				p.addError(fmt.Sprintf("expected type name after ':', got %s", p.curToken.Type), p.curToken)
+				return nil
+			}
+
+			return &ast.TypePattern{
+				Token:    p.curToken,
+				TypeName: typeName,
+				Binding:  name,
+			}
+		}
+
+		// Check if it's a standalone type (capitalized identifier)
+		// For simplicity, if it starts with uppercase, treat as type pattern
+		if len(p.curToken.Literal) > 0 && p.curToken.Literal[0] >= 'A' && p.curToken.Literal[0] <= 'Z' {
+			return &ast.TypePattern{
+				Token:    p.curToken,
+				TypeName: p.curToken.Literal,
+				Binding:  "",
+			}
+		}
+
+		// Otherwise it's a binding pattern
+		return &ast.BindingPattern{
+			Token: p.curToken,
+			Name:  p.curToken.Literal,
+		}
+
+	case lexer.NUMBER, lexer.STRING, lexer.TRUE, lexer.FALSE, lexer.NIL:
+		// Literal pattern
+		var value ast.Expression
+		switch p.curToken.Type {
+		case lexer.NUMBER:
+			value = p.parseNumberLiteral()
+		case lexer.STRING:
+			value = p.parseStringLiteral()
+		case lexer.TRUE, lexer.FALSE:
+			value = p.parseBooleanLiteral()
+		case lexer.NIL:
+			value = p.parseNilLiteral()
+		}
+
+		return &ast.LiteralPattern{
+			Token: p.curToken,
+			Value: value,
+		}
+
+	case lexer.LBRACE:
+		// Struct pattern { field1: pattern1, field2: pattern2 }
+		return p.parseStructPattern()
+
+	default:
+		p.addError(fmt.Sprintf("unexpected token in pattern: %s", p.curToken.Type), p.curToken)
+		return nil
+	}
+}
+
+// parseStructPattern parses a struct/object destructuring pattern
+// Syntax: { field1: pattern1, field2: pattern2, ... }
+func (p *Parser) parseStructPattern() ast.Pattern {
+	pattern := &ast.StructPattern{
+		Token:  p.curToken, // '{' token
+		Fields: make(map[string]ast.Pattern),
+	}
+
+	p.nextToken() // move past {
+
+	// Empty struct pattern
+	if p.curTokenIs(lexer.RBRACE) {
+		return pattern
+	}
+
+	// Parse fields
+	for {
+		// Expect field name
+		if !p.curTokenIs(lexer.IDENT) {
+			p.addError(fmt.Sprintf("expected field name in struct pattern, got %s", p.curToken.Type), p.curToken)
+			return nil
+		}
+
+		fieldName := p.curToken.Literal
+		p.nextToken() // move past field name
+
+		// Expect :
+		if !p.curTokenIs(lexer.COLON) {
+			p.addError(fmt.Sprintf("expected ':' after field name in struct pattern, got %s", p.curToken.Type), p.curToken)
+			return nil
+		}
+
+		p.nextToken() // move to pattern
+
+		// Parse field pattern
+		fieldPattern := p.parsePattern()
+		if fieldPattern == nil {
+			return nil
+		}
+
+		pattern.Fields[fieldName] = fieldPattern
+
+		p.nextToken() // move past pattern
+
+		// Check for more fields or end
+		if p.curTokenIs(lexer.RBRACE) {
+			break
+		}
+
+		if !p.curTokenIs(lexer.COMMA) {
+			p.addError(fmt.Sprintf("expected ',' or '}' in struct pattern, got %s", p.curToken.Type), p.curToken)
+			return nil
+		}
+
+		p.nextToken() // move past comma
+
+		// Allow trailing comma
+		if p.curTokenIs(lexer.RBRACE) {
+			break
+		}
+	}
+
+	return pattern
 }

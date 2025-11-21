@@ -102,6 +102,8 @@ const (
 	AS          = "as" // for type assertions: value as Type
 	KEYOF       = "keyof" // for keyof operator: keyof T
 	TYPEOF      = "typeof" // for typeof operator: typeof value
+	MATCH       = "match" // for pattern matching: match value with | pattern -> expr end
+	WITH        = "with"  // for pattern matching: separates value from cases
 
 	//types
 	ANY         = "any"
@@ -114,10 +116,12 @@ const (
 	NEVER       = "never"
 	UNKNOWN     = "unknown"
 
-	ARROW    = "=>"
-	QUESTION = "?"
-	TABLE    = "table"
-	PIPE     = "|"
+	ARROW      = "=>"
+	THIN_ARROW = "->" // For pattern matching: | pattern -> expression
+	QUESTION   = "?"
+	TABLE      = "table"
+	PIPE       = "|"
+	PIPE_OP    = "|>" // Pipeline operator
 
 	// Optional chaining and nullish coalescing
 	OPTIONAL_CHAIN     = "?."
@@ -172,6 +176,8 @@ var keywords = map[string]TokenType{
 	"as":          AS,
 	"keyof":       KEYOF,
 	"typeof":      TYPEOF,
+	"match":       MATCH,
+	"with":        WITH,
 	"table":       TABLE,
 	"any":         ANY,
 	"string":      STRING_TYPE,

@@ -1256,3 +1256,127 @@ func (ds *DeclareStatement) String() string {
 	}
 	return "declare"
 }
+
+// ============================================
+// Pattern Matching AST Nodes
+// ============================================
+
+// MatchExpression represents a match expression for pattern matching
+// Syntax: match value | pattern -> expression | pattern -> expression end
+type MatchExpression struct {
+	Token lexer.Token // The 'match' token
+	Value Expression  // The value being matched
+	Cases []MatchCase // The match cases
+}
+
+func (me *MatchExpression) expressionNode()      {}
+func (me *MatchExpression) TokenLiteral() string { return me.Token.Literal }
+func (me *MatchExpression) String() string {
+	var out strings.Builder
+	out.WriteString("match ")
+	out.WriteString(me.Value.String())
+	for _, c := range me.Cases {
+		out.WriteString("\n  | ")
+		out.WriteString(c.String())
+	}
+	out.WriteString("\nend")
+	return out.String()
+}
+
+// MatchCase represents a single case in a match expression
+type MatchCase struct {
+	Token   lexer.Token // The '|' token
+	Pattern Pattern     // The pattern to match
+	Guard   Expression  // Optional guard condition (when clause)
+	Body    Expression  // The expression to evaluate if matched
+}
+
+func (mc *MatchCase) String() string {
+	var out strings.Builder
+	out.WriteString(mc.Pattern.String())
+	if mc.Guard != nil {
+		out.WriteString(" when ")
+		out.WriteString(mc.Guard.String())
+	}
+	out.WriteString(" -> ")
+	out.WriteString(mc.Body.String())
+	return out.String()
+}
+
+// Pattern interface for different pattern types
+type Pattern interface {
+	Node
+	patternNode()
+}
+
+// WildcardPattern represents the _ pattern (matches anything)
+type WildcardPattern struct {
+	Token lexer.Token // The '_' token (IDENT with value "_")
+}
+
+func (wp *WildcardPattern) patternNode()           {}
+func (wp *WildcardPattern) TokenLiteral() string   { return wp.Token.Literal }
+func (wp *WildcardPattern) String() string         { return "_" }
+
+// LiteralPattern represents matching a literal value
+type LiteralPattern struct {
+	Token lexer.Token
+	Value Expression // NumberLiteral, StringLiteral, BooleanLiteral, etc.
+}
+
+func (lp *LiteralPattern) patternNode()           {}
+func (lp *LiteralPattern) TokenLiteral() string   { return lp.Token.Literal }
+func (lp *LiteralPattern) String() string {
+	if lp.Value != nil {
+		return lp.Value.String()
+	}
+	return lp.Token.Literal
+}
+
+// BindingPattern represents capturing to a variable
+type BindingPattern struct {
+	Token lexer.Token // The identifier token
+	Name  string      // The variable name to bind to
+}
+
+func (bp *BindingPattern) patternNode()           {}
+func (bp *BindingPattern) TokenLiteral() string   { return bp.Token.Literal }
+func (bp *BindingPattern) String() string         { return bp.Name }
+
+// StructPattern represents object destructuring { key: pattern, ... }
+type StructPattern struct {
+	Token  lexer.Token           // The '{' token
+	Fields map[string]Pattern    // Field patterns
+}
+
+func (sp *StructPattern) patternNode()           {}
+func (sp *StructPattern) TokenLiteral() string   { return sp.Token.Literal }
+func (sp *StructPattern) String() string {
+	var out strings.Builder
+	out.WriteString("{ ")
+
+	fields := make([]string, 0, len(sp.Fields))
+	for key, pattern := range sp.Fields {
+		fields = append(fields, fmt.Sprintf("%s: %s", key, pattern.String()))
+	}
+	out.WriteString(strings.Join(fields, ", "))
+	out.WriteString(" }")
+	return out.String()
+}
+
+// TypePattern represents matching against a type with optional binding
+// Syntax: Type or varName: Type
+type TypePattern struct {
+	Token    lexer.Token // The type token
+	TypeName string      // The type to match against
+	Binding  string      // Optional variable name to bind to (empty if none)
+}
+
+func (tp *TypePattern) patternNode()           {}
+func (tp *TypePattern) TokenLiteral() string   { return tp.Token.Literal }
+func (tp *TypePattern) String() string {
+	if tp.Binding != "" {
+		return fmt.Sprintf("%s: %s", tp.Binding, tp.TypeName)
+	}
+	return tp.TypeName
+}

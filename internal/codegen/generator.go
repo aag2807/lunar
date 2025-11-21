@@ -976,6 +976,8 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 	case *ast.AwaitExpression:
 		// Await translates to coroutine.resume for the coroutine
 		return fmt.Sprintf("coroutine.yield(%s)", g.generateExpression(node.Expression))
+	case *ast.MatchExpression:
+		return g.generateMatchExpression(node)
 	default:
 		return ""
 	}
@@ -1550,4 +1552,165 @@ func (g *Generator) escapeLuaString(s string) string {
 		}
 	}
 	return result.String()
+}
+
+// ============================================
+// Pattern Matching Code Generation
+// ============================================
+
+// generateMatchExpression generates code for a match expression
+// Compiles to an immediately invoked function with if/elseif chains
+func (g *Generator) generateMatchExpression(node *ast.MatchExpression) string {
+	var output strings.Builder
+
+	// Start an immediately invoked function that returns the matched result
+	output.WriteString("(function()")
+	output.WriteString("\n")
+
+	// Store the matched value in a local variable
+	output.WriteString("  local __match_value = ")
+	output.WriteString(g.generateExpression(node.Value))
+	output.WriteString("\n")
+
+	// Generate if/elseif chain for each case
+	for i, matchCase := range node.Cases {
+		if i == 0 {
+			output.WriteString("  if ")
+		} else {
+			output.WriteString("  elseif ")
+		}
+
+		// Generate pattern matching condition
+		condition, bindings := g.generatePatternCondition(matchCase.Pattern, "__match_value")
+
+		// If there are bindings and a guard, we need to declare bindings before the guard
+		// To do this, we wrap the condition in a separate scope
+		if len(bindings) > 0 && matchCase.Guard != nil {
+			output.WriteString("(function()\n")
+			// Add pattern bindings first
+			for _, binding := range bindings {
+				output.WriteString("      ")
+				output.WriteString(binding)
+				output.WriteString("\n")
+			}
+			output.WriteString("      return ")
+			output.WriteString(condition)
+			output.WriteString(" and (")
+			output.WriteString(g.generateExpression(matchCase.Guard))
+			output.WriteString(")\n    end)() then\n")
+		} else {
+			output.WriteString(condition)
+
+			// Add guard condition if present (and no bindings)
+			if matchCase.Guard != nil {
+				output.WriteString(" and (")
+				output.WriteString(g.generateExpression(matchCase.Guard))
+				output.WriteString(")")
+			}
+
+			output.WriteString(" then\n")
+
+			// Add pattern bindings (if no guard, or bindings already added)
+			if matchCase.Guard == nil {
+				for _, binding := range bindings {
+					output.WriteString("    ")
+					output.WriteString(binding)
+					output.WriteString("\n")
+				}
+			}
+		}
+
+		// Return the body expression
+		output.WriteString("    return ")
+		output.WriteString(g.generateExpression(matchCase.Body))
+		output.WriteString("\n")
+	}
+
+	// Close the if statement
+	output.WriteString("  end\n")
+
+	// If no pattern matched, return nil (or could error)
+	output.WriteString("  error('Pattern match failed: no case matched')\n")
+
+	// End the function and invoke it
+	output.WriteString("end)()")
+
+	return output.String()
+}
+
+// generatePatternCondition generates the condition check and bindings for a pattern
+// Returns (condition string, list of binding statements)
+func (g *Generator) generatePatternCondition(pattern ast.Pattern, valueName string) (string, []string) {
+	bindings := []string{}
+
+	switch p := pattern.(type) {
+	case *ast.WildcardPattern:
+		// Wildcard matches everything
+		return "true", bindings
+
+	case *ast.LiteralPattern:
+		// Match against literal value
+		literalValue := g.generateExpression(p.Value)
+		condition := fmt.Sprintf("%s == %s", valueName, literalValue)
+		return condition, bindings
+
+	case *ast.BindingPattern:
+		// Binding pattern always matches and binds the value to a variable
+		binding := fmt.Sprintf("local %s = %s", p.Name, valueName)
+		bindings = append(bindings, binding)
+		return "true", bindings
+
+	case *ast.TypePattern:
+		// Type pattern - check if value has a specific type tag or structure
+		// For discriminated unions, check the 'type' or 'kind' field
+		var condition string
+
+		if p.TypeName == "number" {
+			condition = fmt.Sprintf("type(%s) == 'number'", valueName)
+		} else if p.TypeName == "string" {
+			condition = fmt.Sprintf("type(%s) == 'string'", valueName)
+		} else if p.TypeName == "boolean" {
+			condition = fmt.Sprintf("type(%s) == 'boolean'", valueName)
+		} else if p.TypeName == "table" {
+			condition = fmt.Sprintf("type(%s) == 'table'", valueName)
+		} else {
+			// For custom types, check the type tag field
+			// Try both .type and .kind as common discriminator fields
+			condition = fmt.Sprintf("(type(%s) == 'table' and (%s.type == '%s' or %s.kind == '%s'))",
+				valueName, valueName, p.TypeName, valueName, p.TypeName)
+		}
+
+		// Add binding if specified
+		if p.Binding != "" {
+			binding := fmt.Sprintf("local %s = %s", p.Binding, valueName)
+			bindings = append(bindings, binding)
+		}
+
+		return condition, bindings
+
+	case *ast.StructPattern:
+		// Struct pattern - check if value is a table and has matching fields
+		var conditions []string
+		conditions = append(conditions, fmt.Sprintf("type(%s) == 'table'", valueName))
+
+		// Generate conditions and bindings for each field
+		for fieldName, fieldPattern := range p.Fields {
+			fieldValue := fmt.Sprintf("%s.%s", valueName, fieldName)
+			fieldCond, fieldBindings := g.generatePatternCondition(fieldPattern, fieldValue)
+
+			// Only add non-trivial conditions (not "true")
+			if fieldCond != "true" {
+				conditions = append(conditions, fieldCond)
+			}
+
+			bindings = append(bindings, fieldBindings...)
+		}
+
+		condition := strings.Join(conditions, " and ")
+		return condition, bindings
+
+	default:
+		// Unknown pattern type
+		return "false", bindings
+	}
 }

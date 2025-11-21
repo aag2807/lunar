@@ -41,6 +41,7 @@ end
 ✅ **Generics** - Write reusable, type-safe code
 ✅ **Union Types** - Flexible type combinations (`string | number`)
 ✅ **Intersection Types** - Combine multiple types (`T1 & T2`)
+✅ **Pattern Matching** - Powerful match expressions with discriminated unions, guards, and destructuring
 ✅ **Optional Parameters** - Optional function parameters (`param: Type?`)
 ✅ **Multiple Return Values** - Tuple types for multi-value returns (`(boolean, string)`)
 ✅ **Advanced Types** - Mapped types, conditional types, template literal types
@@ -156,6 +157,8 @@ lua hello.lua
 
 ## Usage
 
+### Basic Compilation
+
 ```bash
 # Compile with type checking (default)
 lunar input.lunar
@@ -185,13 +188,58 @@ lunar --bundle --watch --run main.lunar
 
 # Compile and run (without bundling)
 lunar --run input.lunar
+```
 
+### Project Management
+
+```bash
+# Create a new project from template
+lunar --template basic create my-project
+lunar --template cli create my-cli-app
+lunar --template web create my-api
+lunar --template library create my-lib
+
+# List available templates
+lunar create list
+
+# Initialize lunar.json in existing project
+lunar init
+lunar init -y                    # Skip prompts
+lunar init --name myproject      # Set project name
+lunar init --strict              # Enable strict mode
+
+# Manage dependencies
+lunar add mypackage              # Add package
+lunar add user/repo              # Add from GitHub
+lunar add mypackage --dev        # Add dev dependency
+lunar remove mypackage           # Remove package
+lunar install                    # Install all dependencies
+
+# Run scripts from lunar.json
+lunar run dev
+lunar run build
+lunar run test
+```
+
+### Testing
+
+```bash
 # Run tests in a directory
 lunar --test ./tests
 
 # Run tests with filtering
 lunar --test ./tests --filter "Math"
 
+# Run tests with coverage (experimental)
+lunar --test --coverage ./tests
+
+# Watch tests and re-run on changes
+lunar --test --test-watch ./tests
+```
+
+### Code Quality
+
+```bash
 # Format code (print to stdout)
 lunar --format input.lunar
 
@@ -200,12 +248,21 @@ lunar --format-write input.lunar
 
 # Lint code for best practices
 lunar --lint input.lunar
+```
 
+### Advanced Options
+
+```bash
 # Combine options (note: flags must come before filename)
 lunar --source-map --target luajit -o output.lua input.lunar
 
 # Start interactive REPL
 lunar --repl
+
+# Advanced compiler features
+lunar --wasm input.lunar         # Compile to WebAssembly
+lunar --jit-hints input.lunar    # Add JIT optimization hints
+lunar --plugin-load ./plugin.so  # Load compiler plugin
 
 # Show version
 lunar --version
@@ -326,6 +383,42 @@ end
 
 local sum: number = add(1, 2)      -- Returns 3
 local concat: string = add("a", "b")  -- Returns "ab"
+```
+
+### Pattern Matching
+
+```lunar
+-- Powerful pattern matching for discriminated unions
+function handleResult(result: any): string
+    return match result with
+        | { type: "success", value: v } -> "Got value: " .. tostring(v)
+        | { type: "error", message: msg } -> "Error: " .. msg
+        | _ -> "Unknown result"
+    end
+end
+
+-- Guards for conditional matching
+function classify(n: number): string
+    return match n with
+        | x when x > 100 -> "large"
+        | x when x > 10 -> "medium"
+        | x when x > 0 -> "small"
+        | 0 -> "zero"
+        | _ -> "negative"
+    end
+end
+
+-- Literal patterns and wildcards
+function describe(value: any): string
+    return match value with
+        | 0 -> "zero"
+        | 42 -> "the answer"
+        | "hello" -> "greeting"
+        | true -> "yes"
+        | nil -> "nothing"
+        | _ -> "something else"
+    end
+end
 ```
 
 ### Optional Parameters
@@ -645,20 +738,27 @@ lunar/
 - [x] Advanced type features (mapped, conditional, template literal types)
 - [x] VS Code extension and Neovim plugin
 
-### v1.6 (In Progress) 🚧
+### v1.6 (Current) ✅
 - [x] Better test runner with colored output
 - [x] Test filtering by pattern (`--filter`)
 - [x] Test timing and statistics
-- [ ] More LSP features (find references, rename, code actions, inlay hints)
-- [ ] Documentation generator (`--docs` flag)
+- [x] Pattern matching with discriminated unions, guards, and destructuring
+- [x] Optional chaining (`?.`) and nullish coalescing (`??`)
+- [x] Pipe operator (`|>`) for functional programming
+- [x] Complete LSP features (find references, rename, code actions, inlay hints)
+- [x] Package manager (`lunar add`, `lunar remove`, `lunar install`)
+- [x] Project scaffolding tool (`lunar create` with templates)
+- [x] Test coverage infrastructure (debug hook-based tracking)
+- [x] Advanced compiler features (WASM, JIT hints, plugin system)
 
 ### v2.0 (Future)
 - [ ] Null coalescing assignment (`??=`)
-- [ ] Package manager integration
-- [ ] Incremental compilation
+- [ ] Incremental compilation and caching
 - [ ] Performance optimizations (dead code elimination, minification)
 - [ ] REPL improvements (LSP-powered auto-completion, persistent history)
-- [ ] Test coverage reporting
+- [ ] Documentation generator (`--docs` flag)
+- [ ] Package registry and publishing
+- [ ] Source map debugging improvements
 
 ## Configuration
 
@@ -708,10 +808,10 @@ Lunar includes a full Language Server Protocol (LSP) implementation for IDE inte
 - ✅ Go to definition
 - ✅ Hover type information
 - ✅ Auto-completion (variables, functions, classes, keywords)
-- 🚧 Find references (planned for v2.0)
-- 🚧 Rename symbol (planned for v2.0)
-- 🚧 Code actions (planned for v2.0)
-- 🚧 Inlay hints (planned for v2.0)
+- ✅ Find references (find all usages of a symbol)
+- ✅ Rename symbol (rename across all files)
+- ✅ Code actions (quick fixes for undefined variables, type mismatches, missing imports)
+- ✅ Inlay hints (type annotations for inferred types)
 
 ### Neovim
 

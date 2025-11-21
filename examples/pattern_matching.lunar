@@ -1,0 +1,281 @@
+-- Pattern Matching in Lunar
+-- Powerful pattern matching for discriminated unions and data structures
+
+-- ============================================
+-- BASIC PATTERN MATCHING
+-- ============================================
+
+-- Example 1: Literal Patterns
+function describeNumber(n: number): string
+    return match n with
+        | 0 -> "zero"
+        | 1 -> "one"
+        | 2 -> "two"
+        | _ -> "other number"
+    end
+end
+
+print("Literal patterns:")
+print(describeNumber(0))   -- zero
+print(describeNumber(1))   -- one
+print(describeNumber(42))  -- other number
+
+-- Example 2: Wildcard Pattern (_)
+-- Matches anything, useful as a catch-all
+function acceptAnything(x: any): string
+    return match x with
+        | _ -> "I accept everything!"
+    end
+end
+
+print("\nWildcard pattern:")
+print(acceptAnything(42))      -- I accept everything!
+print(acceptAnything("hello")) -- I accept everything!
+
+-- Example 3: Binding Patterns
+-- Capture the matched value in a variable
+function double(x: number): number
+    return match x with
+        | n -> n * 2
+    end
+end
+
+print("\nBinding patterns:")
+print(double(21)) -- 42
+
+-- ============================================
+-- GUARD CLAUSES
+-- ============================================
+
+-- Example 4: Guards for conditional matching
+function classify(x: number): string
+    return match x with
+        | n when n > 100 -> "large"
+        | n when n > 10 -> "medium"
+        | n when n > 0 -> "small"
+        | 0 -> "zero"
+        | _ -> "negative"
+    end
+end
+
+print("\nGuard clauses:")
+print(classify(200))  -- large
+print(classify(50))   -- medium
+print(classify(5))    -- small
+print(classify(0))    -- zero
+print(classify(-10))  -- negative
+
+-- Example 5: Complex guards
+function fizzBuzz(n: number): string
+    return match n with
+        | x when x % 15 == 0 -> "FizzBuzz"
+        | x when x % 3 == 0 -> "Fizz"
+        | x when x % 5 == 0 -> "Buzz"
+        | x -> tostring(x)
+    end
+end
+
+print("\nFizzBuzz with pattern matching:")
+for i = 1, 16 do
+    print(i, fizzBuzz(i))
+end
+
+-- ============================================
+-- DISCRIMINATED UNIONS
+-- ============================================
+
+-- Example 6: Type-based pattern matching
+-- Simulate discriminated unions using tables with type tags
+
+function processResult(result: any): string
+    return match result with
+        | Success -> "Operation succeeded with value: " .. tostring(result.value)
+        | Error -> "Operation failed: " .. result.message
+        | _ -> "Unknown result type"
+    end
+end
+
+local successResult = { type = "Success", value = 42 }
+local errorResult = { type = "Error", message = "Network timeout" }
+
+print("\nDiscriminated unions:")
+print(processResult(successResult))
+print(processResult(errorResult))
+
+-- Example 7: Shape area calculator
+function calculateArea(shape: any): number
+    return match shape with
+        | Circle -> 3.14159 * shape.radius * shape.radius
+        | Rectangle -> shape.width * shape.height
+        | Triangle -> 0.5 * shape.base * shape.height
+        | _ -> 0
+    end
+end
+
+local circle = { type = "Circle", radius = 5 }
+local rectangle = { type = "Rectangle", width = 10, height = 20 }
+local triangle = { type = "Triangle", base = 6, height = 8 }
+
+print("\nShape area calculator:")
+print("Circle area:", calculateArea(circle))         -- ~78.54
+print("Rectangle area:", calculateArea(rectangle))   -- 200
+print("Triangle area:", calculateArea(triangle))     -- 24
+
+-- ============================================
+-- STRUCT/OBJECT PATTERNS
+-- ============================================
+
+-- Example 8: Destructuring with struct patterns
+function greet(person: any): string
+    return match person with
+        | { name: n, age: a } -> n .. " is " .. tostring(a) .. " years old"
+        | { name: n } -> "Hello, " .. n
+        | _ -> "Hello, stranger"
+    end
+end
+
+local alice = { name = "Alice", age = 30 }
+local bob = { name = "Bob" }
+local anonymous = {}
+
+print("\nStruct patterns:")
+print(greet(alice))     -- Alice is 30 years old
+print(greet(bob))       -- Hello, Bob
+print(greet(anonymous)) -- Hello, stranger
+
+-- ============================================
+-- STRING PATTERNS
+-- ============================================
+
+-- Example 9: Command parser
+function parseCommand(cmd: string): string
+    return match cmd with
+        | "help" -> "Showing help..."
+        | "quit" -> "Exiting..."
+        | "save" -> "Saving..."
+        | "load" -> "Loading..."
+        | _ -> "Unknown command: " .. cmd
+    end
+end
+
+print("\nString patterns:")
+print(parseCommand("help"))    -- Showing help...
+print(parseCommand("quit"))    -- Exiting...
+print(parseCommand("invalid")) -- Unknown command: invalid
+
+-- ============================================
+-- BOOLEAN PATTERNS
+-- ============================================
+
+-- Example 10: Boolean matching
+function toYesNo(b: boolean): string
+    return match b with
+        | true -> "Yes"
+        | false -> "No"
+    end
+end
+
+print("\nBoolean patterns:")
+print(toYesNo(true))  -- Yes
+print(toYesNo(false)) -- No
+
+-- ============================================
+-- NIL/NULL PATTERNS
+-- ============================================
+
+-- Example 11: Optional value handling
+function getValue(optional: any): string
+    return match optional with
+        | nil -> "No value"
+        | val -> "Value: " .. tostring(val)
+    end
+end
+
+print("\nNil patterns:")
+print(getValue(nil))   -- No value
+print(getValue(42))    -- Value: 42
+print(getValue("hi"))  -- Value: hi
+
+-- ============================================
+-- NESTED PATTERNS
+-- ============================================
+
+-- Example 12: Complex nested matching
+function processEvent(event: any): string
+    return match event with
+        | { type: "click", button: btn } -> "Clicked button: " .. tostring(btn)
+        | { type: "keypress", key: k } -> "Pressed key: " .. k
+        | { type: "scroll", delta: d } -> "Scrolled by: " .. tostring(d)
+        | _ -> "Unknown event"
+    end
+end
+
+local clickEvent = { type = "click", button = 1 }
+local keyEvent = { type = "keypress", key = "Enter" }
+local scrollEvent = { type = "scroll", delta = 120 }
+
+print("\nNested patterns:")
+print(processEvent(clickEvent))  -- Clicked button: 1
+print(processEvent(keyEvent))    -- Pressed key: Enter
+print(processEvent(scrollEvent)) -- Scrolled by: 120
+
+-- ============================================
+-- PRACTICAL EXAMPLES
+-- ============================================
+
+-- Example 13: HTTP Response Handler
+function handleResponse(response: any): string
+    return match response.status with
+        | code when code >= 200 and code < 300 -> "Success: " .. response.body
+        | 404 -> "Not found"
+        | code when code >= 400 and code < 500 -> "Client error: " .. tostring(code)
+        | code when code >= 500 -> "Server error: " .. tostring(code)
+        | _ -> "Unknown response"
+    end
+end
+
+local okResponse = { status = 200, body = "Data loaded" }
+local notFoundResponse = { status = 404, body = "" }
+local serverErrorResponse = { status = 500, body = "" }
+
+print("\nHTTP response handler:")
+print(handleResponse(okResponse))           -- Success: Data loaded
+print(handleResponse(notFoundResponse))     -- Not found
+print(handleResponse(serverErrorResponse))  -- Server error: 500
+
+-- Example 14: State Machine
+function transition(currentState: string, event: string): string
+    return match currentState with
+        | "idle" when event == "start" -> "running"
+        | "running" when event == "pause" -> "paused"
+        | "running" when event == "stop" -> "idle"
+        | "paused" when event == "resume" -> "running"
+        | "paused" when event == "stop" -> "idle"
+        | state -> state  -- Stay in current state
+    end
+end
+
+print("\nState machine:")
+local state = "idle"
+print("Current state:", state)
+state = transition(state, "start")
+print("After 'start':", state)    -- running
+state = transition(state, "pause")
+print("After 'pause':", state)    -- paused
+state = transition(state, "resume")
+print("After 'resume':", state)   -- running
+state = transition(state, "stop")
+print("After 'stop':", state)     -- idle
+
+-- ============================================
+-- BEST PRACTICES
+-- ============================================
+
+print("\n=== Pattern Matching Best Practices ===")
+print("1. Always include a wildcard (_) pattern at the end to handle unexpected cases")
+print("2. Order patterns from most specific to least specific")
+print("3. Use guards for complex conditions")
+print("4. Leverage struct patterns for destructuring")
+print("5. Pattern matching compiles to efficient if/elseif chains")
+print("6. Use 'with' keyword to separate the value from patterns")
+print("7. Each case uses '|' followed by pattern, '->', then expression")

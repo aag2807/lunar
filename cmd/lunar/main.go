@@ -12,6 +12,7 @@ import (
 	"lunar/internal/config"
 	"lunar/internal/docgen"
 	"lunar/internal/formatter"
+	"lunar/internal/jit"
 	"lunar/internal/lexer"
 	"lunar/internal/linter"
 	"lunar/internal/luarocks"
@@ -19,7 +20,11 @@ import (
 	"lunar/internal/minify"
 	"lunar/internal/optimizer"
 	"lunar/internal/parser"
+	"lunar/internal/pkgmgr"
+	"lunar/internal/plugin"
+	"lunar/internal/scaffold"
 	"lunar/internal/types"
+	"lunar/internal/wasm"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -78,6 +83,20 @@ func main() {
 	migrateNoTypes := flag.Bool("migrate-no-types", false, "Don't add type annotations during migration")
 	migrateUseConst := flag.Bool("migrate-const", true, "Use const for immutable variables")
 	migrateOutput := flag.String("migrate-output", "", "Output file for migrated code (default: <input>.lunar)")
+
+	// Package manager flags (for init command)
+	initYes := flag.Bool("y", false, "Skip prompts and use defaults (for init)")
+	initName := flag.String("name", "", "Project name (for init)")
+	initStrict := flag.Bool("strict", false, "Enable strict mode (for init)")
+
+	// Scaffolding flags (for create command)
+	createTemplate := flag.String("template", "basic", "Template to use: basic, cli, web, library (for create)")
+
+	// Advanced features flags
+	wasmMode := flag.Bool("wasm", false, "Compile to WebAssembly")
+	wasmOutput := flag.String("wasm-output", "", "WASM output directory (default: build/wasm)")
+	jitHints := flag.Bool("jit-hints", false, "Add JIT optimization hints to output")
+	pluginLoad := flag.String("plugin-load", "", "Load a compiler plugin (.so file)")
 
 	flag.Parse()
 
@@ -163,8 +182,61 @@ func main() {
 		}
 	}
 
-	// Get input file
+	// Get arguments
 	args := flag.Args()
+
+	// Handle subcommands (init, run, add, remove, install)
+	if len(args) > 0 {
+		subcommand := args[0]
+		switch subcommand {
+		case "init":
+			handleInit(*initYes, *initName, *targetLua, *initStrict)
+			os.Exit(0)
+		case "create":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "Error: No project name specified")
+				fmt.Fprintln(os.Stderr, "Usage: lunar create <project-name> [--template <type>]")
+				os.Exit(1)
+			}
+			projectName := args[1]
+			handleCreate(projectName, *createTemplate)
+			os.Exit(0)
+		case "run":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "Error: No script name specified")
+				fmt.Fprintln(os.Stderr, "Usage: lunar run <script>")
+				os.Exit(1)
+			}
+			scriptName := args[1]
+			scriptArgs := args[2:]
+			handleRun(scriptName, scriptArgs)
+			os.Exit(0)
+		case "add":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "Error: No package specified")
+				fmt.Fprintln(os.Stderr, "Usage: lunar add <package> [--dev]")
+				os.Exit(1)
+			}
+			packageSpec := args[1]
+			dev := len(args) > 2 && args[2] == "--dev"
+			handleAdd(packageSpec, dev)
+			os.Exit(0)
+		case "remove":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "Error: No package specified")
+				fmt.Fprintln(os.Stderr, "Usage: lunar remove <package>")
+				os.Exit(1)
+			}
+			packageName := args[1]
+			handleRemove(packageName)
+			os.Exit(0)
+		case "install":
+			handleInstall()
+			os.Exit(0)
+		}
+	}
+
+	// Get input file
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "Error: No input file specified")
 		fmt.Fprintln(os.Stderr, "Usage: lunar [options] <input.lunar>")
@@ -223,6 +295,28 @@ func main() {
 			os.Exit(1)
 		}
 		os.Exit(0)
+	}
+
+	// Handle WASM compilation mode
+	if *wasmMode {
+		output := *wasmOutput
+		if output == "" {
+			output = "build/wasm"
+		}
+		if err := compileToWasm(inputFile, output, !*noTypeCheck); err != nil {
+			fmt.Fprintf(os.Stderr, "WASM compilation failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	// Handle plugin loading
+	if *pluginLoad != "" {
+		if err := loadPlugin(*pluginLoad); err != nil {
+			fmt.Fprintf(os.Stderr, "Plugin load failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Plugin loaded successfully: %s\n", *pluginLoad)
 	}
 
 	// Validate input file extension
@@ -301,11 +395,11 @@ func main() {
 	// Watch mode or single compilation
 	if *watchMode {
 		useCache := !*noCache
-		runWatchMode(inputFile, output, !*noTypeCheck, *sourceMap, *watchInterval, *runMode, cfg.CompilerOptions.Target, useCache, *optimizeMode, *minifyMode, *watchClear)
+		runWatchMode(inputFile, output, !*noTypeCheck, *sourceMap, *watchInterval, *runMode, cfg.CompilerOptions.Target, useCache, *optimizeMode, *minifyMode, *jitHints, *watchClear)
 	} else {
 		// Compile the file
 		useCache := !*noCache
-		if err := compile(inputFile, output, !*noTypeCheck, *sourceMap, cfg.CompilerOptions.Target, useCache, *optimizeMode, *minifyMode); err != nil {
+		if err := compile(inputFile, output, !*noTypeCheck, *sourceMap, cfg.CompilerOptions.Target, useCache, *optimizeMode, *minifyMode, *jitHints); err != nil {
 			fmt.Fprintf(os.Stderr, "Compilation failed:\n%v\n", err)
 			os.Exit(1)
 		}
@@ -484,7 +578,7 @@ func runBundleWatchMode(inputFile, outputFile string, typeCheck, runAfter bool, 
 }
 
 // compile compiles a Lunar source file to Lua
-func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool, target string, useCache, useOptimize, useMinify bool) error {
+func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool, target string, useCache, useOptimize, useMinify, useJitHints bool) error {
 	// Check cache if enabled
 	var compCache *cache.Cache
 	if useCache {
@@ -581,6 +675,12 @@ func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool, ta
 	} else {
 		// Generate without source map
 		luaCode = codegen.GenerateWithTarget(statements, target)
+	}
+
+	// JIT Hints: Add optimization hints (if enabled)
+	if useJitHints {
+		jitPreamble := jit.GenerateOptimizationCode(jit.DefaultConfig())
+		luaCode = jitPreamble + luaCode
 	}
 
 	// Minifier: Reduce code size (if enabled)
@@ -816,14 +916,14 @@ func lintFile(inputFile string) error {
 }
 
 // runWatchMode watches files for changes and recompiles automatically
-func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap bool, intervalMs int, runAfter bool, target string, useCache, useOptimize, useMinify, clearConsole bool) {
+func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap bool, intervalMs int, runAfter bool, target string, useCache, useOptimize, useMinify, useJitHints, clearConsole bool) {
 	fmt.Printf("Watching %s for changes (Ctrl+C to stop)\n", inputFile)
 
 	// Get initial modification time
 	lastModTime := getFileModTime(inputFile)
 
 	// Initial compilation
-	if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target, useCache, useOptimize, useMinify); err != nil {
+	if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target, useCache, useOptimize, useMinify, useJitHints); err != nil {
 		fmt.Fprintf(os.Stderr, "[%s] Compilation failed:\n%v\n", time.Now().Format("15:04:05"), err)
 	} else {
 		fmt.Printf("[%s] Successfully compiled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
@@ -868,7 +968,7 @@ func runWatchMode(inputFile, outputFile string, typeCheck, generateSourceMap boo
 							clearScreen()
 						}
 						fmt.Printf("[%s] File changed, recompiling...\n", time.Now().Format("15:04:05"))
-						if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target, useCache, useOptimize, useMinify); err != nil {
+						if err := compile(inputFile, outputFile, typeCheck, generateSourceMap, target, useCache, useOptimize, useMinify, useJitHints); err != nil {
 							fmt.Fprintf(os.Stderr, "[%s] Compilation failed:\n%v\n", time.Now().Format("15:04:05"), err)
 						} else {
 							fmt.Printf("[%s] Successfully compiled %s -> %s\n", time.Now().Format("15:04:05"), inputFile, outputFile)
@@ -909,6 +1009,36 @@ func printHelp() {
 	fmt.Println("Usage:")
 	fmt.Println("  lunar [options] <input.lunar>")
 	fmt.Println("  lunar --repl")
+	fmt.Println("  lunar init                      Initialize a new Lunar project")
+	fmt.Println("  lunar create <name>             Create a new project from template")
+	fmt.Println("  lunar run <script>              Run a script from lunar.json")
+	fmt.Println()
+	fmt.Println("Scaffolding:")
+	fmt.Println("  lunar create <name>                    Create project with basic template")
+	fmt.Println("  lunar create <name> --template cli     Create CLI application")
+	fmt.Println("  lunar create <name> --template web     Create web server project")
+	fmt.Println("  lunar create <name> --template library Create library/module")
+	fmt.Println("  lunar create list                      List available templates")
+	fmt.Println()
+	fmt.Println("Package Manager:")
+	fmt.Println("  lunar init                    Create lunar.json interactively")
+	fmt.Println("  lunar init -y                 Create lunar.json with defaults (skip prompts)")
+	fmt.Println("  lunar init --name <name>      Set project name")
+	fmt.Println("  lunar init --strict           Enable strict mode")
+	fmt.Println("  lunar add <package>           Add a package dependency")
+	fmt.Println("  lunar add <package> --dev     Add a dev dependency")
+	fmt.Println("  lunar remove <package>        Remove a package dependency")
+	fmt.Println("  lunar install                 Install all dependencies from lunar.json")
+	fmt.Println("  lunar run <script>            Run a script defined in lunar.json")
+	fmt.Println("  lunar run <script> [args]     Pass arguments to the script")
+	fmt.Println()
+	fmt.Println("Package Specifiers:")
+	fmt.Println("  name                          Install from lunar-lang GitHub org")
+	fmt.Println("  user/repo                     Install from GitHub user/repo")
+	fmt.Println("  https://github.com/user/repo  Install from git URL")
+	fmt.Println("  name@version                  Install specific version (if supported)")
+	fmt.Println()
+	fmt.Println("Note: Packages are installed in .lunar/ directory")
 	fmt.Println()
 	fmt.Println("Options:")
 	fmt.Println("  -o <file>           Output file (default: replaces .lunar with .lua)")
@@ -941,6 +1071,12 @@ func printHelp() {
 	fmt.Println("  --version           Show version information")
 	fmt.Println("  --help              Show this help message")
 	fmt.Println()
+	fmt.Println("Advanced Features:")
+	fmt.Println("  --wasm              Compile to WebAssembly")
+	fmt.Println("  --wasm-output <dir> WASM output directory (default: build/wasm)")
+	fmt.Println("  --jit-hints         Add JIT optimization hints to Lua output")
+	fmt.Println("  --plugin-load <.so> Load a compiler plugin")
+	fmt.Println()
 	fmt.Println("LuaRocks Integration:")
 	fmt.Println("  --rocks-install <pkg>   Install a LuaRocks package (e.g., lfs@1.8.0)")
 	fmt.Println("  --rocks-remove <pkg>    Remove a LuaRocks package")
@@ -957,6 +1093,13 @@ func printHelp() {
 	fmt.Println("  --migrate-const         Use const for immutable variables (default: true)")
 	fmt.Println()
 	fmt.Println("Examples:")
+	fmt.Println("  # Package Management")
+	fmt.Println("  lunar init                           # Create lunar.json interactively")
+	fmt.Println("  lunar init -y                        # Create with defaults")
+	fmt.Println("  lunar run build                      # Run 'build' script from lunar.json")
+	fmt.Println("  lunar run dev                        # Run 'dev' script")
+	fmt.Println()
+	fmt.Println("  # Compilation")
 	fmt.Println("  lunar main.lunar")
 	fmt.Println("  lunar main.lunar -o output.lua")
 	fmt.Println("  lunar main.lunar --no-typecheck")
@@ -965,11 +1108,15 @@ func printHelp() {
 	fmt.Println("  lunar main.lunar --watch")
 	fmt.Println("  lunar main.lunar --bundle --run")
 	fmt.Println("  lunar main.lunar --bundle --watch --run")
+	fmt.Println()
+	fmt.Println("  # Testing & Docs")
 	fmt.Println("  lunar --test ./tests")
 	fmt.Println("  lunar --test ./tests --filter \"Math\"")
 	fmt.Println("  lunar --test ./tests --test-watch")
 	fmt.Println("  lunar --docs ./src")
 	fmt.Println("  lunar --docs ./src --docs-output ./api-docs")
+	fmt.Println()
+	fmt.Println("  # Interactive")
 	fmt.Println("  lunar --repl")
 	fmt.Println()
 	fmt.Println("For more information about the Lunar language:")
@@ -1531,7 +1678,10 @@ func generateTestRunner(testFiles []string, baseDir string, withCoverage bool) s
 	sb.WriteString("import { runTests, printResults } from \"vendor/testing\"\n")
 
 	if withCoverage {
-		sb.WriteString("import * as coverage from \"vendor/testing/coverage\"\n\n")
+		// Import coverage module using standard Lua require
+		sb.WriteString("\n-- Load coverage module\n")
+		sb.WriteString("package.path = package.path .. ';vendor/?.lua;vendor/?/init.lua'\n")
+		sb.WriteString("local coverage = require(\"testing.coverage\")\n\n")
 		sb.WriteString("-- Start coverage tracking\n")
 		sb.WriteString("coverage.start()\n\n")
 	} else {
@@ -1554,8 +1704,12 @@ func generateTestRunner(testFiles []string, baseDir string, withCoverage bool) s
 
 	if withCoverage {
 		sb.WriteString("\n-- Print coverage report\n")
-		sb.WriteString("coverage.stop()\n")
-		sb.WriteString("coverage.report()\n")
+		sb.WriteString("if coverage then\n")
+		sb.WriteString("    coverage.stop()\n")
+		sb.WriteString("    coverage.report()\n")
+		sb.WriteString("else\n")
+		sb.WriteString("    print(\"Warning: Coverage module not loaded\")\n")
+		sb.WriteString("end\n")
 	}
 
 	sb.WriteString("\n")
@@ -1819,4 +1973,241 @@ func handleMigration(inputFile, outputFile string, noTypes, useConst bool) {
 	fmt.Printf("  Type annotations: %v\n", !noTypes)
 	fmt.Printf("  Use const: %v\n", useConst)
 	fmt.Println("\nPlease review the migrated code and adjust type annotations as needed.")
+}
+
+// handleInit handles the 'lunar init' command
+func handleInit(skipPrompts bool, name, target string, strict bool) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Check if lunar.json already exists
+	manifestPath := filepath.Join(cwd, "lunar.json")
+	if _, err := os.Stat(manifestPath); err == nil {
+		fmt.Fprintln(os.Stderr, "Error: lunar.json already exists in current directory")
+		fmt.Fprintln(os.Stderr, "Hint: Remove it first or run this command in a different directory")
+		os.Exit(1)
+	}
+
+	opts := &pkgmgr.InitOptions{
+		Name:        name,
+		Target:      target,
+		Strict:      strict,
+		SkipPrompts: skipPrompts,
+	}
+
+	if err := pkgmgr.Init(cwd, opts); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// handleRun handles the 'lunar run <script>' command
+func handleRun(scriptName string, args []string) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Find lunar.json
+	projectDir, _, err := pkgmgr.FindManifest(cwd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error: No lunar.json found in current directory or parent directories")
+		fmt.Fprintln(os.Stderr, "Hint: Run 'lunar init' to create a lunar.json file")
+		os.Exit(1)
+	}
+
+	// Run the script
+	if err := pkgmgr.RunScript(projectDir, scriptName, args); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// handleAdd adds a package to the project
+func handleAdd(packageSpec string, dev bool) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Find lunar.json
+	projectDir, _, err := pkgmgr.FindManifest(cwd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error: No lunar.json found in current directory or parent directories")
+		fmt.Fprintln(os.Stderr, "Hint: Run 'lunar init' to create a lunar.json file")
+		os.Exit(1)
+	}
+
+	// Create package manager
+	pm := pkgmgr.NewPackageManager(projectDir)
+
+	// Add the package
+	if err := pm.Add(packageSpec, dev); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// handleRemove removes a package from the project
+func handleRemove(packageName string) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Find lunar.json
+	projectDir, _, err := pkgmgr.FindManifest(cwd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error: No lunar.json found in current directory or parent directories")
+		fmt.Fprintln(os.Stderr, "Hint: Run 'lunar init' to create a lunar.json file")
+		os.Exit(1)
+	}
+
+	// Create package manager
+	pm := pkgmgr.NewPackageManager(projectDir)
+
+	// Remove the package
+	if err := pm.Remove(packageName); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// handleInstall installs all packages from lunar.json
+func handleInstall() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Find lunar.json
+	projectDir, _, err := pkgmgr.FindManifest(cwd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error: No lunar.json found in current directory or parent directories")
+		fmt.Fprintln(os.Stderr, "Hint: Run 'lunar init' to create a lunar.json file")
+		os.Exit(1)
+	}
+
+	// Create package manager
+	pm := pkgmgr.NewPackageManager(projectDir)
+
+	// Install all packages
+	if err := pm.Install(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// handleCreate scaffolds a new project from a template
+func handleCreate(projectName, templateName string) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// List available templates if requested
+	if projectName == "list" || templateName == "list" {
+		fmt.Println("Available templates:")
+		templates := scaffold.GetAvailableTemplates()
+		for name, template := range templates {
+			fmt.Printf("  %-10s - %s\n", name, template.Description)
+		}
+		return
+	}
+
+	// Create project from template
+	if err := scaffold.CreateProject(projectName, templateName, cwd); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// compileToWasm compiles Lunar code to WebAssembly
+func compileToWasm(inputFile, outputDir string, typeCheck bool) error {
+	fmt.Printf("Compiling %s to WebAssembly...\n", inputFile)
+
+	// Read input file
+	source, err := ioutil.ReadFile(inputFile)
+	if err != nil {
+		return fmt.Errorf("failed to read input file: %w", err)
+	}
+
+	// Parse Lunar code
+	l := lexer.New(string(source))
+	p := parser.New(l)
+	statements := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		for _, err := range p.Errors() {
+			fmt.Fprintf(os.Stderr, "Parse error: %s\n", err)
+		}
+		return fmt.Errorf("parsing failed with %d errors", len(p.Errors()))
+	}
+
+	// Type check if enabled
+	if typeCheck {
+		checker := types.NewChecker()
+		typeErrors := checker.Check(statements)
+		if len(typeErrors) > 0 {
+			for _, err := range typeErrors {
+				fmt.Fprintf(os.Stderr, "Type error: %s\n", err)
+			}
+			return fmt.Errorf("type checking failed with %d errors", len(typeErrors))
+		}
+	}
+
+	// Generate Lua code
+	luaCode := codegen.Generate(statements)
+
+	// Create WASM compiler
+	wasmCompiler := wasm.NewCompiler(wasm.CompilerOptions{
+		OutputDir:      outputDir,
+		Optimization:   wasm.OptSize,
+		IncludeRuntime: true,
+	})
+
+	// Get module name from input file
+	moduleName := strings.TrimSuffix(filepath.Base(inputFile), ".lunar")
+
+	// Compile to WASM
+	wasmFile, err := wasmCompiler.CompileToWasm(luaCode, moduleName)
+	if err != nil {
+		return fmt.Errorf("WASM compilation failed: %w", err)
+	}
+
+	fmt.Printf("✓ Successfully compiled to WebAssembly\n")
+	fmt.Printf("  Output: %s\n", wasmFile)
+	fmt.Printf("  Module: %s\n", moduleName)
+	fmt.Println("\nTo test in browser:")
+	fmt.Printf("  cd %s && python3 -m http.server 8000\n", outputDir)
+	fmt.Println("  Then open http://localhost:8000/")
+
+	return nil
+}
+
+// loadPlugin loads a compiler plugin
+func loadPlugin(pluginPath string) error {
+	fmt.Printf("Loading plugin: %s\n", pluginPath)
+
+	// Check if plugin file exists
+	if _, err := os.Stat(pluginPath); os.IsNotExist(err) {
+		return fmt.Errorf("plugin file not found: %s", pluginPath)
+	}
+
+	// Load the plugin
+	pluginSystem := plugin.NewPluginSystem(nil)
+	if err := pluginSystem.LoadPlugin(pluginPath); err != nil {
+		return fmt.Errorf("failed to load plugin: %w", err)
+	}
+
+	fmt.Println("✓ Plugin loaded successfully")
+	return nil
 }

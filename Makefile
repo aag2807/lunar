@@ -45,7 +45,11 @@ build: create-dist-dir build-lunar build-lunar2decl build-lunar-lsp
 
 # Create dist directory
 create-dist-dir:
-	@mkdir -p $(DIST_DIR)
+ifeq ($(DETECTED_OS),Windows)
+	-@$(MKDIR) $(DIST_DIR) 2>nul
+else
+	@$(MKDIR) $(DIST_DIR)
+endif
 
 # Build the main Lunar compiler
 build-lunar:

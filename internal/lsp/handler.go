@@ -54,6 +54,31 @@ func (s *Server) handleInitialize(content json.RawMessage) error {
 			InlayHintProvider: &InlayHintOptions{
 				ResolveProvider: false,
 			},
+			SemanticTokensProvider: &SemanticTokensOptions{
+				Legend: SemanticTokensLegend{
+					TokenTypes: []string{
+						SemanticTokenTypeKeyword,
+						SemanticTokenTypeType,
+						SemanticTokenTypeClass,
+						SemanticTokenTypeInterface,
+						SemanticTokenTypeFunction,
+						SemanticTokenTypeVariable,
+						SemanticTokenTypeParameter,
+						SemanticTokenTypeProperty,
+						SemanticTokenTypeString,
+						SemanticTokenTypeNumber,
+						SemanticTokenTypeComment,
+						SemanticTokenTypeOperator,
+						SemanticTokenTypeModifier,
+					},
+					TokenModifiers: []string{
+						SemanticTokenModifierDeclaration,
+						SemanticTokenModifierDefinition,
+						SemanticTokenModifierReadonly,
+					},
+				},
+				Full: true,
+			},
 		},
 	}
 
@@ -968,4 +993,151 @@ func isDeclarationLine(line string, idx int, symbol string) bool {
 	}
 
 	return false
+}
+
+// handleSemanticTokens handles textDocument/semanticTokens/full
+func (s *Server) handleSemanticTokens(content json.RawMessage, id interface{}) error {
+	var request struct {
+		Params SemanticTokensParams `json:"params"`
+	}
+
+	if err := json.Unmarshal(content, &request); err != nil {
+		return s.sendError(id, InvalidParams, err.Error())
+	}
+
+	doc := s.documents.Get(request.Params.TextDocument.URI)
+	if doc == nil {
+		return s.sendResponse(id, SemanticTokens{Data: []uint32{}})
+	}
+
+	tokens := s.getSemanticTokens(doc)
+	return s.sendResponse(id, tokens)
+}
+
+// getSemanticTokens returns semantic tokens for a document
+func (s *Server) getSemanticTokens(doc *Document) SemanticTokens {
+	tokens := []uint32{}
+	
+	l := lexer.New(doc.Content)
+	
+	// Token type indices (must match the legend order in handleInitialize)
+	const (
+		tokenTypeKeyword = 0
+		tokenTypeType = 1
+		tokenTypeClass = 2
+		tokenTypeInterface = 3
+		tokenTypeFunction = 4
+		tokenTypeVariable = 5
+		tokenTypeParameter = 6
+		tokenTypeProperty = 7
+		tokenTypeString = 8
+		tokenTypeNumber = 9
+		tokenTypeComment = 10
+		tokenTypeOperator = 11
+		tokenTypeModifier = 12
+	)
+	
+	// Token modifier indices
+	const (
+		modifierDeclaration = 0
+		modifierDefinition = 1
+		modifierReadonly = 2
+	)
+	
+	prevLine := 0
+	prevChar := 0
+	
+	for {
+		tok := l.NextToken()
+		if tok.Type == lexer.EOF {
+			break
+		}
+		
+		// Get token position (line is 0-indexed in LSP)
+		line := tok.Line - 1
+		char := tok.Column
+		
+		var tokenType int = -1
+		var tokenModifiers uint32 = 0
+		
+		// Map token types to semantic token types
+		switch tok.Type {
+		// Keywords
+		case lexer.FUNCTION, lexer.END, lexer.IF, lexer.THEN, lexer.ELSE, lexer.ELSEIF,
+			lexer.WHILE, lexer.DO, lexer.FOR, lexer.IN, lexer.RETURN, lexer.BREAK,
+			lexer.LOCAL, lexer.CONST, lexer.IMPORT, lexer.EXPORT, lexer.FROM,
+			lexer.ASYNC, lexer.AWAIT, lexer.MATCH, lexer.WITH:
+			tokenType = tokenTypeKeyword
+
+		// Declaration keywords
+		case lexer.DECLARE:
+			tokenType = tokenTypeKeyword
+			tokenModifiers = 1 << modifierDeclaration
+
+		case lexer.CLASS:
+			tokenType = tokenTypeClass
+
+		case lexer.INTERFACE:
+			tokenType = tokenTypeInterface
+
+		case lexer.PUBLIC, lexer.PRIVATE, lexer.PROTECTED, lexer.STATIC, lexer.READONLY:
+			tokenType = tokenTypeModifier
+			if tok.Type == lexer.READONLY {
+				tokenModifiers = 1 << modifierReadonly
+			}
+
+		// Types
+		case lexer.NUMBER_TYPE, lexer.STRING_TYPE, lexer.BOOLEAN,
+			lexer.ANY, lexer.VOID, lexer.TABLE, lexer.NEVER, lexer.UNKNOWN:
+			tokenType = tokenTypeType
+
+		// Literals
+		case lexer.STRING, lexer.TEMPLATE_STRING:
+			tokenType = tokenTypeString
+
+		case lexer.NUMBER:
+			tokenType = tokenTypeNumber
+
+		case lexer.NIL, lexer.TRUE, lexer.FALSE:
+			tokenType = tokenTypeKeyword
+
+		// Operators
+		case lexer.PLUS, lexer.MINUS, lexer.ASTERISK, lexer.SLASH, lexer.FLOOR_DIV,
+			lexer.EQ, lexer.NOT_EQ, lexer.NOT_EQ_LUA, lexer.LT, lexer.GT, lexer.LT_EQ, lexer.GT_EQ,
+			lexer.AND, lexer.OR, lexer.NOT, lexer.CONCAT, lexer.AMPERSAND, lexer.PIPE,
+			lexer.CARET, lexer.TILDE, lexer.LEFT_SHIFT, lexer.RIGHT_SHIFT:
+			tokenType = tokenTypeOperator
+		}
+		
+		// Skip tokens we don't want to highlight
+		if tokenType == -1 {
+			continue
+		}
+		
+		// Calculate deltas (LSP semantic tokens use delta encoding)
+		deltaLine := line - prevLine
+		deltaChar := char
+		if deltaLine == 0 {
+			deltaChar = char - prevChar
+		}
+		
+		length := len(tok.Literal)
+		if length == 0 {
+			length = 1
+		}
+		
+		// Append token (format: deltaLine, deltaStart, length, tokenType, tokenModifiers)
+		tokens = append(tokens, 
+			uint32(deltaLine),
+			uint32(deltaChar),
+			uint32(length),
+			uint32(tokenType),
+			tokenModifiers,
+		)
+		
+		prevLine = line
+		prevChar = char
+	}
+	
+	return SemanticTokens{Data: tokens}
 }

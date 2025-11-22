@@ -206,6 +206,8 @@ func (s *Server) handleMessage(content json.RawMessage) error {
 		return s.handleCodeAction(content, baseMsg.ID)
 	case "textDocument/inlayHint":
 		return s.handleInlayHint(content, baseMsg.ID)
+	case "textDocument/semanticTokens/full":
+		return s.handleSemanticTokens(content, baseMsg.ID)
 
 	default:
 		s.logger.Printf("Unhandled method: %s", baseMsg.Method)

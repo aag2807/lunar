@@ -2,6 +2,7 @@
 /lunar
 /lunar2decl
 /lunar-lsp
+bin/
 
 # Generated Lua files (keep source .lunar files only)
 *.lua

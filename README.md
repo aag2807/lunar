@@ -553,12 +553,11 @@ Create type definitions for existing Lua libraries:
 ### Manual Creation
 ```lunar
 -- socket.d.lunar
-declare interface Socket {
+declare interface Socket
     connect: function(host: string, port: number): boolean
     send: function(data: string): boolean
     receive: function(): string | nil
     close: function(): void
-}
 end
 
 declare function socket_connect(host: string, port: number): Socket end

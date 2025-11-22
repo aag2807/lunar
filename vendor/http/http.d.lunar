@@ -2,18 +2,18 @@
 -- Usage: import { get, post, request } from "vendor/http"
 -- Uses curl (no external dependencies required)
 
-declare interface HttpResponse {
+declare interface HttpResponse
     status: number
     body: string
     headers: table
     error: string?
-}
+end
 
-declare interface HttpOptions {
+declare interface HttpOptions
     headers: table?
     timeout: number?
     body: string?
-}
+end
 
 -- Simple GET request
 declare function get(url: string, options: HttpOptions?): HttpResponse end

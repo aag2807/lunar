@@ -1,7 +1,7 @@
 -- Lua 5.1 I/O Library
 -- Type declarations for file and I/O operations
 
-declare interface File {
+declare interface File
 	read: function(format: string): string | nil
 	write: function(...: string): boolean
 	close: function(): void
@@ -9,10 +9,9 @@ declare interface File {
 	seek: function(whence: string, offset: number): number
 	setvbuf: function(mode: string, size: number): void
 	lines: function(): function(): string
-}
 end
 
-declare interface IOLib {
+declare interface IOLib
 	-- File Operations
 	open: function(filename: string, mode: string): File | nil
 	close: function(file: File): void
@@ -34,7 +33,6 @@ declare interface IOLib {
 
 	-- File Types
 	type: function(obj: any): string | nil
-}
 end
 
 declare const io: IOLib

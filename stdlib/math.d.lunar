@@ -1,7 +1,7 @@
 -- Lua 5.1 Math Library
 -- Type declarations for mathematical functions
 
-declare interface MathLib {
+declare interface MathLib
 	-- Trigonometric Functions
 	sin: function(x: number): number
 	cos: function(x: number): number
@@ -43,7 +43,6 @@ declare interface MathLib {
 	-- Constants
 	pi: number
 	huge: number
-}
 end
 
 declare const math: MathLib

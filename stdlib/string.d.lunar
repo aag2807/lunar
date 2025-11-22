@@ -1,7 +1,7 @@
 -- Lua 5.1 String Library
 -- Type declarations for the string manipulation library
 
-declare interface StringLib {
+declare interface StringLib
 	-- String Searching
 	find: function(s: string, pattern: string, init: number, plain: boolean): number | nil
 	match: function(s: string, pattern: string, init: number): string | nil
@@ -22,7 +22,6 @@ declare interface StringLib {
 
 	-- String Length
 	len: function(s: string): number
-}
 end
 
 declare const string: StringLib

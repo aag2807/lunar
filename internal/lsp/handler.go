@@ -894,24 +894,38 @@ func (s *Server) getMemberCompletionsFromType(objName string, typ types.Type, me
 		// Add interface properties (only if not method call with :)
 		if !methodsOnly {
 			for name, propType := range t.Properties {
+				isStatic := t.StaticProps != nil && t.StaticProps[name]
 				// Skip function types when using dot access on properties
 				if _, isFunc := propType.(*types.FunctionType); !isFunc {
-					items = append(items, CompletionItem{
-						Label:  name,
-						Detail: types.TypeString(propType),
-						Kind:   PropertyCompletion,
-					})
+					// Only show non-static properties with dot access
+					if !isStatic {
+						items = append(items, CompletionItem{
+							Label:  name,
+							Detail: types.TypeString(propType),
+							Kind:   PropertyCompletion,
+						})
+					}
 				}
 			}
 		}
 		// Add interface methods (function-type properties and methods)
 		for name, propType := range t.Properties {
-			if _, isFunc := propType.(*types.FunctionType); isFunc {
-				items = append(items, CompletionItem{
-					Label:  name,
-					Detail: types.TypeString(propType),
-					Kind:   MethodCompletion,
-				})
+			if funcType, isFunc := propType.(*types.FunctionType); isFunc {
+				isStatic := t.StaticProps != nil && t.StaticProps[name]
+				// With : show non-static methods, with . show static methods
+				if methodsOnly && !isStatic {
+					items = append(items, CompletionItem{
+						Label:  name,
+						Detail: types.TypeString(funcType),
+						Kind:   MethodCompletion,
+					})
+				} else if !methodsOnly && isStatic {
+					items = append(items, CompletionItem{
+						Label:  name,
+						Detail: types.TypeString(funcType),
+						Kind:   MethodCompletion,
+					})
+				}
 			}
 		}
 		for name, methodType := range t.Methods {

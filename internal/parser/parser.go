@@ -2641,6 +2641,23 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 				iface.IndexSignature = indexSig
 			}
 			p.nextToken() // move past index signature
+		} else if p.curTokenIs(lexer.STATIC) {
+			// Handle static keyword
+			p.nextToken() // move past 'static'
+			if p.curTokenIsIdentOrContextual() {
+				if p.peekTokenIs(lexer.COLON) {
+					// Static property
+					prop := p.parsePropertyDeclaration()
+					prop.IsStatic = true
+					iface.Properties = append(iface.Properties, prop)
+				} else if p.peekTokenIs(lexer.LPAREN) {
+					// Static method signature (shouldn't be common in interfaces)
+					method := p.parseInterfaceMethod()
+					iface.Methods = append(iface.Methods, method)
+				} else {
+					p.nextToken()
+				}
+			}
 		} else if p.curTokenIsIdentOrContextual() {
 			if p.peekTokenIs(lexer.COLON) {
 				// Property

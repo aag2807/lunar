@@ -10,6 +10,7 @@ endif
 # Variables
 GO=go
 GOFLAGS=
+DIST_DIR=dist
 
 # Platform-specific settings
 ifeq ($(DETECTED_OS),Windows)
@@ -30,9 +31,9 @@ else
 	NULL=/dev/null
 endif
 
-LUNAR_BIN=lunar$(EXE_EXT)
-LUNAR2DECL_BIN=lunar2decl$(EXE_EXT)
-LUNAR_LSP_BIN=lunar-lsp$(EXE_EXT)
+LUNAR_BIN=$(DIST_DIR)$(PATHSEP)lunar$(EXE_EXT)
+LUNAR2DECL_BIN=$(DIST_DIR)$(PATHSEP)lunar2decl$(EXE_EXT)
+LUNAR_LSP_BIN=$(DIST_DIR)$(PATHSEP)lunar-lsp$(EXE_EXT)
 
 # Build targets
 .PHONY: all build clean install uninstall test help
@@ -40,7 +41,11 @@ LUNAR_LSP_BIN=lunar-lsp$(EXE_EXT)
 all: build
 
 # Build all binaries
-build: build-lunar build-lunar2decl build-lunar-lsp
+build: create-dist-dir build-lunar build-lunar2decl build-lunar-lsp
+
+# Create dist directory
+create-dist-dir:
+	@mkdir -p $(DIST_DIR)
 
 # Build the main Lunar compiler
 build-lunar:
@@ -168,16 +173,12 @@ endif
 clean:
 	@echo "Cleaning build artifacts..."
 ifeq ($(DETECTED_OS),Windows)
-	@if exist $(LUNAR_BIN) $(RM) $(LUNAR_BIN)
-	@if exist $(LUNAR2DECL_BIN) $(RM) $(LUNAR2DECL_BIN)
-	@if exist $(LUNAR_LSP_BIN) $(RM) $(LUNAR_LSP_BIN)
+	@if exist $(DIST_DIR) $(RMDIR) $(DIST_DIR)
 	@if exist examples$(PATHSEP)*.lua $(RM) examples$(PATHSEP)*.lua
 	@if exist stdlib$(PATHSEP)*.lua $(RM) stdlib$(PATHSEP)*.lua
 	@if exist test*.lua $(RM) test*.lua
 else
-	@$(RM) $(LUNAR_BIN)
-	@$(RM) $(LUNAR2DECL_BIN)
-	@$(RM) $(LUNAR_LSP_BIN)
+	@$(RMDIR) $(DIST_DIR)
 	@$(RM) examples/*.lua
 	@$(RM) stdlib/*.lua
 	@$(RM) /*.lua

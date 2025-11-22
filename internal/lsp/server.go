@@ -13,24 +13,26 @@ import (
 
 // Server represents the LSP server
 type Server struct {
-	initialized bool
-	shutdown    bool
-	documents   *DocumentManager
-	diagnostics *DiagnosticsEngine
-	rootURI     string
-	logger      *log.Logger
-	reader      *bufio.Reader
-	writer      io.Writer
+	initialized  bool
+	shutdown     bool
+	documents    *DocumentManager
+	diagnostics  *DiagnosticsEngine
+	declarations *DeclarationManager
+	rootURI      string
+	logger       *log.Logger
+	reader       *bufio.Reader
+	writer       io.Writer
 }
 
 // NewServer creates a new LSP server
 func NewServer() *Server {
 	return &Server{
-		documents:   NewDocumentManager(),
-		diagnostics: NewDiagnosticsEngine(),
-		logger:      log.New(os.Stderr, "[lunar-lsp] ", log.LstdFlags),
-		reader:      bufio.NewReader(os.Stdin),
-		writer:      os.Stdout,
+		documents:    NewDocumentManager(),
+		diagnostics:  NewDiagnosticsEngine(),
+		declarations: NewDeclarationManager(),
+		logger:       log.New(os.Stderr, "[lunar-lsp] ", log.LstdFlags),
+		reader:       bufio.NewReader(os.Stdin),
+		writer:       os.Stdout,
 	}
 }
 

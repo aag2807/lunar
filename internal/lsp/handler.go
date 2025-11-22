@@ -23,6 +23,13 @@ func (s *Server) handleInitialize(content json.RawMessage) error {
 	s.rootURI = request.Params.RootURI
 	s.logger.Printf("Initializing with root URI: %s", s.rootURI)
 
+	// Scan for declaration files if root URI is provided
+	if s.rootURI != "" {
+		rootPath := strings.TrimPrefix(s.rootURI, "file://")
+		s.declarations.SetRootPath(rootPath)
+		s.logger.Println("Scanned for .d.lunar declaration files")
+	}
+
 	result := InitializeResult{
 		Capabilities: ServerCapabilities{
 			TextDocumentSync: &TextDocumentSyncOptions{
@@ -777,17 +784,33 @@ func (s *Server) getCompletions(doc *Document, pos Position) []CompletionItem {
 		beforeCursor = lineContent[:pos.Character]
 	}
 
-	// Check if we're completing after a dot
-	if strings.HasSuffix(strings.TrimSpace(beforeCursor), ".") {
-		// Get the object before the dot
-		trimmed := strings.TrimSpace(beforeCursor)
-		objName := getObjectBeforeDot(trimmed)
+	// Check if we're completing after a dot or colon
+	trimmedBefore := strings.TrimSpace(beforeCursor)
+	if strings.HasSuffix(trimmedBefore, ".") || strings.HasSuffix(trimmedBefore, ":") {
+		// Get the object before the dot/colon
+		objName := getObjectBeforeDotOrColon(trimmedBefore)
 		if objName != "" {
+			// First try local scope
 			items = append(items, s.getMemberCompletions(checker.GetEnv(), objName)...)
+
+			// Then try declared globals from .d.lunar files
+			if declaredType, ok := s.declarations.GetDeclaredType(objName); ok {
+				items = append(items, s.getMemberCompletionsFromType(objName, declaredType)...)
+			}
 		}
 	} else {
 		// Get all symbols in scope
 		for name, typ := range checker.GetEnv().GetAll() {
+			item := CompletionItem{
+				Label:  name,
+				Detail: types.TypeString(typ),
+				Kind:   getCompletionKind(typ),
+			}
+			items = append(items, item)
+		}
+
+		// Add declared globals from .d.lunar files
+		for name, typ := range s.declarations.GetAllDeclaredSymbols() {
 			item := CompletionItem{
 				Label:  name,
 				Detail: types.TypeString(typ),
@@ -857,6 +880,50 @@ func (s *Server) getMemberCompletions(env *types.Environment, objName string) []
 	return items
 }
 
+// getMemberCompletionsFromType returns member completions for a declared type
+func (s *Server) getMemberCompletionsFromType(objName string, typ types.Type) []CompletionItem {
+	items := []CompletionItem{}
+
+	switch t := typ.(type) {
+	case *types.InterfaceType:
+		// Add interface properties
+		for name, propType := range t.Properties {
+			items = append(items, CompletionItem{
+				Label:  name,
+				Detail: types.TypeString(propType),
+				Kind:   PropertyCompletion,
+			})
+		}
+		// Add interface methods
+		for name, methodType := range t.Methods {
+			items = append(items, CompletionItem{
+				Label:  name,
+				Detail: types.TypeString(methodType),
+				Kind:   MethodCompletion,
+			})
+		}
+	case *types.ClassType:
+		// Add class properties
+		for name, propType := range t.Properties {
+			items = append(items, CompletionItem{
+				Label:  name,
+				Detail: types.TypeString(propType),
+				Kind:   PropertyCompletion,
+			})
+		}
+		// Add class methods
+		for name, methodType := range t.Methods {
+			items = append(items, CompletionItem{
+				Label:  name,
+				Detail: types.TypeString(methodType),
+				Kind:   MethodCompletion,
+			})
+		}
+	}
+
+	return items
+}
+
 // Helper functions
 
 func formatTypeInfo(name string, typ types.Type) string {
@@ -894,6 +961,18 @@ func getCompletionKind(typ types.Type) CompletionItemKind {
 func getObjectBeforeDot(s string) string {
 	// Remove the trailing dot
 	s = strings.TrimSuffix(s, ".")
+	// Get the last word
+	parts := strings.Fields(s)
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[len(parts)-1]
+}
+
+func getObjectBeforeDotOrColon(s string) string {
+	// Remove the trailing dot or colon
+	s = strings.TrimSuffix(s, ".")
+	s = strings.TrimSuffix(s, ":")
 	// Get the last word
 	parts := strings.Fields(s)
 	if len(parts) == 0 {

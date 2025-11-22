@@ -786,16 +786,19 @@ func (s *Server) getCompletions(doc *Document, pos Position) []CompletionItem {
 
 	// Check if we're completing after a dot or colon
 	trimmedBefore := strings.TrimSpace(beforeCursor)
-	if strings.HasSuffix(trimmedBefore, ".") || strings.HasSuffix(trimmedBefore, ":") {
+	isMethodCall := strings.HasSuffix(trimmedBefore, ":")
+	isDotAccess := strings.HasSuffix(trimmedBefore, ".")
+
+	if isMethodCall || isDotAccess {
 		// Get the object before the dot/colon
 		objName := getObjectBeforeDotOrColon(trimmedBefore)
 		if objName != "" {
 			// First try local scope
-			items = append(items, s.getMemberCompletions(checker.GetEnv(), objName)...)
+			items = append(items, s.getMemberCompletions(checker.GetEnv(), objName, isMethodCall)...)
 
 			// Then try declared globals from .d.lunar files
 			if declaredType, ok := s.declarations.GetDeclaredType(objName); ok {
-				items = append(items, s.getMemberCompletionsFromType(objName, declaredType)...)
+				items = append(items, s.getMemberCompletionsFromType(objName, declaredType, isMethodCall)...)
 			}
 		}
 	} else {
@@ -849,7 +852,7 @@ func (s *Server) getKeywordCompletions() []CompletionItem {
 }
 
 // getMemberCompletions returns member completions for an object
-func (s *Server) getMemberCompletions(env *types.Environment, objName string) []CompletionItem {
+func (s *Server) getMemberCompletions(env *types.Environment, objName string, methodsOnly bool) []CompletionItem {
 	items := []CompletionItem{}
 
 	typ, ok := env.Get(objName)
@@ -859,13 +862,15 @@ func (s *Server) getMemberCompletions(env *types.Environment, objName string) []
 
 	switch t := typ.(type) {
 	case *types.ClassType:
-		// Add properties
-		for name, propType := range t.Properties {
-			items = append(items, CompletionItem{
-				Label:  name,
-				Detail: types.TypeString(propType),
-				Kind:   PropertyCompletion,
-			})
+		// Add properties (only if not method call with :)
+		if !methodsOnly {
+			for name, propType := range t.Properties {
+				items = append(items, CompletionItem{
+					Label:  name,
+					Detail: types.TypeString(propType),
+					Kind:   PropertyCompletion,
+				})
+			}
 		}
 		// Add methods
 		for name, methodType := range t.Methods {
@@ -881,20 +886,34 @@ func (s *Server) getMemberCompletions(env *types.Environment, objName string) []
 }
 
 // getMemberCompletionsFromType returns member completions for a declared type
-func (s *Server) getMemberCompletionsFromType(objName string, typ types.Type) []CompletionItem {
+func (s *Server) getMemberCompletionsFromType(objName string, typ types.Type, methodsOnly bool) []CompletionItem {
 	items := []CompletionItem{}
 
 	switch t := typ.(type) {
 	case *types.InterfaceType:
-		// Add interface properties
-		for name, propType := range t.Properties {
-			items = append(items, CompletionItem{
-				Label:  name,
-				Detail: types.TypeString(propType),
-				Kind:   PropertyCompletion,
-			})
+		// Add interface properties (only if not method call with :)
+		if !methodsOnly {
+			for name, propType := range t.Properties {
+				// Skip function types when using dot access on properties
+				if _, isFunc := propType.(*types.FunctionType); !isFunc {
+					items = append(items, CompletionItem{
+						Label:  name,
+						Detail: types.TypeString(propType),
+						Kind:   PropertyCompletion,
+					})
+				}
+			}
 		}
-		// Add interface methods
+		// Add interface methods (function-type properties and methods)
+		for name, propType := range t.Properties {
+			if _, isFunc := propType.(*types.FunctionType); isFunc {
+				items = append(items, CompletionItem{
+					Label:  name,
+					Detail: types.TypeString(propType),
+					Kind:   MethodCompletion,
+				})
+			}
+		}
 		for name, methodType := range t.Methods {
 			items = append(items, CompletionItem{
 				Label:  name,
@@ -903,13 +922,15 @@ func (s *Server) getMemberCompletionsFromType(objName string, typ types.Type) []
 			})
 		}
 	case *types.ClassType:
-		// Add class properties
-		for name, propType := range t.Properties {
-			items = append(items, CompletionItem{
-				Label:  name,
-				Detail: types.TypeString(propType),
-				Kind:   PropertyCompletion,
-			})
+		// Add class properties (only if not method call with :)
+		if !methodsOnly {
+			for name, propType := range t.Properties {
+				items = append(items, CompletionItem{
+					Label:  name,
+					Detail: types.TypeString(propType),
+					Kind:   PropertyCompletion,
+				})
+			}
 		}
 		// Add class methods
 		for name, methodType := range t.Methods {

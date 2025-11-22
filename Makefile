@@ -32,14 +32,15 @@ endif
 
 LUNAR_BIN=lunar$(EXE_EXT)
 LUNAR2DECL_BIN=lunar2decl$(EXE_EXT)
+LUNAR_LSP_BIN=lunar-lsp$(EXE_EXT)
 
 # Build targets
 .PHONY: all build clean install uninstall test help
 
 all: build
 
-# Build both binaries
-build: build-lunar build-lunar2decl
+# Build all binaries
+build: build-lunar build-lunar2decl build-lunar-lsp
 
 # Build the main Lunar compiler
 build-lunar:
@@ -53,6 +54,12 @@ build-lunar2decl:
 	$(GO) build $(GOFLAGS) -o $(LUNAR2DECL_BIN) ./cmd/lunar2decl
 	@echo "✓ Built $(LUNAR2DECL_BIN)"
 
+# Build the LSP server
+build-lunar-lsp:
+	@echo "Building lunar-lsp server..."
+	$(GO) build $(GOFLAGS) -o $(LUNAR_LSP_BIN) ./cmd/lunar-lsp
+	@echo "✓ Built $(LUNAR_LSP_BIN)"
+
 # Install binaries to system
 install: build
 	@echo "Installing to $(BINDIR)..."
@@ -60,21 +67,25 @@ ifeq ($(DETECTED_OS),Windows)
 	@if not exist "$(BINDIR)" $(MKDIR) "$(BINDIR)"
 	@copy /Y $(LUNAR_BIN) "$(BINDIR)$(PATHSEP)$(LUNAR_BIN)"
 	@copy /Y $(LUNAR2DECL_BIN) "$(BINDIR)$(PATHSEP)$(LUNAR2DECL_BIN)"
-	@echo ✓ Installed $(LUNAR_BIN) and $(LUNAR2DECL_BIN) to $(BINDIR)
+	@copy /Y $(LUNAR_LSP_BIN) "$(BINDIR)$(PATHSEP)$(LUNAR_LSP_BIN)"
+	@echo ✓ Installed $(LUNAR_BIN), $(LUNAR2DECL_BIN), and $(LUNAR_LSP_BIN) to $(BINDIR)
 	@echo.
 	@echo Installation complete! Make sure $(BINDIR) is in your PATH.
 	@echo You can now use:
 	@echo   lunar ^<file.lunar^>       - Compile Lunar code
 	@echo   lunar2decl ^<file.lua^>    - Generate declaration files
+	@echo   lunar-lsp                  - Start the LSP server
 else
 	@$(MKDIR) $(BINDIR)
 	@install -m 755 $(LUNAR_BIN) $(BINDIR)/$(LUNAR_BIN)
 	@install -m 755 $(LUNAR2DECL_BIN) $(BINDIR)/$(LUNAR2DECL_BIN)
-	@echo "✓ Installed $(LUNAR_BIN) and $(LUNAR2DECL_BIN) to $(BINDIR)"
+	@install -m 755 $(LUNAR_LSP_BIN) $(BINDIR)/$(LUNAR_LSP_BIN)
+	@echo "✓ Installed $(LUNAR_BIN), $(LUNAR2DECL_BIN), and $(LUNAR_LSP_BIN) to $(BINDIR)"
 	@echo ""
 	@echo "Installation complete! You can now use:"
 	@echo "  lunar <file.lunar>       - Compile Lunar code"
 	@echo "  lunar2decl <file.lua>    - Generate declaration files"
+	@echo "  lunar-lsp                - Start the LSP server"
 endif
 
 # Uninstall binaries from system
@@ -83,9 +94,11 @@ uninstall:
 ifeq ($(DETECTED_OS),Windows)
 	@if exist "$(BINDIR)$(PATHSEP)$(LUNAR_BIN)" $(RM) "$(BINDIR)$(PATHSEP)$(LUNAR_BIN)"
 	@if exist "$(BINDIR)$(PATHSEP)$(LUNAR2DECL_BIN)" $(RM) "$(BINDIR)$(PATHSEP)$(LUNAR2DECL_BIN)"
+	@if exist "$(BINDIR)$(PATHSEP)$(LUNAR_LSP_BIN)" $(RM) "$(BINDIR)$(PATHSEP)$(LUNAR_LSP_BIN)"
 else
 	@$(RM) $(BINDIR)/$(LUNAR_BIN)
 	@$(RM) $(BINDIR)/$(LUNAR2DECL_BIN)
+	@$(RM) $(BINDIR)/$(LUNAR_LSP_BIN)
 endif
 	@echo "✓ Uninstalled"
 
@@ -157,12 +170,14 @@ clean:
 ifeq ($(DETECTED_OS),Windows)
 	@if exist $(LUNAR_BIN) $(RM) $(LUNAR_BIN)
 	@if exist $(LUNAR2DECL_BIN) $(RM) $(LUNAR2DECL_BIN)
+	@if exist $(LUNAR_LSP_BIN) $(RM) $(LUNAR_LSP_BIN)
 	@if exist examples$(PATHSEP)*.lua $(RM) examples$(PATHSEP)*.lua
 	@if exist stdlib$(PATHSEP)*.lua $(RM) stdlib$(PATHSEP)*.lua
 	@if exist test*.lua $(RM) test*.lua
 else
 	@$(RM) $(LUNAR_BIN)
 	@$(RM) $(LUNAR2DECL_BIN)
+	@$(RM) $(LUNAR_LSP_BIN)
 	@$(RM) examples/*.lua
 	@$(RM) stdlib/*.lua
 	@$(RM) /*.lua

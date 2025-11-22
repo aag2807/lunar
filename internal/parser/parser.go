@@ -2651,8 +2651,9 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 					prop.IsStatic = true
 					iface.Properties = append(iface.Properties, prop)
 				} else if p.peekTokenIs(lexer.LPAREN) {
-					// Static method signature (shouldn't be common in interfaces)
+					// Static method signature
 					method := p.parseInterfaceMethod()
+					method.IsStatic = true
 					iface.Methods = append(iface.Methods, method)
 				} else {
 					p.nextToken()

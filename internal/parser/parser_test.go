@@ -879,6 +879,93 @@ end`
 	}
 }
 
+func TestInterfaceWithStaticMethods(t *testing.T) {
+	input := `interface GraphicsModule
+    static clear(r: number, g: number, b: number): void
+    static print(text: string, x: number, y: number): void
+    width: number
+    height: number
+end`
+
+	l := lexer.New(input)
+	p := New(l)
+	stmt := p.parseInterfaceDeclaration()
+
+	if stmt == nil {
+		t.Fatalf("parseInterfaceDeclaration() returned nil. Errors: %v", p.Errors())
+	}
+
+	if stmt.Name.Value != "GraphicsModule" {
+		t.Errorf("interface name wrong. expected=GraphicsModule, got=%s", stmt.Name.Value)
+	}
+
+	// Should have 2 properties (width, height)
+	if len(stmt.Properties) != 2 {
+		t.Errorf("expected 2 properties, got=%d", len(stmt.Properties))
+	}
+
+	// Should have 2 methods (clear, print)
+	if len(stmt.Methods) != 2 {
+		t.Errorf("expected 2 methods, got=%d", len(stmt.Methods))
+	}
+
+	// Check that methods have IsStatic = true
+	staticMethodCount := 0
+	for _, method := range stmt.Methods {
+		if method.IsStatic {
+			staticMethodCount++
+			if method.Name.Value != "clear" && method.Name.Value != "print" {
+				t.Errorf("unexpected static method: %s", method.Name.Value)
+			}
+		} else {
+			t.Errorf("method %s should be static", method.Name.Value)
+		}
+	}
+
+	if staticMethodCount != 2 {
+		t.Errorf("expected 2 static methods, got=%d", staticMethodCount)
+	}
+}
+
+func TestInterfaceWithMixedStaticAndInstanceMembers(t *testing.T) {
+	input := `interface Love
+    graphics: GraphicsModule
+    window: WindowModule
+    load(): void
+    update(dt: number): void
+    draw(): void
+end`
+
+	l := lexer.New(input)
+	p := New(l)
+	stmt := p.parseInterfaceDeclaration()
+
+	if stmt == nil {
+		t.Fatalf("parseInterfaceDeclaration() returned nil. Errors: %v", p.Errors())
+	}
+
+	if stmt.Name.Value != "Love" {
+		t.Errorf("interface name wrong. expected=Love, got=%s", stmt.Name.Value)
+	}
+
+	// Should have 2 properties (graphics, window)
+	if len(stmt.Properties) != 2 {
+		t.Errorf("expected 2 properties, got=%d", len(stmt.Properties))
+	}
+
+	// Should have 3 methods (load, update, draw)
+	if len(stmt.Methods) != 3 {
+		t.Errorf("expected 3 methods, got=%d", len(stmt.Methods))
+	}
+
+	// All methods should be non-static (no static keyword used)
+	for _, method := range stmt.Methods {
+		if method.IsStatic {
+			t.Errorf("method %s should not be static", method.Name.Value)
+		}
+	}
+}
+
 func TestEnumDeclaration(t *testing.T) {
 	tests := []struct {
 		input           string

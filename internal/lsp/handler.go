@@ -929,11 +929,21 @@ func (s *Server) getMemberCompletionsFromType(objName string, typ types.Type, me
 			}
 		}
 		for name, methodType := range t.Methods {
-			items = append(items, CompletionItem{
-				Label:  name,
-				Detail: types.TypeString(methodType),
-				Kind:   MethodCompletion,
-			})
+			isStatic := t.StaticMethods != nil && t.StaticMethods[name]
+			// With : show non-static methods, with . show static methods
+			if methodsOnly && !isStatic {
+				items = append(items, CompletionItem{
+					Label:  name,
+					Detail: types.TypeString(methodType),
+					Kind:   MethodCompletion,
+				})
+			} else if !methodsOnly && isStatic {
+				items = append(items, CompletionItem{
+					Label:  name,
+					Detail: types.TypeString(methodType),
+					Kind:   MethodCompletion,
+				})
+			}
 		}
 	case *types.ClassType:
 		// Add class properties (only if not method call with :)

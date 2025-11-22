@@ -616,11 +616,12 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 // registerInterface registers an interface type
 func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
 	interfaceType := &InterfaceType{
-		Name:       node.Name.Value,
-		Methods:    make(map[string]*FunctionType),
-		Properties: make(map[string]Type),
-		Extends:    []*InterfaceType{},
-		StaticProps: make(map[string]bool),
+		Name:          node.Name.Value,
+		Methods:       make(map[string]*FunctionType),
+		Properties:    make(map[string]Type),
+		Extends:       []*InterfaceType{},
+		StaticProps:   make(map[string]bool),
+		StaticMethods: make(map[string]bool),
 	}
 
 	// Register properties
@@ -646,6 +647,9 @@ func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
 			Parameters:    params,
 			ReturnType:    returnType,
 			GenericParams: []string{}, // Interface methods are not separately generic
+		}
+		if method.IsStatic {
+			interfaceType.StaticMethods[method.Name.Value] = true
 		}
 	}
 

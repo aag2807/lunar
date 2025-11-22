@@ -1,13 +1,13 @@
 -- Coverage tracking declarations for Lunar
 -- Usage: import * as coverage from "vendor/testing/coverage"
 
-declare interface FileStats {
+declare interface FileStats
     total: number
     covered: number
     percentage: number
-}
+end
 
-declare interface CoverageModule {
+declare interface CoverageModule
     -- Initialize coverage for a file
     init: function(filename: string): void
 
@@ -31,6 +31,6 @@ declare interface CoverageModule {
 
     -- Reset coverage data
     reset: function(): void
-}
+end
 
 declare const coverage: CoverageModule

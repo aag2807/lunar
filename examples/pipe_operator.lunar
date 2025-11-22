@@ -167,11 +167,11 @@ print("Example 6:", user_name)  -- "Alice"
 -- Validation and Error Handling
 -- ============================================
 
-interface Result {
-    success: boolean,
-    value: any,
+interface Result
+    success: boolean
+    value: any
     error: string | nil
-}
+end
 
 function validate_positive(x: number): Result
     if x > 0 then

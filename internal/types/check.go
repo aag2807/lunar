@@ -616,16 +616,21 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 // registerInterface registers an interface type
 func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
 	interfaceType := &InterfaceType{
-		Name:       node.Name.Value,
-		Methods:    make(map[string]*FunctionType),
-		Properties: make(map[string]Type),
-		Extends:    []*InterfaceType{},
+		Name:          node.Name.Value,
+		Methods:       make(map[string]*FunctionType),
+		Properties:    make(map[string]Type),
+		Extends:       []*InterfaceType{},
+		StaticProps:   make(map[string]bool),
+		StaticMethods: make(map[string]bool),
 	}
 
 	// Register properties
 	for _, prop := range node.Properties {
 		propType := c.resolveTypeExpression(prop.Type)
 		interfaceType.Properties[prop.Name.Value] = propType
+		if prop.IsStatic {
+			interfaceType.StaticProps[prop.Name.Value] = true
+		}
 	}
 
 	// Register methods
@@ -642,6 +647,9 @@ func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
 			Parameters:    params,
 			ReturnType:    returnType,
 			GenericParams: []string{}, // Interface methods are not separately generic
+		}
+		if method.IsStatic {
+			interfaceType.StaticMethods[method.Name.Value] = true
 		}
 	}
 
@@ -725,12 +733,16 @@ func (c *Checker) registerTypeAlias(node *ast.TypeDeclaration) {
 			Properties: make(map[string]Type),
 			Methods:    make(map[string]*FunctionType),
 			Extends:    []*InterfaceType{},
+			StaticProps: make(map[string]bool),
 		}
 
 		// Register properties
 		for _, prop := range node.Properties {
 			propType := c.resolveTypeExpression(prop.Type)
 			interfaceType.Properties[prop.Name.Value] = propType
+			if prop.IsStatic {
+				interfaceType.StaticProps[prop.Name.Value] = true
+			}
 		}
 
 		aliasType = interfaceType
@@ -1280,6 +1292,7 @@ func (c *Checker) pickType(t Type, keys Type) Type {
 			Name:       objType.Name + "_Picked",
 			Properties: make(map[string]Type),
 			Methods:    make(map[string]*FunctionType),
+			StaticProps: make(map[string]bool),
 		}
 
 		// Extract keys from the keys type
@@ -1287,6 +1300,9 @@ func (c *Checker) pickType(t Type, keys Type) Type {
 		for _, key := range keyList {
 			if propType, ok := objType.Properties[key]; ok {
 				picked.Properties[key] = propType
+				if objType.StaticProps != nil && objType.StaticProps[key] {
+					picked.StaticProps[key] = true
+				}
 			}
 			if methodType, ok := objType.Methods[key]; ok {
 				picked.Methods[key] = methodType
@@ -1333,6 +1349,7 @@ func (c *Checker) recordType(keys Type, valueType Type) Type {
 		Name:       "Record",
 		Properties: make(map[string]Type),
 		Methods:    make(map[string]*FunctionType),
+		StaticProps: make(map[string]bool),
 	}
 
 	keyList := c.extractKeyNames(keys)
@@ -1352,11 +1369,15 @@ func (c *Checker) partialType(t Type) Type {
 			Name:       objType.Name + "_Partial",
 			Properties: make(map[string]Type),
 			Methods:    make(map[string]*FunctionType),
+			StaticProps: make(map[string]bool),
 		}
 
 		// Make all properties optional (T | nil)
 		for name, propType := range objType.Properties {
 			partial.Properties[name] = &UnionType{Types: []Type{propType, Nil}}
+			if objType.StaticProps != nil && objType.StaticProps[name] {
+				partial.StaticProps[name] = true
+			}
 		}
 		for name, methodType := range objType.Methods {
 			partial.Methods[name] = methodType
@@ -1392,11 +1413,15 @@ func (c *Checker) requiredType(t Type) Type {
 			Name:       objType.Name + "_Required",
 			Properties: make(map[string]Type),
 			Methods:    make(map[string]*FunctionType),
+			StaticProps: make(map[string]bool),
 		}
 
 		// Remove optionality from properties
 		for name, propType := range objType.Properties {
 			required.Properties[name] = c.nonNullable(propType)
+			if objType.StaticProps != nil && objType.StaticProps[name] {
+				required.StaticProps[name] = true
+			}
 		}
 		for name, methodType := range objType.Methods {
 			required.Methods[name] = methodType

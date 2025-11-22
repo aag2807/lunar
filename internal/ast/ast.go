@@ -1091,6 +1091,7 @@ type InterfaceMethod struct {
 	Name       *Identifier
 	Parameters []*Parameter
 	ReturnType Expression
+	IsStatic   bool // static method
 }
 
 func (im *InterfaceMethod) statementNode()       {}

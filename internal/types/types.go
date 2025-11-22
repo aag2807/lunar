@@ -943,6 +943,8 @@ type InterfaceType struct {
 	Extends        []*InterfaceType
 	IndexSignature *IndexSignature         // [key: KeyType]: ValueType
 	ReadonlyProps  map[string]bool         // Track readonly properties (for as const)
+	StaticProps    map[string]bool         // Track static properties
+	StaticMethods  map[string]bool         // Track static methods
 }
 
 // IndexSignature represents an index signature like [key: string]: number

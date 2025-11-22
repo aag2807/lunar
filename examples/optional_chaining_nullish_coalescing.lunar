@@ -27,17 +27,23 @@ end
 -- Example 1: API Response Handling
 -- ============================================
 
-interface ApiResponse {
-    data: {
-        user: {
-            id: number,
-            profile: {
-                name: string,
-                email: string
-            }
-        }
-    } | nil
-}
+interface UserProfile
+    name: string
+    email: string
+end
+
+interface User
+    id: number
+    profile: UserProfile
+end
+
+interface ApiResponseData
+    user: User
+end
+
+interface ApiResponse
+    data: ApiResponseData | nil
+end
 
 function processApiResponse(response: any): void
     -- Safe access to deeply nested properties
@@ -52,16 +58,20 @@ end
 -- Example 2: Configuration Objects
 -- ============================================
 
-interface Config {
-    database: {
-        host: string,
-        port: number,
-        credentials: {
-            username: string,
-            password: string
-        } | nil
-    } | nil
-}
+interface Credentials
+    username: string
+    password: string
+end
+
+interface DatabaseConfig
+    host: string
+    port: number
+    credentials: Credentials | nil
+end
+
+interface Config
+    database: DatabaseConfig | nil
+end
 
 function connectDatabase(config: any): void
     -- Get config values with defaults
@@ -109,11 +119,13 @@ end
 -- Example 5: Function Calls
 -- ============================================
 
-interface Service {
-    api: {
-        fetchUser: function(id: number): any
-    } | nil
-}
+interface API
+    fetchUser: function(id: number): any
+end
+
+interface Service
+    api: API | nil
+end
 
 function callService(service: any, userId: number): void
     -- Safe function call
@@ -178,9 +190,9 @@ end
 -- Example 10: Combining with Other Features
 -- ============================================
 
-interface Repository {
+interface Repository
     findById: function(id: number): any
-}
+end
 
 async function loadUser(repo: any, id: number): string
     -- Combine optional chaining, nullish coalescing, and async

@@ -230,9 +230,8 @@ Example:
 
 ```lunar
 -- mylib.d.lunar
-declare interface MyLib {
-    doSomething: function(x: number): string end
-}
+declare interface MyLib
+    doSomething: function(x: number): string
 end
 
 declare const mylib: MyLib

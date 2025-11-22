@@ -1,17 +1,16 @@
 -- Test if interface property access works
 
-interface TestLib {
+interface TestLib
 	getValue: function(): number
-}
 end
 
-class MyMath implements TestLib {
-	getValue(): number {
+class MyMath implements TestLib
+	getValue(): number
 		return 42
-	}
-}
+	end
+end
 
-function main(): void {
+function main(): void
 	local m: TestLib = MyMath()
 	local v: number = m.getValue()
 	print("Value is")

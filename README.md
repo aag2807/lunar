@@ -50,6 +50,161 @@ end
 ✅ **Constructor Parameter Properties** - TypeScript-style shorthand for class properties
 ✅ **Readonly Properties** - Immutable properties that can only be set in constructors
 
+## Language Reference
+
+### Keywords
+
+Lunar includes the following keywords:
+
+**Type & Declaration Keywords:**
+- `class` - Define a class
+- `interface` - Define an interface contract
+- `enum` - Define an enumeration
+- `type` - Define a type alias
+- `declare` - Declare types for external code (in `.d.lunar` files)
+- `extends` - Class/interface inheritance
+- `implements` - Implement an interface
+
+**Access Modifiers:**
+- `public` - Accessible from anywhere (default)
+- `private` - Only accessible within the class
+- `protected` - Accessible within class and subclasses
+- `static` - Static method (in interfaces, for autocomplete)
+- `readonly` - Property can only be assigned in constructor
+- `abstract` - Abstract class or method
+
+**Function & Variable Keywords:**
+- `function` - Define a function
+- `local` - Local variable (Lua standard)
+- `const` - Constant variable (enforced at compile-time)
+- `return` - Return from function
+- `async` - Async function (planned feature)
+- `await` - Await async operation (planned feature)
+
+**Control Flow:**
+- `if`, `then`, `else`, `elseif` - Conditional statements
+- `while`, `do` - While loop
+- `for`, `in` - For loop
+- `break` - Break from loop
+- `match`, `with` - Pattern matching
+- `end` - End block
+
+**Module System:**
+- `import` - Import from module
+- `export` - Export from module
+- `from` - Specify module source
+- `namespace` - Namespace declaration (planned)
+
+**Type System:**
+- `is` - Type guard (`value is Type`)
+- `as` - Type assertion (`value as Type`)
+- `keyof` - Extract keys of type
+- `typeof` - Get type of value
+
+**Other:**
+- `constructor` - Class constructor
+- `self` - Reference to current instance
+- `super` - Reference to parent class
+- `get`, `set` - Property accessors (planned)
+
+### Primitive Types
+
+**Basic Types:**
+- `number` - Numeric values (integers and floats)
+- `string` - Text values
+- `boolean` - True or false values
+- `nil` - Null/undefined value
+- `void` - No return value (for functions)
+- `any` - Any type (disables type checking)
+- `unknown` - Unknown type (requires type narrowing)
+- `never` - Type that never occurs
+
+**Literal Types:**
+- `true`, `false` - Boolean literals
+- `42`, `3.14` - Number literals
+- `"hello"` - String literals
+
+**Composite Types:**
+- `table` - Lua table type
+- `table<K, V>` - Generic table with key and value types
+- `Type[]` - Array type
+- `(Type1, Type2)` - Tuple type (multiple return values)
+- `Type1 | Type2` - Union type (can be Type1 OR Type2)
+- `Type1 & Type2` - Intersection type (combines Type1 AND Type2)
+- `Type?` - Optional type (Type OR nil)
+- `function(params): ReturnType` - Function type
+
+**Advanced Types:**
+- `Pick<T, K>` - Pick specific properties from type
+- `Omit<T, K>` - Omit specific properties from type
+- `Partial<T>` - Make all properties optional
+- `Required<T>` - Make all properties required
+- `Record<K, V>` - Object with keys of type K and values of type V
+- `Readonly<T>` - Make all properties readonly
+- `keyof T` - Union of property names
+- `typeof value` - Get type of a value
+- Template literal types - `` `prefix_${T}` ``
+- Conditional types - `T extends U ? X : Y`
+- Mapped types - `{ [K in T]: U }`
+
+### Operators
+
+**Arithmetic:**
+- `+` - Addition
+- `-` - Subtraction
+- `*` - Multiplication
+- `/` - Division
+- `//` - Integer division (floor division)
+- `%` - Modulo
+- `^` - Exponentiation (Lua standard)
+
+**Comparison:**
+- `==` - Equal to
+- `~=` - Not equal to (Lua style)
+- `!=` - Not equal to (alternative)
+- `<` - Less than
+- `>` - Greater than
+- `<=` - Less than or equal
+- `>=` - Greater than or equal
+
+**Logical:**
+- `and` - Logical AND
+- `or` - Logical OR
+- `not` - Logical NOT
+
+**Bitwise:**
+- `&` - Bitwise AND
+- `|` - Bitwise OR
+- `^` - Bitwise XOR
+- `~` - Bitwise NOT
+- `<<` - Left shift
+- `>>` - Right shift
+
+**Other:**
+- `..` - String concatenation
+- `...` - Variadic (spread) operator
+- `#` - Length operator
+- `?.` - Optional chaining
+- `??` - Nullish coalescing
+- `|>` - Pipe operator
+
+### Comments
+
+```lunar
+-- Single line comment
+
+--[[
+    Multi-line comment
+    Can span multiple lines
+]]
+
+--[[ Inline comment ]] local x: number = 42
+```
+
+For complete language documentation, see:
+- **[Compiled Output Guide](docs/COMPILED_OUTPUT.md)** - How Lunar compiles to Lua
+- **[Language Specification](LANGUAGE_SPEC.md)** - Complete language reference
+
 ### Developer Experience
 ✅ **Bundler** - Bundle all dependencies into a single file with `--bundle`
 ✅ **Run Mode** - Compile and execute with `--run`
@@ -297,6 +452,7 @@ Hello, Lunar
 ## Documentation
 
 - **[Language Specification](LANGUAGE_SPEC.md)** - Complete language reference
+- **[Compiled Output Guide](docs/COMPILED_OUTPUT.md)** - How Lunar features compile to Lua
 - **[Standard Library](stdlib/README.md)** - Type declarations for Lua stdlib
 - **[Declaration Generator](cmd/lunar2decl/README.md)** - Generate `.d.lunar` files
 - **[Examples](examples/)** - Sample code and use cases
@@ -553,12 +709,11 @@ Create type definitions for existing Lua libraries:
 ### Manual Creation
 ```lunar
 -- socket.d.lunar
-declare interface Socket {
+declare interface Socket
     connect: function(host: string, port: number): boolean
     send: function(data: string): boolean
     receive: function(): string | nil
     close: function(): void
-}
 end
 
 declare function socket_connect(host: string, port: number): Socket end

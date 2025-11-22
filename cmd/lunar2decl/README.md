@@ -84,9 +84,8 @@ declare function greet(name: string): string end
 - **Module Functions**: Functions like `module.func()` are skipped. For module-based libraries, you should manually create interface declarations:
 
 ```lunar
-declare interface MyModule {
+declare interface MyModule
 	func: function(x: number): string
-}
 end
 
 declare const mymodule: MyModule

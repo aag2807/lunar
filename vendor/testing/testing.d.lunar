@@ -1,14 +1,14 @@
 -- Testing library declarations for Lunar
 -- Usage: import { describe, it, expect } from "vendor/testing"
 
-declare interface TestContext {
+declare interface TestContext
     name: string
     passed: number
     failed: number
     errors: string[]
-}
+end
 
-declare interface Expectation<T> {
+declare interface Expectation<T>
     toBe: function(expected: T): void
     toEqual: function(expected: T): void
     toBeTruthy: function(): void
@@ -18,7 +18,7 @@ declare interface Expectation<T> {
     toBeLessThan: function(value: number): void
     toContain: function(value: any): void
     toThrow: function(): void
-}
+end
 
 -- Test organization
 declare function describe(name: string, fn: function(): void): void end

@@ -1,14 +1,14 @@
 -- Simple test for discriminated unions
 
-interface Success {
-    status: "success",
+interface Success
+    status: "success"
     data: string
-}
+end
 
-interface Failure {
-    status: "error",
+interface Failure
+    status: "error"
     code: number
-}
+end
 
 type Result = Success | Failure
 

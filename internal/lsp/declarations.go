@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"io/fs"
+	"log"
 	"lunar/internal/lexer"
 	"lunar/internal/parser"
 	"lunar/internal/types"
@@ -16,12 +17,14 @@ type DeclarationManager struct {
 	declarations map[string]*types.Environment // URI -> environment
 	mu           sync.RWMutex
 	rootPath     string
+	logger       *log.Logger
 }
 
 // NewDeclarationManager creates a new declaration manager
 func NewDeclarationManager() *DeclarationManager {
 	return &DeclarationManager{
 		declarations: make(map[string]*types.Environment),
+		logger:       log.New(os.Stderr, "[lunar-lsp-decl] ", log.LstdFlags),
 	}
 }
 
@@ -31,18 +34,24 @@ func (dm *DeclarationManager) SetRootPath(rootPath string) {
 	defer dm.mu.Unlock()
 
 	dm.rootPath = rootPath
+	dm.logger.Printf("Setting root path: %s", rootPath)
 	dm.scanDeclarations()
 }
 
 // scanDeclarations scans the workspace for .d.lunar files
 func (dm *DeclarationManager) scanDeclarations() {
 	if dm.rootPath == "" {
+		dm.logger.Println("Root path is empty, skipping scan")
 		return
 	}
+
+	dm.logger.Printf("Scanning for .d.lunar files in: %s", dm.rootPath)
+	filesFound := 0
 
 	// Scan for .d.lunar files
 	filepath.WalkDir(dm.rootPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			dm.logger.Printf("Error accessing path %s: %v", path, err)
 			return nil // Continue on error
 		}
 
@@ -50,6 +59,7 @@ func (dm *DeclarationManager) scanDeclarations() {
 		if d.IsDir() {
 			name := d.Name()
 			if name == "node_modules" || name == ".git" || strings.HasPrefix(name, ".") {
+				dm.logger.Printf("Skipping directory: %s", path)
 				return filepath.SkipDir
 			}
 			return nil
@@ -57,17 +67,24 @@ func (dm *DeclarationManager) scanDeclarations() {
 
 		// Process .d.lunar files
 		if strings.HasSuffix(path, ".d.lunar") {
+			dm.logger.Printf("Found .d.lunar file: %s", path)
+			filesFound++
 			dm.loadDeclarationFile(path)
 		}
 
 		return nil
 	})
+
+	dm.logger.Printf("Scan complete. Found %d .d.lunar files", filesFound)
 }
 
 // loadDeclarationFile loads a declaration file and extracts type information
 func (dm *DeclarationManager) loadDeclarationFile(path string) {
+	dm.logger.Printf("Loading declaration file: %s", path)
+
 	content, err := os.ReadFile(path)
 	if err != nil {
+		dm.logger.Printf("Failed to read file %s: %v", path, err)
 		return
 	}
 
@@ -77,16 +94,36 @@ func (dm *DeclarationManager) loadDeclarationFile(path string) {
 	statements := p.Parse()
 
 	if len(p.Errors()) > 0 {
+		dm.logger.Printf("Parse errors in %s:", path)
+		for _, err := range p.Errors() {
+			dm.logger.Printf("  %s", err)
+		}
 		return
 	}
 
 	// Type check to extract declarations
 	checker := types.NewChecker()
-	checker.Check(statements)
+	typeErrors := checker.Check(statements)
+
+	if len(typeErrors) > 0 {
+		dm.logger.Printf("Type errors in %s:", path)
+		for _, err := range typeErrors {
+			dm.logger.Printf("  %s", err.Message)
+		}
+		// Continue loading even with type errors
+	}
 
 	// Store the environment
 	uri := "file://" + path
-	dm.declarations[uri] = checker.GetEnv()
+	env := checker.GetEnv()
+	dm.declarations[uri] = env
+
+	// Log what was loaded
+	symbols := env.GetAll()
+	dm.logger.Printf("Loaded %d symbols from %s", len(symbols), path)
+	for name := range symbols {
+		dm.logger.Printf("  - %s", name)
+	}
 }
 
 // GetDeclaredType looks up a declared constant or type in all declaration files

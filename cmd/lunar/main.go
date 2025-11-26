@@ -36,6 +36,37 @@ import (
 
 const version = "1.5.0"
 
+// getStdlibPath returns the path to the stdlib directory relative to the executable
+func getStdlibPath() string {
+	// Get the path to the current executable
+	exePath, err := os.Executable()
+	if err != nil {
+		return "" // Fall back to relative search
+	}
+
+	// Get the directory containing the executable
+	exeDir := filepath.Dir(exePath)
+
+	// Check if stdlib exists in the same directory as the executable
+	stdlibPath := filepath.Join(exeDir, "stdlib")
+	if _, err := os.Stat(stdlibPath); err == nil {
+		return stdlibPath
+	}
+
+	// Check if stdlib exists one level up (for development builds in dist/)
+	stdlibPath = filepath.Join(exeDir, "..", "stdlib")
+	if _, err := os.Stat(stdlibPath); err == nil {
+		// Convert to absolute path
+		absPath, err := filepath.Abs(stdlibPath)
+		if err == nil {
+			return absPath
+		}
+		return stdlibPath
+	}
+
+	return "" // Fall back to relative search
+}
+
 func main() {
 	// Define command-line flags
 	outputFile := flag.String("o", "", "Output file (default: replaces .lunar with .lua)")
@@ -639,7 +670,8 @@ func compile(inputFile, outputFile string, typeCheck, generateSourceMap bool, ta
 		// Combine declaration statements with main file statements
 		// Declarations first so they're registered before main code
 		allStatements := append(declarationStatements, statements...)
-		typeErrors := types.Check(allStatements)
+		checker := types.NewChecker(getStdlibPath())
+		typeErrors := checker.Check(allStatements)
 		if len(typeErrors) > 0 {
 			return formatTypeErrors(inputFile, string(source), typeErrors)
 		}
@@ -1134,7 +1166,7 @@ func runREPL() {
 	var multiLineBuffer strings.Builder
 	nestingLevel := 0
 	allStatements := []ast.Statement{}
-	checker := types.NewChecker()
+	checker := types.NewChecker(getStdlibPath())
 
 	// Command history
 	history := []string{}
@@ -1170,7 +1202,7 @@ func runREPL() {
 				continue
 			case "clear":
 				allStatements = []ast.Statement{}
-				checker = types.NewChecker()
+				checker = types.NewChecker(getStdlibPath())
 				fmt.Println("Context cleared")
 				continue
 			case "context":
@@ -2154,7 +2186,7 @@ func compileToWasm(inputFile, outputDir string, typeCheck bool) error {
 
 	// Type check if enabled
 	if typeCheck {
-		checker := types.NewChecker()
+		checker := types.NewChecker(getStdlibPath())
 		typeErrors := checker.Check(statements)
 		if len(typeErrors) > 0 {
 			for _, err := range typeErrors {

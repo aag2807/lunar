@@ -6,6 +6,7 @@ import (
 	"lunar/internal/lexer"
 	"lunar/internal/parser"
 	"os"
+	"path/filepath"
 )
 
 // TypeError represents a type error
@@ -227,6 +228,9 @@ type Checker struct {
 	modules        map[string]*ModuleInfo // Tracks loaded modules
 	currentModule  string // Current module being checked
 
+	// Standard library path
+	stdlibPath string // Path to the stdlib directory
+
 	// Current function return type (for checking return statements)
 	currentFunctionReturnType Type
 
@@ -244,7 +248,9 @@ type ModuleInfo struct {
 }
 
 // NewChecker creates a new type checker
-func NewChecker() *Checker {
+// If stdlibPath is provided, it will be used to locate stdlib files
+// Otherwise, it will search relative to the current directory (for backwards compatibility)
+func NewChecker(stdlibPath ...string) *Checker {
 	env := NewEnvironment()
 
 	// Register built-in types
@@ -257,6 +263,12 @@ func NewChecker() *Checker {
 	env.Set("never", Never)
 	env.Set("unknown", Unknown)
 
+	// Determine stdlib path
+	var stdlib string
+	if len(stdlibPath) > 0 && stdlibPath[0] != "" {
+		stdlib = stdlibPath[0]
+	}
+
 	checker := &Checker{
 		env:                env,
 		errors:             []*TypeError{},
@@ -268,6 +280,7 @@ func NewChecker() *Checker {
 		exports:            make(map[string]Type),
 		modules:            make(map[string]*ModuleInfo),
 		currentModule:      "",
+		stdlibPath:         stdlib,
 	}
 
 	// Register built-in utility types
@@ -300,19 +313,29 @@ func (c *Checker) loadStdlib() {
 	// List of stdlib files to load
 	stdlibFiles := []string{"lua.d.lunar", "table.d.lunar", "string.d.lunar", "math.d.lunar"}
 
-	// Try to find stdlib directory relative to the current directory
-	stdlibDirs := []string{
-		"stdlib",
-		"../stdlib",
-		"../../stdlib",
-		"../../../stdlib",
+	var foundDir string
+
+	// If a specific stdlib path was provided, use it directly
+	if c.stdlibPath != "" {
+		if _, err := os.Stat(c.stdlibPath); err == nil {
+			foundDir = c.stdlibPath
+		}
 	}
 
-	var foundDir string
-	for _, dir := range stdlibDirs {
-		if _, err := os.Stat(dir); err == nil {
-			foundDir = dir
-			break
+	// If not found yet, try to find stdlib directory relative to the current directory (for backwards compatibility)
+	if foundDir == "" {
+		stdlibDirs := []string{
+			"stdlib",
+			"../stdlib",
+			"../../stdlib",
+			"../../../stdlib",
+		}
+
+		for _, dir := range stdlibDirs {
+			if _, err := os.Stat(dir); err == nil {
+				foundDir = dir
+				break
+			}
 		}
 	}
 
@@ -323,8 +346,8 @@ func (c *Checker) loadStdlib() {
 
 	// Load each stdlib file
 	for _, filename := range stdlibFiles {
-		filepath := foundDir + "/" + filename
-		content, err := os.ReadFile(filepath)
+		filePath := filepath.Join(foundDir, filename)
+		content, err := os.ReadFile(filePath)
 		if err != nil {
 			continue // Skip files that don't exist
 		}

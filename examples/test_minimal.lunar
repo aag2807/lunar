@@ -1,0 +1,9 @@
+-- Minimal test to check if declarations work at all
+
+function testGlobals(): void
+	print("Testing globals")
+	local str: string = tostring(123)
+	print("Globals work!")
+end
+
+testGlobals()

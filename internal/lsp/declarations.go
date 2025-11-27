@@ -81,7 +81,8 @@ func (dm *DeclarationManager) loadDeclarationFile(path string) {
 	}
 
 	// Type check to extract declarations
-	checker := types.NewChecker()
+	stdlibPath := getStdlibPathForLSP()
+	checker := types.NewChecker(stdlibPath)
 	checker.Check(statements)
 
 	// Store the environment

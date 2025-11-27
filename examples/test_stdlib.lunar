@@ -1,0 +1,48 @@
+-- Test file to verify standard library declarations work correctly
+
+function testStringLib(): void
+	local text: string = "Hello, World!"
+	local upper: string = string.upper(text)
+	local lower: string = string.lower(text)
+	local sub: string = string.sub(text, 1, 5)
+	local len: number = string.len(text)
+
+	print("String tests passed")
+end
+
+function testMathLib(): void
+	local pi: number = math.pi
+	local sine: number = math.sin(pi / 2)
+	local random: number = math.random(1, 100)
+	local floor: number = math.floor(3.7)
+	local ceil: number = math.ceil(3.2)
+
+	print("Math tests passed")
+end
+
+function testTableLib(): void
+	local items: any = {"apple", "banana"}
+	table.insert(items, "cherry")
+	table.sort(items)
+	local joined: string = table.concat(items, ", ")
+
+	print("Table tests passed")
+end
+
+function testCoreGlobals(): void
+	local str: string = tostring(123)
+	local num: number | nil = tonumber("456")
+	local t: string = type(str)
+
+	print("Core global tests passed")
+end
+
+function main(): void
+	testStringLib()
+	testMathLib()
+	testTableLib()
+	testCoreGlobals()
+	print("All standard library tests passed!")
+end
+
+main()

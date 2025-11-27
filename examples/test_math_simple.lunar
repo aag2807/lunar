@@ -1,0 +1,8 @@
+-- Simplest possible math test
+
+function test(): void
+	local m: any = math
+	print("Math exists")
+end
+
+test()

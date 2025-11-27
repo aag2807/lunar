@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -200,6 +201,12 @@ func (s *Server) handleMessage(content json.RawMessage) error {
 		return s.handleDefinition(content, baseMsg.ID)
 	case "textDocument/completion":
 		return s.handleCompletion(content, baseMsg.ID)
+	case "textDocument/signatureHelp":
+		return s.handleSignatureHelp(content, baseMsg.ID)
+	case "textDocument/documentSymbol":
+		return s.handleDocumentSymbol(content, baseMsg.ID)
+	case "workspace/symbol":
+		return s.handleWorkspaceSymbol(content, baseMsg.ID)
 	case "textDocument/references":
 		return s.handleReferences(content, baseMsg.ID)
 	case "textDocument/rename":
@@ -238,4 +245,34 @@ func (s *Server) publishDiagnostics(uri string) {
 	if err := s.sendNotification("textDocument/publishDiagnostics", params); err != nil {
 		s.logger.Printf("Error publishing diagnostics: %v", err)
 	}
+}
+
+// getStdlibPathForLSP gets the stdlib path for the LSP type checker
+func getStdlibPathForLSP() string {
+	// Get the executable path
+	exePath, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+
+	// Get the directory containing the executable
+	exeDir := filepath.Dir(exePath)
+
+	// Check if stdlib exists in the same directory as the executable
+	stdlibPath := filepath.Join(exeDir, "stdlib")
+	if _, err := os.Stat(stdlibPath); err == nil {
+		return stdlibPath
+	}
+
+	// Check one level up (for development builds)
+	stdlibPath = filepath.Join(exeDir, "..", "stdlib")
+	if _, err := os.Stat(stdlibPath); err == nil {
+		absPath, err := filepath.Abs(stdlibPath)
+		if err == nil {
+			return absPath
+		}
+		return stdlibPath
+	}
+
+	return ""
 }

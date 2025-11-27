@@ -54,7 +54,8 @@ func (de *DiagnosticsEngine) Analyze(uri string, content string) []Diagnostic {
 	}
 
 	// Run type checker
-	checker := types.NewChecker()
+	stdlibPath := getStdlibPathForLSP()
+	checker := types.NewChecker(stdlibPath)
 	typeErrors := checker.Check(statements)
 
 	for _, err := range typeErrors {

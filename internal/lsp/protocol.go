@@ -116,6 +116,7 @@ type ServerCapabilities struct {
 	TextDocumentSync           *TextDocumentSyncOptions   `json:"textDocumentSync,omitempty"`
 	HoverProvider              bool                       `json:"hoverProvider,omitempty"`
 	CompletionProvider         *CompletionOptions         `json:"completionProvider,omitempty"`
+	SignatureHelpProvider      *SignatureHelpOptions      `json:"signatureHelpProvider,omitempty"`
 	DefinitionProvider         bool                       `json:"definitionProvider,omitempty"`
 	ReferencesProvider         bool                       `json:"referencesProvider,omitempty"`
 	DocumentSymbolProvider     bool                       `json:"documentSymbolProvider,omitempty"`
@@ -152,6 +153,12 @@ type SaveOptions struct {
 type CompletionOptions struct {
 	TriggerCharacters []string `json:"triggerCharacters,omitempty"`
 	ResolveProvider   bool     `json:"resolveProvider,omitempty"`
+}
+
+// SignatureHelpOptions represents signature help options
+type SignatureHelpOptions struct {
+	TriggerCharacters   []string `json:"triggerCharacters,omitempty"`
+	RetriggerCharacters []string `json:"retriggerCharacters,omitempty"`
 }
 
 // TextDocumentIdentifier identifies a text document
@@ -292,11 +299,15 @@ const (
 
 // CompletionItem represents a completion item
 type CompletionItem struct {
-	Label         string             `json:"label"`
-	Kind          CompletionItemKind `json:"kind,omitempty"`
-	Detail        string             `json:"detail,omitempty"`
-	Documentation interface{}        `json:"documentation,omitempty"`
-	InsertText    string             `json:"insertText,omitempty"`
+	Label            string             `json:"label"`
+	Kind             CompletionItemKind `json:"kind,omitempty"`
+	Detail           string             `json:"detail,omitempty"`
+	Documentation    interface{}        `json:"documentation,omitempty"`
+	InsertText       string             `json:"insertText,omitempty"`
+	InsertTextFormat InsertTextFormat   `json:"insertTextFormat,omitempty"`
+	SortText         string             `json:"sortText,omitempty"`
+	FilterText       string             `json:"filterText,omitempty"`
+	Preselect        bool               `json:"preselect,omitempty"`
 }
 
 // CompletionItemKind represents completion item kind
@@ -322,6 +333,109 @@ const (
 type CompletionList struct {
 	IsIncomplete bool             `json:"isIncomplete"`
 	Items        []CompletionItem `json:"items"`
+}
+
+// InsertTextFormat represents the format of insert text
+type InsertTextFormat int
+
+const (
+	PlainTextFormat InsertTextFormat = 1
+	SnippetFormat   InsertTextFormat = 2
+)
+
+// SignatureHelpParams represents signature help parameters
+type SignatureHelpParams struct {
+	TextDocumentPositionParams
+	Context *SignatureHelpContext `json:"context,omitempty"`
+}
+
+// SignatureHelpContext represents signature help context
+type SignatureHelpContext struct {
+	TriggerKind      SignatureHelpTriggerKind `json:"triggerKind"`
+	TriggerCharacter string                   `json:"triggerCharacter,omitempty"`
+	IsRetrigger      bool                     `json:"isRetrigger"`
+	ActiveSignature  int                      `json:"activeSignatureHelp,omitempty"`
+}
+
+// SignatureHelpTriggerKind represents how signature help was triggered
+type SignatureHelpTriggerKind int
+
+const (
+	SignatureHelpInvoked           SignatureHelpTriggerKind = 1
+	SignatureHelpTriggerCharacter  SignatureHelpTriggerKind = 2
+	SignatureHelpContentChange     SignatureHelpTriggerKind = 3
+)
+
+// SignatureHelp represents signature help
+type SignatureHelp struct {
+	Signatures      []SignatureInformation `json:"signatures"`
+	ActiveSignature int                    `json:"activeSignature,omitempty"`
+	ActiveParameter int                    `json:"activeParameter,omitempty"`
+}
+
+// SignatureInformation represents a function signature
+type SignatureInformation struct {
+	Label         string                 `json:"label"`
+	Documentation interface{}            `json:"documentation,omitempty"`
+	Parameters    []ParameterInformation `json:"parameters,omitempty"`
+}
+
+// ParameterInformation represents a function parameter
+type ParameterInformation struct {
+	Label         interface{} `json:"label"` // string or [int, int]
+	Documentation interface{} `json:"documentation,omitempty"`
+}
+
+// DocumentSymbolParams represents document symbol parameters
+type DocumentSymbolParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+// DocumentSymbol represents a symbol in a document
+type DocumentSymbol struct {
+	Name           string           `json:"name"`
+	Detail         string           `json:"detail,omitempty"`
+	Kind           SymbolKind       `json:"kind"`
+	Range          Range            `json:"range"`
+	SelectionRange Range            `json:"selectionRange"`
+	Children       []DocumentSymbol `json:"children,omitempty"`
+}
+
+// SymbolKind represents the kind of a symbol
+type SymbolKind int
+
+const (
+	FileSymbol        SymbolKind = 1
+	ModuleSymbol      SymbolKind = 2
+	NamespaceSymbol   SymbolKind = 3
+	PackageSymbol     SymbolKind = 4
+	ClassSymbol       SymbolKind = 5
+	MethodSymbol      SymbolKind = 6
+	PropertySymbol    SymbolKind = 7
+	FieldSymbol       SymbolKind = 8
+	ConstructorSymbol SymbolKind = 9
+	EnumSymbol        SymbolKind = 10
+	InterfaceSymbol   SymbolKind = 11
+	FunctionSymbol    SymbolKind = 12
+	VariableSymbol    SymbolKind = 13
+	ConstantSymbol    SymbolKind = 14
+	StringSymbol      SymbolKind = 15
+	NumberSymbol      SymbolKind = 16
+	BooleanSymbol     SymbolKind = 17
+	ArraySymbol       SymbolKind = 18
+)
+
+// WorkspaceSymbolParams represents workspace symbol parameters
+type WorkspaceSymbolParams struct {
+	Query string `json:"query"`
+}
+
+// SymbolInformation represents a workspace symbol
+type SymbolInformation struct {
+	Name          string   `json:"name"`
+	Kind          SymbolKind `json:"kind"`
+	Location      Location `json:"location"`
+	ContainerName string   `json:"containerName,omitempty"`
 }
 
 // ReferenceParams represents references parameters

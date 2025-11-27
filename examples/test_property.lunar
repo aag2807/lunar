@@ -1,0 +1,15 @@
+-- Test property access on a class
+
+class Calculator {
+	add(a: number, b: number): number {
+		return a + b
+	}
+}
+
+function main(): void {
+	local calc: Calculator = Calculator()
+	local result: number = calc.add(2, 3)
+	print("Result")
+end
+
+main()

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 )
 
@@ -37,8 +38,16 @@ func executeScript(script string, args []string, dir string) error {
 		fullCommand = script + " " + strings.Join(args, " ")
 	}
 
-	// Create command
-	cmd := exec.Command("sh", "-c", fullCommand)
+	// Create command based on OS
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		// Use cmd.exe on Windows
+		cmd = exec.Command("cmd", "/c", fullCommand)
+	} else {
+		// Use sh on Unix-like systems (Linux, macOS, etc.)
+		cmd = exec.Command("sh", "-c", fullCommand)
+	}
+
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

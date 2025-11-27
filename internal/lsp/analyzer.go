@@ -37,7 +37,7 @@ type FileInfo struct {
 // SymbolInfo contains information about a symbol
 type SymbolInfo struct {
 	Name       string
-	Kind       SymbolKind
+	Kind       AnalyzerSymbolKind
 	Type       string
 	Location   Location
 	References []Location
@@ -46,17 +46,17 @@ type SymbolInfo struct {
 }
 
 // SymbolKind represents the kind of symbol
-type SymbolKind int
+type AnalyzerSymbolKind int
 
 const (
-	SymbolKindFunction SymbolKind = iota
-	SymbolKindVariable
-	SymbolKindClass
-	SymbolKindInterface
-	SymbolKindType
-	SymbolKindConstant
-	SymbolKindParameter
-	SymbolKindProperty
+	AnalyzerSymbolKindFunction AnalyzerSymbolKind = iota
+	AnalyzerSymbolKindVariable
+	AnalyzerSymbolKindClass
+	AnalyzerSymbolKindInterface
+	AnalyzerSymbolKindType
+	AnalyzerSymbolKindConstant
+	AnalyzerSymbolKindParameter
+	AnalyzerSymbolKindProperty
 )
 
 // FileMetrics contains metrics for a file

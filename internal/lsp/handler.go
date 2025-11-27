@@ -45,8 +45,14 @@ func (s *Server) handleInitialize(content json.RawMessage) error {
 				TriggerCharacters: []string{".", ":"},
 				ResolveProvider:   false,
 			},
-			ReferencesProvider: true,
-			RenameProvider:     true,
+			SignatureHelpProvider: &SignatureHelpOptions{
+				TriggerCharacters:   []string{"(", ","},
+				RetriggerCharacters: []string{","},
+			},
+			DocumentSymbolProvider:  true,
+			WorkspaceSymbolProvider: true,
+			ReferencesProvider:      true,
+			RenameProvider:          true,
 			CodeActionProvider: &CodeActionOptions{
 				CodeActionKinds: []string{
 					CodeActionKindQuickFix,
@@ -88,6 +94,10 @@ func (s *Server) handleInitialize(content json.RawMessage) error {
 			},
 		},
 	}
+
+	// Mark server as initialized after sending response
+	s.initialized = true
+	s.logger.Println("Server initialization complete")
 
 	return s.sendResponse(request.ID, result)
 }
@@ -361,6 +371,58 @@ func (s *Server) handleCompletion(content json.RawMessage, id interface{}) error
 	return s.sendResponse(id, result)
 }
 
+// handleSignatureHelp handles textDocument/signatureHelp
+func (s *Server) handleSignatureHelp(content json.RawMessage, id interface{}) error {
+	var request struct {
+		Params SignatureHelpParams `json:"params"`
+	}
+
+	if err := json.Unmarshal(content, &request); err != nil {
+		return s.sendError(id, InvalidParams, err.Error())
+	}
+
+	doc := s.documents.Get(request.Params.TextDocument.URI)
+	if doc == nil {
+		return s.sendError(id, InvalidParams, "Document not found")
+	}
+
+	result := s.getSignatureHelp(doc, request.Params)
+	return s.sendResponse(id, result)
+}
+
+// handleDocumentSymbol handles textDocument/documentSymbol
+func (s *Server) handleDocumentSymbol(content json.RawMessage, id interface{}) error {
+	var request struct {
+		Params DocumentSymbolParams `json:"params"`
+	}
+
+	if err := json.Unmarshal(content, &request); err != nil {
+		return s.sendError(id, InvalidParams, err.Error())
+	}
+
+	doc := s.documents.Get(request.Params.TextDocument.URI)
+	if doc == nil {
+		return s.sendError(id, InvalidParams, "Document not found")
+	}
+
+	result := s.getDocumentSymbols(doc)
+	return s.sendResponse(id, result)
+}
+
+// handleWorkspaceSymbol handles workspace/symbol
+func (s *Server) handleWorkspaceSymbol(content json.RawMessage, id interface{}) error {
+	var request struct {
+		Params WorkspaceSymbolParams `json:"params"`
+	}
+
+	if err := json.Unmarshal(content, &request); err != nil {
+		return s.sendError(id, InvalidParams, err.Error())
+	}
+
+	result := s.getWorkspaceSymbols(request.Params.Query)
+	return s.sendResponse(id, result)
+}
+
 // handleCodeAction handles textDocument/codeAction
 func (s *Server) handleCodeAction(content json.RawMessage, id interface{}) error {
 	var request struct {
@@ -572,7 +634,8 @@ func (s *Server) getInlayHints(doc *Document, params InlayHintParams) []InlayHin
 	}
 
 	// Run type checker
-	checker := types.NewChecker()
+	stdlibPath := getStdlibPathForLSP()
+	checker := types.NewChecker(stdlibPath)
 	checker.Check(statements)
 
 	// Get all type information
@@ -730,7 +793,8 @@ func (s *Server) getTypeInfo(content string, word string, pos Position) string {
 		return ""
 	}
 
-	checker := types.NewChecker()
+	stdlibPath := getStdlibPathForLSP()
+	checker := types.NewChecker(stdlibPath)
 	checker.Check(statements)
 
 	// Look up the symbol in the type environment
@@ -769,12 +833,17 @@ func (s *Server) getCompletions(doc *Document, pos Position) []CompletionItem {
 	p := parser.New(l)
 	statements := p.Parse()
 
+	// Get stdlib path for type checker
+	stdlibPath := getStdlibPathForLSP()
+
 	if len(p.Errors()) > 0 {
-		// Still provide keyword completions
-		return s.getKeywordCompletions()
+		// Still provide keyword completions and snippets
+		items = append(items, s.getKeywordCompletions()...)
+		items = append(items, s.addSnippetCompletions(&EnhancedCompletionContext{CursorPosition: pos})...)
+		return items
 	}
 
-	checker := types.NewChecker()
+	checker := types.NewChecker(stdlibPath)
 	checker.Check(statements)
 
 	// Get line content to determine context
@@ -789,9 +858,22 @@ func (s *Server) getCompletions(doc *Document, pos Position) []CompletionItem {
 	isMethodCall := strings.HasSuffix(trimmedBefore, ":")
 	isDotAccess := strings.HasSuffix(trimmedBefore, ".")
 
+	// Extract query (partial word being typed)
+	query := s.extractQueryFromLine(lineContent, pos.Character)
+
+	// Build completion context
+	context := &EnhancedCompletionContext{
+		IsAfterDot:     isDotAccess,
+		IsAfterColon:   isMethodCall,
+		Query:          query,
+		CursorPosition: pos,
+	}
+
 	if isMethodCall || isDotAccess {
 		// Get the object before the dot/colon
 		objName := getObjectBeforeDotOrColon(trimmedBefore)
+		context.ObjectName = objName
+
 		if objName != "" {
 			// First try local scope
 			items = append(items, s.getMemberCompletions(checker.GetEnv(), objName, isMethodCall)...)
@@ -809,6 +891,8 @@ func (s *Server) getCompletions(doc *Document, pos Position) []CompletionItem {
 				Detail: types.TypeString(typ),
 				Kind:   getCompletionKind(typ),
 			}
+			// Enhance with documentation
+			item = s.enhanceCompletionItem(item, typ, context)
 			items = append(items, item)
 		}
 
@@ -819,14 +903,43 @@ func (s *Server) getCompletions(doc *Document, pos Position) []CompletionItem {
 				Detail: types.TypeString(typ),
 				Kind:   getCompletionKind(typ),
 			}
+			// Enhance with documentation
+			item = s.enhanceCompletionItem(item, typ, context)
 			items = append(items, item)
 		}
 
 		// Add keyword completions
 		items = append(items, s.getKeywordCompletions()...)
+
+		// Add snippet completions
+		items = append(items, s.addSnippetCompletions(context)...)
 	}
 
+	// Sort and rank items
+	items = s.sortAndRankCompletions(items, context)
+
 	return items
+}
+
+// extractQueryFromLine extracts the partial word being typed at the cursor
+func (s *Server) extractQueryFromLine(line string, cursorPos int) string {
+	if cursorPos > len(line) {
+		cursorPos = len(line)
+	}
+
+	// Find start of word
+	start := cursorPos - 1
+	for start >= 0 && (isAlphanumeric(line[start]) || line[start] == '_') {
+		start--
+	}
+	start++
+
+	return line[start:cursorPos]
+}
+
+// isAlphanumeric checks if a character is alphanumeric
+func isAlphanumeric(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
 }
 
 // getKeywordCompletions returns keyword completion items

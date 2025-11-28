@@ -27,4 +27,8 @@
 # Lunar cache directory (incremental compilation)
 .lunar-cache/
 .claude/
-dist/
+/dist/**
+nul
+*.ps1
+*.exe
+

@@ -84,6 +84,18 @@ lspconfig.lunar.setup({
     -- Your on_attach configuration here
     vim.notify('Lunar LSP attached!', vim.log.levels.INFO)
   end,
+  -- Enable file watching for .d.lunar files
+  capabilities = vim.tbl_deep_extend(
+    'force',
+    vim.lsp.protocol.make_client_capabilities(),
+    {
+      workspace = {
+        didChangeWatchedFiles = {
+          dynamicRegistration = true,
+        },
+      },
+    }
+  ),
 })
 ```
 
@@ -151,6 +163,48 @@ The Lunar LSP supports:
 - ✅ **Code actions** - Quick fixes and refactorings
 - ✅ **Inlay hints** - Type hints inline
 - ✅ **Signature help** - Parameter hints while typing
+- ✅ **Declaration files** - Automatic `.d.lunar` file detection
+
+## Declaration Files (.d.lunar)
+
+The LSP automatically scans your workspace for `.d.lunar` declaration files and includes their type definitions in IntelliSense.
+
+### How it works
+
+1. **Automatic scanning**: When the LSP initializes, it recursively scans your workspace root directory for all `.d.lunar` files
+2. **Live updates**: The LSP watches for changes to `.d.lunar` files and automatically reloads them
+3. **Global types**: All types, interfaces, and declarations from `.d.lunar` files are available globally in your workspace
+
+### Creating declaration files
+
+Create a `.d.lunar` file to define types that should be available across your project:
+
+```lunar
+-- types.d.lunar
+export interface User
+    id: number
+    name: string
+    email: string
+    save(): void
+end
+
+export interface Database
+    query(sql: string): any
+    connect(): void
+    disconnect(): void
+end
+```
+
+These types will be automatically picked up by the LSP and available for completion and type checking in all your `.lunar` files.
+
+### File watching
+
+The LSP automatically watches for:
+- New `.d.lunar` files being created
+- Existing `.d.lunar` files being modified
+- `.d.lunar` files being deleted
+
+No manual refresh is needed - changes are detected automatically!
 
 ## Keybindings (Default)
 

@@ -61,6 +61,13 @@ function M.setup(config)
       }
     end
 
+    -- Get capabilities for nvim-cmp integration
+    local capabilities = vim.lsp.protocol.make_client_capabilities()
+    local has_cmp, cmp_nvim_lsp = pcall(require, 'cmp_nvim_lsp')
+    if has_cmp then
+      capabilities = cmp_nvim_lsp.default_capabilities(capabilities)
+    end
+
     -- Setup the LSP server
     lspconfig.lunar_lsp.setup({
       on_attach = function(client, bufnr)
@@ -95,10 +102,17 @@ function M.setup(config)
         vim.notify("Lunar LSP attached to buffer " .. bufnr, vim.log.levels.INFO)
       end,
 
-      capabilities = vim.lsp.protocol.make_client_capabilities(),
+      capabilities = capabilities,
     })
   else
     -- Fallback: use vim.lsp.start directly without lspconfig
+    -- Get capabilities for nvim-cmp integration
+    local capabilities = vim.lsp.protocol.make_client_capabilities()
+    local has_cmp, cmp_nvim_lsp = pcall(require, 'cmp_nvim_lsp')
+    if has_cmp then
+      capabilities = cmp_nvim_lsp.default_capabilities(capabilities)
+    end
+
     vim.api.nvim_create_autocmd("FileType", {
       pattern = "lunar",
       callback = function(args)
@@ -110,6 +124,7 @@ function M.setup(config)
           name = "lunar-lsp",
           cmd = { lsp_binary },
           root_dir = vim.fn.getcwd(),
+          capabilities = capabilities,
           on_attach = function(client, bufnr)
             vim.bo[bufnr].omnifunc = "v:lua.vim.lsp.omnifunc"
 

@@ -18,7 +18,10 @@ function activate(context) {
             { scheme: 'file', language: 'lunar' }
         ],
         synchronize: {
-            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.lunar')
+            fileEvents: [
+                vscode.workspace.createFileSystemWatcher('**/*.lunar'),
+                vscode.workspace.createFileSystemWatcher('**/*.d.lunar')
+            ]
         }
     };
 

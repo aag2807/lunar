@@ -2429,8 +2429,8 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 
 		case lexer.IDENT, lexer.STRING_TYPE, lexer.TABLE, lexer.TYPE:
 			// Could be property or method
-			if p.peekTokenIs(lexer.COLON) {
-				// It's a property
+			if p.peekTokenIs(lexer.COLON) || p.peekTokenIs(lexer.ASSIGN) {
+				// It's a property (with type annotation or initial value)
 				prop := p.parsePropertyDeclaration()
 				prop.Visibility = visibility
 				prop.IsStatic = isStatic
@@ -2465,15 +2465,21 @@ func (p *Parser) parsePropertyDeclaration() *ast.PropertyDeclaration {
 		Name:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
 	}
 
-	// Expect colon
-	if !p.expectPeek(lexer.COLON) {
-		return nil
+	// Check for type annotation (: type)
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // consume ':'
+		p.nextToken() // move to type
+		prop.Type = p.parseType()
 	}
 
-	p.nextToken() // move to type
-	prop.Type = p.parseType()
+	// Check for initial value (= value)
+	if p.peekTokenIs(lexer.ASSIGN) {
+		p.nextToken() // consume '='
+		p.nextToken() // move to value
+		prop.Value = p.parseExpression(LOWEST)
+	}
 
-	p.nextToken() // move past type
+	p.nextToken() // move past property
 	return prop
 }
 

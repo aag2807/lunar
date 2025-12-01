@@ -15,21 +15,23 @@ type Generator struct {
 	currentLine      int
 	currentColumn    int
 	sourceFile       string
-	classes          map[string]bool   // Track defined classes for constructor calls
-	classParents     map[string]string // Track parent class names for super
-	currentClassName string            // Current class being generated
-	exports          []string          // Track exported names for module generation
-	target           string            // Target Lua version: lua51, lua52, lua53, lua54, luajit
+	classes          map[string]bool              // Track defined classes for constructor calls
+	classParents     map[string]string            // Track parent class names for super
+	staticMethods    map[string]map[string]bool   // Track static methods: class -> method -> isStatic
+	currentClassName string                       // Current class being generated
+	exports          []string                     // Track exported names for module generation
+	target           string                       // Target Lua version: lua51, lua52, lua53, lua54, luajit
 }
 
 // New creates a new code generator
 func New() *Generator {
 	return &Generator{
-		indent:       0,
-		classes:      make(map[string]bool),
-		classParents: make(map[string]string),
-		exports:      make([]string, 0),
-		target:       "lua53",
+		indent:        0,
+		classes:       make(map[string]bool),
+		classParents:  make(map[string]string),
+		staticMethods: make(map[string]map[string]bool),
+		exports:       make([]string, 0),
+		target:        "lua53",
 	}
 }
 
@@ -39,11 +41,12 @@ func NewWithTarget(target string) *Generator {
 		target = "lua53"
 	}
 	return &Generator{
-		indent:       0,
-		classes:      make(map[string]bool),
-		classParents: make(map[string]string),
-		exports:      make([]string, 0),
-		target:       target,
+		indent:        0,
+		classes:       make(map[string]bool),
+		classParents:  make(map[string]string),
+		staticMethods: make(map[string]map[string]bool),
+		exports:       make([]string, 0),
+		target:        target,
 	}
 }
 
@@ -70,6 +73,7 @@ func NewWithSourceMapAndTarget(sourceFile, generatedFile string, target string) 
 		sourceFile:       sourceFile,
 		classes:          make(map[string]bool),
 		classParents:     make(map[string]string),
+		staticMethods:    make(map[string]map[string]bool),
 		exports:          make([]string, 0),
 		target:           target,
 	}
@@ -584,6 +588,18 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 	// Track this class for constructor calls
 	g.classes[className] = true
 
+	// Initialize static methods tracking for this class
+	if g.staticMethods[className] == nil {
+		g.staticMethods[className] = make(map[string]bool)
+	}
+
+	// Track which methods are static
+	for _, method := range node.Methods {
+		if method.IsStatic {
+			g.staticMethods[className][method.Name.Value] = true
+		}
+	}
+
 	// Track parent class name for super
 	if node.Extends != nil {
 		if parentIdent, ok := node.Extends.(*ast.Identifier); ok {
@@ -614,32 +630,52 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 	output.WriteString("\n")
 
 	// Generate constructor as new() function
-	if node.Constructor != nil {
+	if node.Constructor != nil || len(node.Properties) > 0 {
 		output.WriteString(g.generateIndent())
 		output.WriteString(fmt.Sprintf("function %s.new(", className))
 
-		params := make([]string, len(node.Constructor.Parameters))
-		for i, param := range node.Constructor.Parameters {
-			params[i] = param.Name.Value
+		// If there's a constructor, use its parameters
+		if node.Constructor != nil {
+			params := make([]string, len(node.Constructor.Parameters))
+			for i, param := range node.Constructor.Parameters {
+				params[i] = param.Name.Value
+			}
+			output.WriteString(strings.Join(params, ", "))
 		}
-		output.WriteString(strings.Join(params, ", "))
 		output.WriteString(")\n")
 
 		g.indent++
 		output.WriteString(g.generateIndent())
 		output.WriteString("local self = setmetatable({}, " + className + ")\n")
 
-		// Initialize constructor parameter properties
-		for _, param := range node.Constructor.Parameters {
-			if param.Visibility != "" {
+		// Initialize instance properties with their default values
+		for _, prop := range node.Properties {
+			if !prop.IsStatic {
 				output.WriteString(g.generateIndent())
-				output.WriteString(fmt.Sprintf("self.%s = %s\n", param.Name.Value, param.Name.Value))
+				if prop.Value != nil {
+					// Property has an initial value
+					value := g.generateExpression(prop.Value)
+					output.WriteString(fmt.Sprintf("self.%s = %s\n", prop.Name.Value, value))
+				} else {
+					// Property has no initial value, initialize to nil
+					output.WriteString(fmt.Sprintf("self.%s = nil\n", prop.Name.Value))
+				}
 			}
 		}
 
-		// Initialize properties from constructor body
-		for _, stmt := range node.Constructor.Body.Statements {
-			output.WriteString(g.generateStatement(stmt))
+		// Initialize constructor parameter properties (if there's a constructor)
+		if node.Constructor != nil {
+			for _, param := range node.Constructor.Parameters {
+				if param.Visibility != "" {
+					output.WriteString(g.generateIndent())
+					output.WriteString(fmt.Sprintf("self.%s = %s\n", param.Name.Value, param.Name.Value))
+				}
+			}
+
+			// Execute constructor body
+			for _, stmt := range node.Constructor.Body.Statements {
+				output.WriteString(g.generateStatement(stmt))
+			}
 		}
 
 		output.WriteString(g.generateIndent())
@@ -655,10 +691,15 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 	for _, prop := range node.Properties {
 		if prop.IsStatic {
 			// Static properties go directly on the class table
-			// They would need initialization in constructor or elsewhere
-			// For now, we'll just declare them as nil (can be set later)
 			output.WriteString(g.generateIndent())
-			output.WriteString(fmt.Sprintf("%s.%s = nil\n", className, prop.Name.Value))
+			if prop.Value != nil {
+				// Static property has an initial value
+				value := g.generateExpression(prop.Value)
+				output.WriteString(fmt.Sprintf("%s.%s = %s\n", className, prop.Name.Value, value))
+			} else {
+				// Static property has no initial value, initialize to nil
+				output.WriteString(fmt.Sprintf("%s.%s = nil\n", className, prop.Name.Value))
+			}
 		}
 	}
 	if len(node.Properties) > 0 {
@@ -1194,6 +1235,90 @@ func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
 
 // generateCallExpression generates code for a function call
 func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
+	// Check if this is a method call on an object (DotExpression)
+	// In Lunar: object.method() should compile to Lua: object:method() or object.method()
+	// depending on whether it's an instance method or static method
+	if dotExpr, ok := node.Function.(*ast.DotExpression); ok {
+		// Right side should be an identifier (the property/method name)
+		var property string
+		if rightIdent, ok := dotExpr.Right.(*ast.Identifier); ok {
+			property = rightIdent.Value
+		} else {
+			// If right is not an identifier, generate normally
+			function := g.generateExpression(node.Function)
+			args := make([]string, len(node.Arguments))
+			for i, arg := range node.Arguments {
+				args[i] = g.generateExpression(arg)
+			}
+			return fmt.Sprintf("%s(%s)", function, strings.Join(args, ", "))
+		}
+
+		// Check if calling a static method on a class name
+		useColonSyntax := true // Default to : for instance methods
+		if ident, ok := dotExpr.Left.(*ast.Identifier); ok {
+			className := ident.Value
+			// If calling on a class name and the method is static, use dot syntax
+			if g.classes[className] {
+				if g.staticMethods[className] != nil && g.staticMethods[className][property] {
+					useColonSyntax = false
+				}
+			}
+		}
+
+		object := g.generateExpression(dotExpr.Left)
+
+		// Check if any argument is a spread expression
+		hasSpread := false
+		for _, arg := range node.Arguments {
+			if _, ok := arg.(*ast.SpreadExpression); ok {
+				hasSpread = true
+				break
+			}
+		}
+
+		// Choose the appropriate syntax for method calls
+		methodOp := ":"
+		if !useColonSyntax {
+			methodOp = "."
+		}
+
+		// Generate method call
+		if hasSpread {
+			// Handle spread arguments
+			if len(node.Arguments) == 1 {
+				if spread, ok := node.Arguments[0].(*ast.SpreadExpression); ok {
+					spreadValue := g.generateExpression(spread.Value)
+					return fmt.Sprintf("%s%s%s(table.unpack(%s))", object, methodOp, property, spreadValue)
+				}
+			}
+
+			// Complex case: mixed regular and spread arguments
+			var tableBuilder strings.Builder
+			tableBuilder.WriteString("{")
+			for i, arg := range node.Arguments {
+				if i > 0 {
+					tableBuilder.WriteString(", ")
+				}
+				if spread, ok := arg.(*ast.SpreadExpression); ok {
+					tableBuilder.WriteString(fmt.Sprintf("table.unpack(%s)", g.generateExpression(spread.Value)))
+				} else {
+					tableBuilder.WriteString(g.generateExpression(arg))
+				}
+			}
+			tableBuilder.WriteString("}")
+			return fmt.Sprintf("%s%s%s(table.unpack(%s))", object, methodOp, property, tableBuilder.String())
+		}
+
+		// No spread arguments - normal method call
+		args := make([]string, len(node.Arguments))
+		for i, arg := range node.Arguments {
+			args[i] = g.generateExpression(arg)
+		}
+
+		return fmt.Sprintf("%s%s%s(%s)", object, methodOp, property, strings.Join(args, ", "))
+	}
+
+	// Not a method call - generate normally
 	function := g.generateExpression(node.Function)
 
 	// Check if calling a class constructor (simple identifier that's a known class)

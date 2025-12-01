@@ -194,6 +194,10 @@ func (s *Server) handleMessage(content json.RawMessage) error {
 	case "textDocument/didSave":
 		return s.handleDidSave(content)
 
+	// Workspace notifications
+	case "workspace/didChangeWatchedFiles":
+		return s.handleDidChangeWatchedFiles(content)
+
 	// Language features
 	case "textDocument/hover":
 		return s.handleHover(content, baseMsg.ID)

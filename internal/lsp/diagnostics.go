@@ -8,11 +8,17 @@ import (
 
 // DiagnosticsEngine provides diagnostics for Lunar code
 type DiagnosticsEngine struct {
+	declarations *DeclarationManager
 }
 
 // NewDiagnosticsEngine creates a new diagnostics engine
 func NewDiagnosticsEngine() *DiagnosticsEngine {
 	return &DiagnosticsEngine{}
+}
+
+// SetDeclarationManager sets the declaration manager for type checking
+func (de *DiagnosticsEngine) SetDeclarationManager(dm *DeclarationManager) {
+	de.declarations = dm
 }
 
 // Analyze analyzes source code and returns diagnostics
@@ -56,6 +62,14 @@ func (de *DiagnosticsEngine) Analyze(uri string, content string) []Diagnostic {
 	// Run type checker
 	stdlibPath := getStdlibPathForLSP()
 	checker := types.NewChecker(stdlibPath)
+
+	// Preload declarations from .d.lunar files
+	if de.declarations != nil {
+		for _, declEnv := range de.declarations.GetAllEnvironments() {
+			checker.PreloadDeclarations(declEnv)
+		}
+	}
+
 	typeErrors := checker.Check(statements)
 
 	for _, err := range typeErrors {

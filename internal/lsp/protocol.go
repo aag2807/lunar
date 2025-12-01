@@ -598,3 +598,48 @@ const (
 	CodeActionKindSource          = "source"
 	CodeActionKindSourceOrganizeImports = "source.organizeImports"
 )
+
+// FileSystemWatcher represents a file system watcher
+type FileSystemWatcher struct {
+	GlobPattern string `json:"globPattern"`
+	Kind        int    `json:"kind,omitempty"`
+}
+
+// WatchKind represents the kind of file system event to watch
+const (
+	WatchKindCreate = 1
+	WatchKindChange = 2
+	WatchKindDelete = 4
+)
+
+// DidChangeWatchedFilesParams represents file change notification parameters
+type DidChangeWatchedFilesParams struct {
+	Changes []FileEvent `json:"changes"`
+}
+
+// FileEvent represents a file change event
+type FileEvent struct {
+	URI  string           `json:"uri"`
+	Type FileChangeType   `json:"type"`
+}
+
+// FileChangeType represents the type of file change
+type FileChangeType int
+
+const (
+	FileChangeTypeCreated FileChangeType = 1
+	FileChangeTypeChanged FileChangeType = 2
+	FileChangeTypeDeleted FileChangeType = 3
+)
+
+// FileSystemWatcherRegistration represents dynamic file watcher registration
+type FileSystemWatcherRegistration struct {
+	ID              string              `json:"id"`
+	Method          string              `json:"method"`
+	RegisterOptions RegisterOptions     `json:"registerOptions"`
+}
+
+// RegisterOptions represents file watcher registration options
+type RegisterOptions struct {
+	Watchers []FileSystemWatcher `json:"watchers"`
+}

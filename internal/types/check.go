@@ -394,6 +394,29 @@ func (c *Checker) GetEnv() *Environment {
 	return c.env
 }
 
+// PreloadDeclarations adds types from a declaration environment to the checker
+// This is used by the LSP to inject types from .d.lunar files before checking
+func (c *Checker) PreloadDeclarations(declEnv *Environment) {
+	if declEnv == nil {
+		return
+	}
+
+	// Copy all types from the declaration environment to the checker's environment
+	for name, typ := range declEnv.GetAll() {
+		c.env.Set(name, typ)
+
+		// Also register in appropriate internal maps based on type
+		switch t := typ.(type) {
+		case *InterfaceType:
+			c.interfaces[name] = t
+		case *ClassType:
+			c.classes[name] = t
+		case *EnumType:
+			c.enums[name] = t
+		}
+	}
+}
+
 // registerTypeDefinition registers classes, interfaces, enums, and type aliases
 func (c *Checker) registerTypeDefinition(stmt ast.Statement) {
 	switch node := stmt.(type) {

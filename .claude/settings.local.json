@@ -2,7 +2,15 @@
   "permissions": {
     "allow": [
       "Bash(make build:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(go build:*)",
+      "Bash(dir:*)",
+      "Bash(cat:*)",
+      "Bash(C:/Users/Alvaro/Development/lua/lunar/bin/lunar-lsp.exe)",
+      "Bash(python:*)",
+      "Bash(find:*)",
+      "Bash(timeout 3 python:*)",
+      "Bash(go test:*)"
     ],
     "deny": [],
     "ask": []

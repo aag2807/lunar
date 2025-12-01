@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"io/fs"
+	"log"
 	"lunar/internal/lexer"
 	"lunar/internal/parser"
 	"lunar/internal/types"
@@ -16,6 +17,11 @@ type DeclarationManager struct {
 	declarations map[string]*types.Environment // URI -> environment
 	mu           sync.RWMutex
 	rootPath     string
+	logger       *log.Logger
+}
+
+func (dm *DeclarationManager) SetLogger(logger *log.Logger) {
+	dm.logger = logger
 }
 
 // NewDeclarationManager creates a new declaration manager
@@ -40,7 +46,12 @@ func (dm *DeclarationManager) scanDeclarations() {
 		return
 	}
 
-	// Scan for .d.lunar files
+	if dm.logger != nil {
+		dm.logger.Printf("Scanning for .d.lunar files in: %s", dm.rootPath)
+	}
+
+	fileCount := 0
+	// Scan for .d.lunar files recursively
 	filepath.WalkDir(dm.rootPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // Continue on error
@@ -57,11 +68,19 @@ func (dm *DeclarationManager) scanDeclarations() {
 
 		// Process .d.lunar files
 		if strings.HasSuffix(path, ".d.lunar") {
+			if dm.logger != nil {
+				dm.logger.Printf("Found declaration file: %s", path)
+			}
 			dm.loadDeclarationFile(path)
+			fileCount++
 		}
 
 		return nil
 	})
+
+	if dm.logger != nil {
+		dm.logger.Printf("Loaded %d declaration file(s)", fileCount)
+	}
 }
 
 // loadDeclarationFile loads a declaration file and extracts type information
@@ -86,7 +105,7 @@ func (dm *DeclarationManager) loadDeclarationFile(path string) {
 	checker.Check(statements)
 
 	// Store the environment
-	uri := "file://" + path
+	uri := pathToURI(path)
 	dm.declarations[uri] = checker.GetEnv()
 }
 
@@ -120,6 +139,19 @@ func (dm *DeclarationManager) GetAllDeclaredSymbols() map[string]types.Type {
 	}
 
 	return symbols
+}
+
+// GetAllEnvironments returns all declaration file environments
+func (dm *DeclarationManager) GetAllEnvironments() []*types.Environment {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+
+	envs := make([]*types.Environment, 0, len(dm.declarations))
+	for _, env := range dm.declarations {
+		envs = append(envs, env)
+	}
+
+	return envs
 }
 
 // GetMembersOf returns the members of a declared interface or class
@@ -165,4 +197,23 @@ func (dm *DeclarationManager) Refresh() {
 
 	dm.declarations = make(map[string]*types.Environment)
 	dm.scanDeclarations()
+}
+
+// pathToURI converts a filesystem path to a file:// URI
+// Handles both Windows (C:\path) and Unix (/path) paths
+func pathToURI(path string) string {
+	// Convert backslashes to forward slashes
+	path = filepath.ToSlash(path)
+
+	// On Windows, paths start with a drive letter (e.g., C:/Users/...)
+	// We need to prepend with file:/// (3 slashes)
+	// On Unix, paths start with / (e.g., /home/...)
+	// We need to prepend with file:// (2 slashes to make file:///)
+	if len(path) > 1 && path[1] == ':' {
+		// Windows path with drive letter
+		return "file:///" + path
+	}
+
+	// Unix path
+	return "file://" + path
 }

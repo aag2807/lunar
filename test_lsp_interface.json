@@ -1,0 +1,18 @@
+Content-Length: 157
+
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"file:///C:/Users/Alvaro/Development/lua/portfolio","capabilities":{}}}
+Content-Length: 52
+
+{"jsonrpc":"2.0","method":"initialized","params":{}}
+Content-Length: 238
+
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///C:/Users/Alvaro/Development/lua/portfolio/main.lunar","languageId":"lunar","version":1,"text":"local t: TEST\n\nfunction main(): void\n\tprint(\"Hello world!!!!\")\nend\n\nmain()\n"}}}
+Content-Length: 191
+
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///C:/Users/Alvaro/Development/lua/portfolio/main.lunar"},"position":{"line":0,"character":13}}}
+Content-Length: 43
+
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}
+Content-Length: 35
+
+{"jsonrpc":"2.0","method":"exit"}

@@ -979,6 +979,7 @@ type PropertyDeclaration struct {
 	IsReadonly bool        // readonly property
 	Name       *Identifier
 	Type       Expression
+	Value      Expression  // initial/default value
 }
 
 func (pd *PropertyDeclaration) statementNode()       {}

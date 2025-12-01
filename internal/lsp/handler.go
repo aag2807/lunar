@@ -6,6 +6,7 @@ import (
 	"lunar/internal/lexer"
 	"lunar/internal/parser"
 	"lunar/internal/types"
+	"path/filepath"
 	"strings"
 )
 
@@ -25,9 +26,13 @@ func (s *Server) handleInitialize(content json.RawMessage) error {
 
 	// Scan for declaration files if root URI is provided
 	if s.rootURI != "" {
-		rootPath := strings.TrimPrefix(s.rootURI, "file://")
+		rootPath := uriToPath(s.rootURI)
+		s.logger.Printf("Converted root path: %s", rootPath)
+		s.declarations.SetLogger(s.logger)
 		s.declarations.SetRootPath(rootPath)
-		s.logger.Println("Scanned for .d.lunar declaration files")
+
+		// Connect declarations to diagnostics engine
+		s.diagnostics.SetDeclarationManager(s.declarations)
 	}
 
 	result := InitializeResult{
@@ -209,6 +214,36 @@ func (s *Server) handleDidSave(content json.RawMessage) error {
 
 	// Publish diagnostics
 	s.publishDiagnostics(params.Params.TextDocument.URI)
+
+	return nil
+}
+
+// handleDidChangeWatchedFiles handles workspace/didChangeWatchedFiles
+func (s *Server) handleDidChangeWatchedFiles(content json.RawMessage) error {
+	var params struct {
+		Params DidChangeWatchedFilesParams `json:"params"`
+	}
+
+	if err := json.Unmarshal(content, &params); err != nil {
+		return err
+	}
+
+	// Check if any .d.lunar files changed
+	needsRefresh := false
+	for _, change := range params.Params.Changes {
+		if strings.HasSuffix(change.URI, ".d.lunar") {
+			needsRefresh = true
+			s.logger.Printf("Declaration file changed: %s (type: %d)", change.URI, change.Type)
+			break
+		}
+	}
+
+	// Refresh declarations if needed
+	if needsRefresh {
+		s.logger.Println("Refreshing declaration files...")
+		s.declarations.Refresh()
+		s.logger.Println("Declaration files refreshed")
+	}
 
 	return nil
 }
@@ -634,8 +669,7 @@ func (s *Server) getInlayHints(doc *Document, params InlayHintParams) []InlayHin
 	}
 
 	// Run type checker
-	stdlibPath := getStdlibPathForLSP()
-	checker := types.NewChecker(stdlibPath)
+	checker := s.createCheckerWithDeclarations()
 	checker.Check(statements)
 
 	// Get all type information
@@ -783,6 +817,40 @@ func getWordAtRange(line string, r Range) string {
 	return line[r.Start.Character:r.End.Character]
 }
 
+// uriToPath converts a file:// URI to a filesystem path
+// Handles both Windows (file:///C:/path) and Unix (file:///path) URIs
+func uriToPath(uri string) string {
+	path := strings.TrimPrefix(uri, "file://")
+
+	// On Windows, URIs look like file:///C:/Users/...
+	// After trimming "file://", we get "/C:/Users/..."
+	// We need to remove the leading "/" before the drive letter
+	if len(path) > 2 && path[0] == '/' && path[2] == ':' {
+		// Windows path with drive letter
+		path = path[1:]
+	}
+
+	// Convert forward slashes to backslashes on Windows
+	path = filepath.FromSlash(path)
+
+	return path
+}
+
+// createCheckerWithDeclarations creates a type checker with preloaded declarations
+func (s *Server) createCheckerWithDeclarations() *types.Checker {
+	stdlibPath := getStdlibPathForLSP()
+	checker := types.NewChecker(stdlibPath)
+
+	// Preload all declarations from .d.lunar files
+	if s.declarations != nil {
+		for _, declEnv := range s.declarations.GetAllEnvironments() {
+			checker.PreloadDeclarations(declEnv)
+		}
+	}
+
+	return checker
+}
+
 // getTypeInfo returns type information for a symbol
 func (s *Server) getTypeInfo(content string, word string, pos Position) string {
 	l := lexer.New(content)
@@ -793,8 +861,7 @@ func (s *Server) getTypeInfo(content string, word string, pos Position) string {
 		return ""
 	}
 
-	stdlibPath := getStdlibPathForLSP()
-	checker := types.NewChecker(stdlibPath)
+	checker := s.createCheckerWithDeclarations()
 	checker.Check(statements)
 
 	// Look up the symbol in the type environment
@@ -833,9 +900,6 @@ func (s *Server) getCompletions(doc *Document, pos Position) []CompletionItem {
 	p := parser.New(l)
 	statements := p.Parse()
 
-	// Get stdlib path for type checker
-	stdlibPath := getStdlibPathForLSP()
-
 	if len(p.Errors()) > 0 {
 		// Still provide keyword completions and snippets
 		items = append(items, s.getKeywordCompletions()...)
@@ -843,7 +907,7 @@ func (s *Server) getCompletions(doc *Document, pos Position) []CompletionItem {
 		return items
 	}
 
-	checker := types.NewChecker(stdlibPath)
+	checker := s.createCheckerWithDeclarations()
 	checker.Check(statements)
 
 	// Get line content to determine context
@@ -853,10 +917,23 @@ func (s *Server) getCompletions(doc *Document, pos Position) []CompletionItem {
 		beforeCursor = lineContent[:pos.Character]
 	}
 
+	s.logger.Printf("Completion at line %d, char %d: '%s'", pos.Line, pos.Character, beforeCursor)
+
 	// Check if we're completing after a dot or colon
+	// We need to check the current token, not just if the line ends with : or .
 	trimmedBefore := strings.TrimSpace(beforeCursor)
-	isMethodCall := strings.HasSuffix(trimmedBefore, ":")
-	isDotAccess := strings.HasSuffix(trimmedBefore, ".")
+
+	// Find the last : or . in the line to determine if we're in member access
+	lastColon := strings.LastIndex(trimmedBefore, ":")
+	lastDot := strings.LastIndex(trimmedBefore, ".")
+	lastSpace := strings.LastIndexAny(trimmedBefore, " \t\n")
+
+	// We're in method/property access if the last : or . comes after the last space
+	isMethodCall := lastColon > lastSpace && lastColon > lastDot
+	isDotAccess := lastDot > lastSpace && lastDot > lastColon
+
+	s.logger.Printf("isMethodCall=%v, isDotAccess=%v, trimmedBefore='%s', lastColon=%d, lastDot=%d, lastSpace=%d",
+		isMethodCall, isDotAccess, trimmedBefore, lastColon, lastDot, lastSpace)
 
 	// Extract query (partial word being typed)
 	query := s.extractQueryFromLine(lineContent, pos.Character)
@@ -874,13 +951,19 @@ func (s *Server) getCompletions(doc *Document, pos Position) []CompletionItem {
 		objName := getObjectBeforeDotOrColon(trimmedBefore)
 		context.ObjectName = objName
 
+		s.logger.Printf("Member completion for object: '%s'", objName)
+
 		if objName != "" {
 			// First try local scope
-			items = append(items, s.getMemberCompletions(checker.GetEnv(), objName, isMethodCall)...)
+			memberItems := s.getMemberCompletions(checker.GetEnv(), objName, isMethodCall)
+			s.logger.Printf("Got %d member completions from local scope", len(memberItems))
+			items = append(items, memberItems...)
 
 			// Then try declared globals from .d.lunar files
 			if declaredType, ok := s.declarations.GetDeclaredType(objName); ok {
-				items = append(items, s.getMemberCompletionsFromType(objName, declaredType, isMethodCall)...)
+				declItems := s.getMemberCompletionsFromType(objName, declaredType, isMethodCall)
+				s.logger.Printf("Got %d member completions from declarations", len(declItems))
+				items = append(items, declItems...)
 			}
 		}
 	} else {
@@ -974,6 +1057,49 @@ func (s *Server) getMemberCompletions(env *types.Environment, objName string, me
 	}
 
 	switch t := typ.(type) {
+	case *types.InterfaceType:
+		s.logger.Printf("Found InterfaceType: %s with %d properties, %d methods", t.Name, len(t.Properties), len(t.Methods))
+
+		// Add interface properties (only if not method call with :)
+		if !methodsOnly {
+			for name, propType := range t.Properties {
+				// Skip function types when using dot access
+				if _, isFunc := propType.(*types.FunctionType); !isFunc {
+					items = append(items, CompletionItem{
+						Label:  name,
+						Detail: types.TypeString(propType),
+						Kind:   PropertyCompletion,
+					})
+				}
+			}
+		}
+		// Add interface methods (both from Properties that are functions and Methods map)
+		for name, propType := range t.Properties {
+			if funcType, isFunc := propType.(*types.FunctionType); isFunc {
+				// With : show non-static methods, with . show static methods
+				isStatic := t.StaticProps != nil && t.StaticProps[name]
+				s.logger.Printf("Property method '%s': isStatic=%v, methodsOnly=%v", name, isStatic, methodsOnly)
+				if (methodsOnly && !isStatic) || (!methodsOnly && isStatic) {
+					items = append(items, CompletionItem{
+						Label:  name,
+						Detail: types.TypeString(funcType),
+						Kind:   MethodCompletion,
+					})
+				}
+			}
+		}
+		for name, methodType := range t.Methods {
+			isStatic := t.StaticMethods != nil && t.StaticMethods[name]
+			s.logger.Printf("Method '%s': isStatic=%v, methodsOnly=%v", name, isStatic, methodsOnly)
+			// With : show non-static methods, with . show static methods
+			if (methodsOnly && !isStatic) || (!methodsOnly && isStatic) {
+				items = append(items, CompletionItem{
+					Label:  name,
+					Detail: types.TypeString(methodType),
+					Kind:   MethodCompletion,
+				})
+			}
+		}
 	case *types.ClassType:
 		// Add properties (only if not method call with :)
 		if !methodsOnly {

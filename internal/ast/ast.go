@@ -125,9 +125,10 @@ func (pe *PrefixExpression) String() string {
 }
 
 type CallExpression struct {
-	Token     lexer.Token
-	Function  Expression
-	Arguments []Expression
+	Token      lexer.Token
+	Function   Expression
+	Arguments  []Expression
+	IsOptional bool // true for optional call syntax (fn?.())
 }
 
 func (ce *CallExpression) expressionNode()      {}
@@ -184,14 +185,18 @@ func (de *DotExpression) String() string {
 }
 
 type IndexExpression struct {
-	Token lexer.Token // '[' token
-	Left  Expression  // the object being indexed
-	Index Expression  // the index expression
+	Token      lexer.Token // '[' token
+	Left       Expression  // the object being indexed
+	Index      Expression  // the index expression
+	IsOptional bool        // true for optional index access (?[])
 }
 
 func (ie *IndexExpression) expressionNode()      {}
 func (ie *IndexExpression) TokenLiteral() string { return ie.Token.Literal }
 func (ie *IndexExpression) String() string {
+	if ie.IsOptional {
+		return fmt.Sprintf("%s?[%s]", ie.Left.String(), ie.Index.String())
+	}
 	return fmt.Sprintf("%s[%s]", ie.Left.String(), ie.Index.String())
 }
 

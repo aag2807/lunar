@@ -3201,6 +3201,21 @@ func (c *Checker) checkInfixExpression(node *ast.InfixExpression) Type {
 func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 	funcType := c.checkExpression(node.Function)
 
+	// An optional call tolerates a missing callee, so unwrap the optional before
+	// checking the signature and make the result optional in turn.
+	if node.IsOptional {
+		if optType, ok := funcType.(*OptionalType); ok {
+			funcType = optType.BaseType
+		}
+		return &OptionalType{BaseType: c.checkCallWithType(node, funcType)}
+	}
+
+	return c.checkCallWithType(node, funcType)
+}
+
+// checkCallWithType checks a call whose callee type has already been resolved.
+func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Type {
+
 	// Check if it's a class type (constructor call)
 	if classType, ok := funcType.(*ClassType); ok {
 		// Check if trying to instantiate an abstract class
@@ -3736,6 +3751,21 @@ func (c *Checker) checkIndexExpression(node *ast.IndexExpression) Type {
 	leftType := c.checkExpression(node.Left)
 	indexType := c.checkExpression(node.Index)
 
+	// Optional index access unwraps an optional receiver and makes the result
+	// optional, mirroring how '?.' is handled.
+	isLeftOptional := false
+	if optType, ok := leftType.(*OptionalType); ok {
+		isLeftOptional = true
+		leftType = optType.BaseType
+	}
+
+	result := func(resultType Type) Type {
+		if node.IsOptional || isLeftOptional {
+			return &OptionalType{BaseType: resultType}
+		}
+		return resultType
+	}
+
 	switch typ := leftType.(type) {
 	case *ArrayType:
 		// Index must be a number
@@ -3745,7 +3775,7 @@ func (c *Checker) checkIndexExpression(node *ast.IndexExpression) Type {
 				node.Token,
 			)
 		}
-		return typ.ElementType
+		return result(typ.ElementType)
 
 	case *TableType:
 		// Index must match key type
@@ -3755,7 +3785,7 @@ func (c *Checker) checkIndexExpression(node *ast.IndexExpression) Type {
 				node.Token,
 			)
 		}
-		return typ.ValueType
+		return result(typ.ValueType)
 
 	default:
 		// For other types, allow any index access

@@ -1385,6 +1385,18 @@ func (g *Generator) usesImplicitSelf(dotExpr *ast.DotExpression, property string
 
 // generateCallExpression generates code for a function call
 func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
+	// Optional call (fn?.()) evaluates the callee once and yields nil when it
+	// is absent, instead of erroring on a nil call.
+	if node.IsOptional {
+		function := g.generateExpression(node.Function)
+		args := make([]string, len(node.Arguments))
+		for i, arg := range node.Arguments {
+			args[i] = g.generateExpression(arg)
+		}
+		return fmt.Sprintf("(function() local __fn = %s; if __fn ~= nil then return __fn(%s) else return nil end end)()",
+			function, strings.Join(args, ", "))
+	}
+
 	// Check if this is a method call on an object (DotExpression)
 	// In Lunar: object.method() should compile to Lua: object:method() or object.method()
 	// depending on whether it's an instance method or static method
@@ -1585,6 +1597,12 @@ func (g *Generator) generateDotExpression(node *ast.DotExpression) string {
 func (g *Generator) generateIndexExpression(node *ast.IndexExpression) string {
 	left := g.generateExpression(node.Left)
 	index := g.generateExpression(node.Index)
+
+	// Optional index access (?[]) evaluates the receiver once and yields nil
+	// instead of erroring when it is nil.
+	if node.IsOptional {
+		return fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp[%s] else return nil end end)()", left, index)
+	}
 
 	return fmt.Sprintf("%s[%s]", left, index)
 }

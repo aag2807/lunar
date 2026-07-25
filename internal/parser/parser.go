@@ -143,6 +143,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.DOT, p.parseDotExpression)
 	p.registerInfix(lexer.OPTIONAL_CHAIN, p.parseDotExpression)
 	p.registerInfix(lexer.COLON, p.parseMethodCallExpression)
+	p.registerInfix(lexer.QUESTION, p.parseOptionalIndexExpression)
 	p.registerInfix(lexer.CONCAT, p.parseInfixExpression)
 	p.registerInfix(lexer.NULLISH_COALESCE, p.parseInfixExpression)
 	p.registerInfix(lexer.AS, p.parseTypeAssertion)
@@ -516,6 +517,17 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 }
 
 func (p *Parser) parseDotExpression(left ast.Expression) ast.Expression {
+	// '?.' followed by '(' is an optional call: fn?.(args)
+	if p.curTokenIs(lexer.OPTIONAL_CHAIN) && p.peekTokenIs(lexer.LPAREN) {
+		p.nextToken() // move onto '('
+		call, ok := p.parseCallExpression(left).(*ast.CallExpression)
+		if !ok {
+			return nil
+		}
+		call.IsOptional = true
+		return call
+	}
+
 	exp := &ast.DotExpression{
 		Token:      p.curToken,
 		Left:       left,
@@ -572,6 +584,34 @@ func (p *Parser) isColonMethodCall() bool {
 	return p.peekTokenIs(lexer.LPAREN)
 }
 
+// isOptionalIndex reports whether a '?' in peek position starts an optional
+// index access (items?[1]).
+func (p *Parser) isOptionalIndex() bool {
+	if !p.peekTokenIs(lexer.QUESTION) {
+		return false
+	}
+
+	state := p.SaveState()
+	defer p.RestoreState(state)
+
+	p.nextToken() // curToken = '?'
+	return p.peekTokenIs(lexer.LBRACKET)
+}
+
+// parseOptionalIndexExpression parses optional index access: items?[1].
+func (p *Parser) parseOptionalIndexExpression(left ast.Expression) ast.Expression {
+	if !p.expectPeek(lexer.LBRACKET) {
+		return nil
+	}
+
+	exp := p.parseIndexExpression(left)
+	if indexExpr, ok := exp.(*ast.IndexExpression); ok {
+		indexExpr.IsOptional = true
+	}
+
+	return exp
+}
+
 // parsePipeExpression handles the pipeline operator (|>)
 // Transforms: value |> func(args) into func(value, args)
 func (p *Parser) parsePipeExpression(left ast.Expression) ast.Expression {
@@ -614,6 +654,15 @@ func (p *Parser) peekPrecedence() int {
 	if p.peekToken.Type == lexer.COLON {
 		if p.isColonMethodCall() {
 			return DOT
+		}
+		return LOWEST
+	}
+
+	// '?' binds only in '?[', the optional index operator. Optional types and
+	// conditional types use '?' too, and must not be treated as operators.
+	if p.peekToken.Type == lexer.QUESTION {
+		if p.isOptionalIndex() {
+			return CALL
 		}
 		return LOWEST
 	}

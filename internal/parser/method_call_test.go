@@ -180,3 +180,50 @@ func TestGenericInstantiationStillParses(t *testing.T) {
 		})
 	}
 }
+
+// '?' is an operator only in '?[', so optional types keep parsing.
+func TestOptionalIndexAndOptionalTypesCoexist(t *testing.T) {
+	for _, input := range []string{
+		`local x = items?[1]`,
+		`local y = items?[1] ?? 0`,
+		`local z: number? = nil`,
+		"function f(a: number?): string?\n\treturn nil\nend",
+		`type Conditional = number extends string ? number : string`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			parseSource(t, input)
+		})
+	}
+}
+
+func TestParseOptionalIndexSetsFlag(t *testing.T) {
+	statements := parseSource(t, `local x = items?[1]`)
+
+	decl := statements[0].(*ast.VariableDeclaration)
+	index, ok := decl.Values[0].(*ast.IndexExpression)
+	if !ok {
+		t.Fatalf("expected IndexExpression, got %T", decl.Values[0])
+	}
+
+	if !index.IsOptional {
+		t.Error("expected IsOptional to be true for items?[1]")
+	}
+}
+
+func TestParseOptionalCallSetsFlag(t *testing.T) {
+	statements := parseSource(t, `local x = fn?.(1)`)
+
+	decl := statements[0].(*ast.VariableDeclaration)
+	call, ok := decl.Values[0].(*ast.CallExpression)
+	if !ok {
+		t.Fatalf("expected CallExpression, got %T", decl.Values[0])
+	}
+
+	if !call.IsOptional {
+		t.Error("expected IsOptional to be true for fn?.(1)")
+	}
+
+	if len(call.Arguments) != 1 {
+		t.Errorf("expected 1 argument, got %d", len(call.Arguments))
+	}
+}

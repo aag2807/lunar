@@ -1,0 +1,27 @@
+-- Abstract classes
+abstract class Vehicle
+    protected wheels: number
+
+    constructor(wheels: number)
+        self.wheels = wheels
+    end
+
+    abstract sound(): string
+
+    describe(): string
+        return tostring(self.wheels) .. " wheels, says " .. self.sound()
+    end
+end
+
+class Car extends Vehicle
+    constructor()
+        super(4)
+    end
+
+    sound(): string
+        return "vroom"
+    end
+end
+
+local c: Car = Car()
+print(c.describe())

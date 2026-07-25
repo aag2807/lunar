@@ -1,0 +1,25 @@
+-- Enums
+enum Color
+    Red
+    Green
+    Blue
+end
+
+enum Status
+    Active = 1
+    Inactive = 0
+end
+
+function colorName(c: Color): string
+    if c == Color.Red then
+        return "red"
+    end
+    if c == Color.Green then
+        return "green"
+    end
+    return "blue"
+end
+
+print(colorName(Color.Red))
+print(colorName(Color.Blue))
+print(Status.Active, Status.Inactive)

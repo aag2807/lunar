@@ -988,6 +988,12 @@ func (g *Generator) generateNamespaceDeclaration(node *ast.NamespaceDeclaration)
 
 	// Generate all statements in the namespace
 	for _, stmt := range node.Statements {
+		// `export` inside a namespace marks a member of that namespace; the
+		// declaration it wraps is what gets attached to the table.
+		if exported, ok := stmt.(*ast.ExportStatement); ok && exported.Statement != nil {
+			stmt = exported.Statement
+		}
+
 		switch s := stmt.(type) {
 		case *ast.ClassDeclaration:
 			// Generate class and assign to namespace
@@ -1213,6 +1219,31 @@ func isLuaIdentifier(key string) bool {
 	return true
 }
 
+// receiverNeedsParens reports whether a method call's receiver has to be
+// wrapped in parentheses. Lua only allows a name, an index, a call or a
+// parenthesized expression before ':' or '.', so `"a,b":gmatch(...)` is a
+// syntax error while `("a,b"):gmatch(...)` is fine.
+func receiverNeedsParens(expr ast.Expression) bool {
+	switch expr.(type) {
+	case *ast.StringLiteral, *ast.NumberLiteral, *ast.BooleanLiteral, *ast.NilLiteral,
+		*ast.TemplateLiteral, *ast.TableLiteral, *ast.InfixExpression, *ast.PrefixExpression,
+		*ast.FunctionExpression, *ast.VarargExpression, *ast.TypeAssertion:
+		return true
+	}
+
+	return false
+}
+
+// asReceiver renders an expression for use before ':' or '.'.
+func (g *Generator) asReceiver(expr ast.Expression) string {
+	rendered := g.generateExpression(expr)
+	if receiverNeedsParens(expr) {
+		return "(" + rendered + ")"
+	}
+
+	return rendered
+}
+
 // spreadMerge emits the Lua that merges one spread source into __temp. It works
 // for arrays, records and mixed tables: the sequence part is appended in order
 // and every other key is copied. The source is bound to a local first so an
@@ -1307,7 +1338,8 @@ func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
 		bitwiseOp = "band"
 	case "|":
 		bitwiseOp = "bor"
-	case "^":
+	case "~":
+		// Binary '~' is XOR in Lua; '^' stays exponentiation on every target.
 		bitwiseOp = "bxor"
 	case "<<":
 		bitwiseOp = "lshift"
@@ -1538,7 +1570,7 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 
 		useColonSyntax := g.usesImplicitSelf(dotExpr, property)
 
-		object := g.generateExpression(dotExpr.Left)
+		object := g.asReceiver(dotExpr.Left)
 
 		// Check if any argument is a spread expression
 		hasSpread := false
@@ -1700,7 +1732,7 @@ func (g *Generator) generateTemplateLiteral(node *ast.TemplateLiteral) string {
 
 // generateDotExpression generates code for a dot expression
 func (g *Generator) generateDotExpression(node *ast.DotExpression) string {
-	left := g.generateExpression(node.Left)
+	left := g.asReceiver(node.Left)
 	right := g.generateExpression(node.Right)
 
 	// Handle optional chaining (?.)
@@ -1802,17 +1834,33 @@ func (g *Generator) generateExportStatement(node *ast.ExportStatement) string {
 }
 
 // generateImportStatement generates code for an import statement
+// luaModuleName turns an import path into the dotted name Lua's require expects:
+// "./mod/math_utils" becomes "mod.math_utils". Passing the path through
+// verbatim produced a require that could never resolve.
+func luaModuleName(path string) string {
+	name := strings.TrimSuffix(path, ".lunar")
+	name = strings.TrimPrefix(name, "./")
+
+	// A parent-directory hop has no dotted equivalent; leave those alone rather
+	// than inventing a name that resolves to the wrong module.
+	if strings.HasPrefix(name, "../") {
+		return name
+	}
+
+	return strings.ReplaceAll(name, "/", ".")
+}
+
 func (g *Generator) generateImportStatement(node *ast.ImportStatement) string {
 	var output strings.Builder
 	output.WriteString(g.generateIndent())
 
+	moduleName := luaModuleName(node.Module)
+
 	if node.IsWildcard {
 		// import * from "module" -> local module = require("module")
-		// Extract module name from path (last part before extension)
-		moduleName := node.Module
 		// Simple heuristic: use the last part of the path as variable name
-		parts := strings.Split(moduleName, "/")
-		varName := strings.TrimSuffix(parts[len(parts)-1], ".lunar")
+		parts := strings.Split(strings.TrimSuffix(node.Module, ".lunar"), "/")
+		varName := parts[len(parts)-1]
 		output.WriteString(fmt.Sprintf("local %s = require(\"%s\")\n", varName, moduleName))
 	} else {
 		// import { name1, name2 } from "module"
@@ -1822,7 +1870,7 @@ func (g *Generator) generateImportStatement(node *ast.ImportStatement) string {
 		tempVar := "_" + strings.ReplaceAll(node.Module, "/", "_")
 		tempVar = strings.ReplaceAll(tempVar, ".", "_")
 
-		output.WriteString(fmt.Sprintf("local %s = require(\"%s\")\n", tempVar, node.Module))
+		output.WriteString(fmt.Sprintf("local %s = require(\"%s\")\n", tempVar, moduleName))
 
 		for _, name := range node.Names {
 			output.WriteString(g.generateIndent())

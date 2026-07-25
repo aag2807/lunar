@@ -11,8 +11,8 @@ local or_result: number = a | b   -- 0b1110 = 14
 print("12 | 10 =", or_result)
 
 -- Bitwise XOR
-local xor_result: number = a ^ b  -- 0b0110 = 6
-print("12 ^ 10 =", xor_result)
+local xor_result: number = a ~ b  -- 0b0110 = 6
+print("12 ~ 10 =", xor_result)
 
 -- Bitwise NOT
 local not_result: number = ~a     -- depends on integer size
@@ -27,5 +27,5 @@ local rshift_result: number = a >> 2  -- 0b0011 = 3
 print("12 >> 2 =", rshift_result)
 
 -- Complex expression
-local complex: number = (a & b) | (a ^ b)
-print("(12 & 10) | (12 ^ 10) =", complex)
+local complex: number = (a & b) | (a ~ b)
+print("(12 & 10) | (12 ~ 10) =", complex)

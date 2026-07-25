@@ -33,7 +33,8 @@ var precedences = map[lexer.TokenType]int{
 	lexer.NULLISH_COALESCE: OR_PREC,   // ?? has same precedence as ||
 	lexer.OR:               OR_PREC,
 	lexer.PIPE:             BITWISE_OR,
-	lexer.CARET:            BITWISE_XOR,
+	lexer.CARET:            PRODUCT, // exponentiation, as in Lua
+	lexer.TILDE:            BITWISE_XOR,
 	lexer.AMPERSAND:        BITWISE_AND,
 	lexer.AND:              AND_PREC,
 	lexer.EQ:               EQUALS,
@@ -136,6 +137,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.PIPE, p.parseInfixExpression)
 	p.registerInfix(lexer.PIPE_OP, p.parsePipeExpression)
 	p.registerInfix(lexer.CARET, p.parseInfixExpression)
+	p.registerInfix(lexer.TILDE, p.parseInfixExpression)
 	p.registerInfix(lexer.AND, p.parseInfixExpression)
 	p.registerInfix(lexer.OR, p.parseInfixExpression)
 	p.registerInfix(lexer.LBRACKET, p.parseIndexExpression)

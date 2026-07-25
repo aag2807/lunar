@@ -1,0 +1,41 @@
+-- Primitive types, operators, control flow
+local name: string = "lunar"
+local version: number = 1.6
+local ready: boolean = true
+local nothing: nil = nil
+
+local sum: number = 10 + 5
+local diff: number = 10 - 5
+local prod: number = 10 * 5
+local quot: number = 10 / 4
+local floor: number = 10 // 4
+local rem: number = 10 % 4
+local power: number = 2 ^ 8
+
+print(name, version, ready, nothing)
+print(sum, diff, prod, quot, floor, rem, power)
+
+if version >= 1.0 and ready then
+    print("release")
+elseif version > 0 then
+    print("beta")
+else
+    print("unreleased")
+end
+
+local total: number = 0
+for i = 1, 5 do
+    total = total + i
+end
+print("sum 1..5:", total)
+
+local countdown: number = 3
+while countdown > 0 do
+    countdown = countdown - 1
+end
+print("countdown:", countdown)
+
+local words: string[] = {"a", "b", "c"}
+for i, w in ipairs(words) do
+    print(i, w)
+end

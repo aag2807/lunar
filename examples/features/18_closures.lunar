@@ -1,0 +1,26 @@
+-- Closures, higher-order functions, method chaining
+function makeCounter(): any
+    local count: number = 0
+    return function(): number
+        count = count + 1
+        return count
+    end
+end
+
+function applyTwice(fn: any, value: number): number
+    return fn(fn(value))
+end
+
+function compose(f: any, g: any): any
+    return function(x: number): number
+        return f(g(x))
+    end
+end
+
+local counter = makeCounter()
+print(counter(), counter(), counter())
+print(applyTwice(function(n: number): number return n + 10 end, 1))
+
+local addThenDouble = compose(function(n: number): number return n * 2 end,
+                              function(n: number): number return n + 1 end)
+print(addThenDouble(3))

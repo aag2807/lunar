@@ -312,6 +312,7 @@ func (c *Checker) registerUtilityTypes() {
 	c.env.Set("Record", Any)        // Record<K, V>
 	c.env.Set("Partial", Any)       // Partial<T>
 	c.env.Set("Required", Any)      // Required<T>
+	c.env.Set("Readonly", Any)      // Readonly<T>
 	c.env.Set("ReturnType", Any)    // ReturnType<F>
 	c.env.Set("Parameters", Any)    // Parameters<F>
 }
@@ -467,7 +468,7 @@ func (c *Checker) hoistedSignature(fn *ast.FunctionDeclaration) *FunctionType {
 				paramType = &ArrayType{ElementType: paramType}
 			}
 		}
-		optionalParams[i] = param.IsOptional
+		optionalParams[i] = paramIsOptional(param, paramType)
 		params[i] = paramType
 	}
 
@@ -1015,7 +1016,7 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 					paramType = &ArrayType{ElementType: paramType}
 				}
 			}
-			optionalParams[i] = param.IsOptional
+			optionalParams[i] = paramIsOptional(param, paramType)
 			params[i] = paramType
 		}
 		var returnType Type = Void
@@ -1120,6 +1121,13 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 					return Any
 				}
 				return c.requiredType(typeArgs[0])
+
+			case "Readonly":
+				if len(typeArgs) != 1 {
+					c.addError("Readonly<T> expects 1 type argument", lexer.Token{})
+					return Any
+				}
+				return c.readonlyType(typeArgs[0])
 
 			case "ReturnType":
 				if len(typeArgs) != 1 {
@@ -1530,6 +1538,53 @@ func (c *Checker) recordType(keys Type, valueType Type) Type {
 
 // partialType implements Partial<T> utility type
 // Makes all properties in T optional
+// readonlyType implements Readonly<T>: the same shape, with every property
+// marked readonly so assigning to one is reported.
+func (c *Checker) readonlyType(t Type) Type {
+	switch objType := t.(type) {
+	case *InterfaceType:
+		readonly := &InterfaceType{
+			Name:        objType.Name + "_Readonly",
+			Properties:  make(map[string]Type),
+			Methods:     make(map[string]*FunctionType),
+			StaticProps: make(map[string]bool),
+			Extends:     []*InterfaceType{},
+		}
+
+		for name, propType := range objType.Properties {
+			readonly.Properties[name] = propType
+			if objType.StaticProps != nil && objType.StaticProps[name] {
+				readonly.StaticProps[name] = true
+			}
+		}
+		for name, methodType := range objType.Methods {
+			readonly.Methods[name] = methodType
+		}
+
+		return readonly
+
+	case *ClassType:
+		readonly := &ClassType{
+			Name:          objType.Name + "_Readonly",
+			Properties:    make(map[string]Type),
+			Methods:       make(map[string]*FunctionType),
+			ReadonlyProps: make(map[string]bool),
+		}
+
+		for name, propType := range objType.Properties {
+			readonly.Properties[name] = propType
+			readonly.ReadonlyProps[name] = true
+		}
+		for name, methodType := range objType.Methods {
+			readonly.Methods[name] = methodType
+		}
+
+		return readonly
+	}
+
+	return t
+}
+
 func (c *Checker) partialType(t Type) Type {
 	switch objType := t.(type) {
 	case *InterfaceType:
@@ -1980,6 +2035,14 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 		}
 	}
 
+	// A call or '...' can yield more values than its type records, which is how
+	// `local ok, err = pcall(f)` is written, so extra names take 'any'.
+	if len(node.Names) > len(valueTypes) && len(node.Values) == 1 && yieldsMultipleValues(node.Values[0]) {
+		for len(valueTypes) < len(node.Names) {
+			valueTypes = append(valueTypes, Any)
+		}
+	}
+
 	// Check that the number of variables matches number of values
 	if len(node.Names) != len(valueTypes) {
 		c.addError(
@@ -2042,6 +2105,32 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 	}
 }
 
+// yieldsMultipleValues reports whether an expression can produce more than one
+// value in Lua. Only calls and the vararg expression can.
+func yieldsMultipleValues(expr ast.Expression) bool {
+	switch expr.(type) {
+	case *ast.CallExpression, *ast.VarargExpression:
+		return true
+	}
+
+	return false
+}
+
+// paramIsOptional reports whether a parameter may be omitted at a call site.
+// Both spellings count: `b?: number` and the documented `b: number?`, which is
+// the same thing in Lua, where a missing argument arrives as nil.
+func paramIsOptional(param *ast.Parameter, resolved Type) bool {
+	if param.IsOptional {
+		return true
+	}
+
+	// `number?` resolves to the union `number | nil`, so ask whether nil is one
+	// of the type's members rather than looking for a specific representation.
+	_, admitsNil := removeNil(resolved)
+
+	return admitsNil
+}
+
 // widenLiteralType generalises a literal type to its base type. A mutable
 // binding declared without an annotation has to accept later values of the same
 // base type, so `local state = "idle"` is a string rather than the type "idle".
@@ -2100,14 +2189,13 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 			if i != len(node.Parameters)-1 {
 				c.addError("Rest parameter must be the last parameter", param.Token)
 			}
-			// Rest parameter type should be an array
+			// A rest parameter may be annotated with the element type (...n: number)
+			// or with the array it collects (...n: number[]); function type
+			// annotations already accept both, so declarations do too.
 			if param.Type != nil {
 				paramType := c.resolveTypeExpression(param.Type)
-				if _, ok := paramType.(*ArrayType); !ok && !paramType.Equals(Any) {
-					c.addError(
-						fmt.Sprintf("Rest parameter must have array type, got '%s'", paramType.String()),
-						param.Token,
-					)
+				if _, ok := paramType.(*ArrayType); !ok {
+					paramType = &ArrayType{ElementType: paramType}
 				}
 				params[i] = paramType
 			} else {
@@ -2116,7 +2204,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 			}
 		} else {
 			// Validate optional parameter ordering
-			if param.IsOptional {
+			if paramIsOptional(param, c.resolveTypeExpression(param.Type)) {
 				hasOptional = true
 				optionalParams[i] = true
 			} else if hasOptional && !param.IsRest {
@@ -2364,6 +2452,13 @@ func (c *Checker) checkIfStatement(node *ast.IfStatement) {
 		)
 	}
 
+	// A nil check refines an optional in both branches, and when the nil branch
+	// always exits it refines the rest of the enclosing block too.
+	if nilCheck, ok := c.nilNarrowing(node.Condition); ok {
+		c.checkIfWithNilNarrowing(node, nilCheck)
+		return
+	}
+
 	// Check for type narrowing from type guard functions
 	varName, narrowedType := c.extractTypeNarrowing(node.Condition)
 
@@ -2405,6 +2500,158 @@ func (c *Checker) checkIfStatement(node *ast.IfStatement) {
 			c.checkBlockStatement(node.Alternative)
 		}
 	}
+}
+
+// nilCheck describes an `x == nil` / `x ~= nil` test on an optional variable.
+type nilCheck struct {
+	varName string
+	// nonNil is the variable's type with nil removed.
+	nonNil Type
+	// nilInThen is true when the then-branch is the one where x is nil.
+	nilInThen bool
+}
+
+// nilNarrowing recognises a comparison of a variable against nil and reports how
+// each branch refines it. Without this an optional parameter stays 'T | nil'
+// after its own nil check and cannot be used.
+func (c *Checker) nilNarrowing(expr ast.Expression) (nilCheck, bool) {
+	infix, ok := expr.(*ast.InfixExpression)
+	if !ok {
+		return nilCheck{}, false
+	}
+
+	var equality bool
+	switch infix.Operator {
+	case "==":
+		equality = true
+	case "~=", "!=":
+		equality = false
+	default:
+		return nilCheck{}, false
+	}
+
+	// Accept the comparison written either way round.
+	ident, nilOK := identComparedToNil(infix.Left, infix.Right)
+	if !nilOK {
+		ident, nilOK = identComparedToNil(infix.Right, infix.Left)
+	}
+	if !nilOK {
+		return nilCheck{}, false
+	}
+
+	current, exists := c.env.Get(ident.Value)
+	if !exists {
+		return nilCheck{}, false
+	}
+
+	nonNil, isOptional := removeNil(current)
+	if !isOptional {
+		return nilCheck{}, false
+	}
+
+	return nilCheck{varName: ident.Value, nonNil: nonNil, nilInThen: equality}, true
+}
+
+// identComparedToNil returns the identifier when one side of a comparison is a
+// plain name and the other is the nil literal.
+func identComparedToNil(candidate, other ast.Expression) (*ast.Identifier, bool) {
+	ident, ok := candidate.(*ast.Identifier)
+	if !ok {
+		return nil, false
+	}
+
+	if _, isNil := other.(*ast.NilLiteral); !isNil {
+		return nil, false
+	}
+
+	return ident, true
+}
+
+// removeNil strips nil from an optional or a union that includes it.
+func removeNil(t Type) (Type, bool) {
+	if optType, ok := t.(*OptionalType); ok {
+		return optType.BaseType, true
+	}
+
+	union, ok := t.(*UnionType)
+	if !ok {
+		return t, false
+	}
+
+	remaining := make([]Type, 0, len(union.Types))
+	foundNil := false
+	for _, member := range union.Types {
+		if IsNilType(member) {
+			foundNil = true
+			continue
+		}
+		remaining = append(remaining, member)
+	}
+
+	if !foundNil || len(remaining) == 0 {
+		return t, false
+	}
+
+	if len(remaining) == 1 {
+		return remaining[0], true
+	}
+
+	return &UnionType{Types: remaining}, true
+}
+
+// checkIfWithNilNarrowing checks both branches with the variable refined, and
+// carries the refinement past the statement when the nil branch always exits.
+func (c *Checker) checkIfWithNilNarrowing(node *ast.IfStatement, check nilCheck) {
+	prevEnv := c.env
+
+	thenType, elseType := check.nonNil, Type(Nil)
+	if check.nilInThen {
+		thenType, elseType = Nil, check.nonNil
+	}
+
+	c.env = NewEnclosedEnvironment(prevEnv)
+	c.env.Set(check.varName, thenType)
+	c.checkBlockStatement(node.Consequence)
+	c.env = prevEnv
+
+	if node.Alternative != nil {
+		c.env = NewEnclosedEnvironment(prevEnv)
+		c.env.Set(check.varName, elseType)
+		c.checkBlockStatement(node.Alternative)
+		c.env = prevEnv
+	}
+
+	// `if x == nil then return end` leaves x non-nil for everything after it.
+	nilBranch := node.Alternative
+	if check.nilInThen {
+		nilBranch = node.Consequence
+	}
+	if nilBranch != nil && blockAlwaysExits(nilBranch) {
+		c.env.Set(check.varName, check.nonNil)
+	}
+}
+
+// blockAlwaysExits reports whether a block ends in a statement that leaves the
+// enclosing function or loop, so the code after it only runs otherwise.
+func blockAlwaysExits(block *ast.BlockStatement) bool {
+	if block == nil || len(block.Statements) == 0 {
+		return false
+	}
+
+	switch last := block.Statements[len(block.Statements)-1].(type) {
+	case *ast.ReturnStatement, *ast.BreakStatement:
+		return true
+	case *ast.ExpressionStatement:
+		// A call to error() does not return either.
+		call, ok := last.Expression.(*ast.CallExpression)
+		if !ok {
+			return false
+		}
+		ident, ok := call.Function.(*ast.Identifier)
+		return ok && ident.Value == "error"
+	}
+
+	return false
 }
 
 // extractTypeNarrowing checks if the expression is a type guard call or discriminated union check
@@ -3438,7 +3685,7 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 				paramType = &ArrayType{ElementType: paramType}
 			}
 		}
-		optionalParams[i] = param.IsOptional
+		optionalParams[i] = paramIsOptional(param, paramType)
 		paramTypes[i] = paramType
 		if param.Name != nil {
 			c.env.Set(param.Name.Value, paramType)

@@ -1,0 +1,33 @@
+-- Realistic data manipulation
+interface Task
+    id: number
+    title: string
+    done: boolean
+end
+
+function completed(tasks: Task[]): Task[]
+    local out: Task[] = {}
+    for _, t in ipairs(tasks) do
+        if t.done then
+            table.insert(out, t)
+        end
+    end
+    return out
+end
+
+function titles(tasks: Task[]): string[]
+    local out: string[] = {}
+    for _, t in ipairs(tasks) do
+        table.insert(out, t.title)
+    end
+    return out
+end
+
+local tasks: Task[] = {
+    {id = 1, title = "write", done = true},
+    {id = 2, title = "review", done = false},
+    {id = 3, title = "ship", done = true}
+}
+
+print(#completed(tasks))
+print(table.concat(titles(tasks), ", "))

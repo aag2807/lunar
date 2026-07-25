@@ -1,0 +1,7 @@
+namespace Geometry
+    export function area(w: number, h: number): number
+        return w * h
+    end
+end
+
+print(Geometry.area(3, 4))

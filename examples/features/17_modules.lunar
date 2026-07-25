@@ -1,0 +1,4 @@
+import { double, triple } from "./mod/math_utils"
+
+print(double(4))
+print(triple(4))

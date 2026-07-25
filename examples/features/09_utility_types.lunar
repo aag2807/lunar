@@ -1,0 +1,19 @@
+-- Utility types
+interface User
+    id: number
+    name: string
+    email: string
+end
+
+type PublicUser = Omit<User, "email">
+type UserPreview = Pick<User, "id" | "name">
+type PartialUser = Partial<User>
+type ReadonlyUser = Readonly<User>
+type UserMap = Record<string, User>
+
+function show(u: UserPreview): string
+    return tostring(u.id) .. ":" .. u.name
+end
+
+local preview: UserPreview = {id = 1, name = "ada"}
+print(show(preview))

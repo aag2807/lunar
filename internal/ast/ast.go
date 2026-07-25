@@ -870,18 +870,50 @@ func (bs *BreakStatement) String() string       { return "break" }
 
 type AssignmentStatement struct {
 	Token lexer.Token // '=' token
-	Name  Expression  // left side (can be identifier, dot expression, index expression)
-	Value Expression  // right side
+	// Targets are the left-hand sides; Lua allows several (a, b = b, a). Each
+	// may be an identifier, a dot expression or an index expression.
+	Targets []Expression
+	Values  []Expression // right side, one or more
 }
 
 func (as *AssignmentStatement) statementNode()       {}
 func (as *AssignmentStatement) TokenLiteral() string { return as.Token.Literal }
 func (as *AssignmentStatement) String() string {
 	var out strings.Builder
-	out.WriteString(as.Name.String())
+
+	for i, target := range as.Targets {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(target.String())
+	}
+
 	out.WriteString(" = ")
-	out.WriteString(as.Value.String())
+
+	for i, value := range as.Values {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(value.String())
+	}
+
 	return out.String()
+}
+
+// Name returns the first assignment target, for the common single-target case.
+func (as *AssignmentStatement) Name() Expression {
+	if len(as.Targets) == 0 {
+		return nil
+	}
+	return as.Targets[0]
+}
+
+// Value returns the first assigned value, for the common single-value case.
+func (as *AssignmentStatement) Value() Expression {
+	if len(as.Values) == 0 {
+		return nil
+	}
+	return as.Values[0]
 }
 
 type ClassDeclaration struct {

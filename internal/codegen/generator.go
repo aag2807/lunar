@@ -207,8 +207,8 @@ func (g *Generator) trackStatementMapping(stmt ast.Statement) {
 	case *ast.BreakStatement:
 		token = node.Token
 	case *ast.AssignmentStatement:
-		if node.Name != nil {
-			token = g.getExpressionToken(node.Name)
+		if first := node.Name(); first != nil {
+			token = g.getExpressionToken(first)
 		}
 	case *ast.ClassDeclaration:
 		token = node.Token
@@ -589,9 +589,23 @@ func (g *Generator) generateAssignmentStatement(node *ast.AssignmentStatement) s
 	var output strings.Builder
 
 	output.WriteString(g.generateIndent())
-	output.WriteString(g.generateExpression(node.Name))
+
+	for i, target := range node.Targets {
+		if i > 0 {
+			output.WriteString(", ")
+		}
+		output.WriteString(g.generateExpression(target))
+	}
+
 	output.WriteString(" = ")
-	output.WriteString(g.generateExpression(node.Value))
+
+	for i, value := range node.Values {
+		if i > 0 {
+			output.WriteString(", ")
+		}
+		output.WriteString(g.generateExpression(value))
+	}
+
 	output.WriteString("\n")
 
 	return output.String()

@@ -135,9 +135,18 @@ func (m *Migrator) inferFunctionType(decl *ast.FunctionDeclaration) {
 }
 
 func (m *Migrator) inferAssignmentType(stmt *ast.AssignmentStatement) {
-	if ident, ok := stmt.Name.(*ast.Identifier); ok {
-		inferredType := m.inferExpressionType(stmt.Value)
-		m.variableTypes[ident.Value] = inferredType
+	for i, target := range stmt.Targets {
+		ident, ok := target.(*ast.Identifier)
+		if !ok {
+			continue
+		}
+		// Only a matching value position tells us anything about the type;
+		// extra targets take whatever a multi-value call returns.
+		if i >= len(stmt.Values) {
+			m.variableTypes[ident.Value] = "any"
+			continue
+		}
+		m.variableTypes[ident.Value] = m.inferExpressionType(stmt.Values[i])
 	}
 }
 
@@ -370,9 +379,17 @@ func (m *Migrator) generateFunctionDeclaration(decl *ast.FunctionDeclaration) st
 }
 
 func (m *Migrator) generateAssignment(stmt *ast.AssignmentStatement) string {
-	return fmt.Sprintf("%s = %s",
-		m.generateExpression(stmt.Name),
-		m.generateExpression(stmt.Value))
+	targets := make([]string, len(stmt.Targets))
+	for i, target := range stmt.Targets {
+		targets[i] = m.generateExpression(target)
+	}
+
+	values := make([]string, len(stmt.Values))
+	for i, value := range stmt.Values {
+		values[i] = m.generateExpression(value)
+	}
+
+	return fmt.Sprintf("%s = %s", strings.Join(targets, ", "), strings.Join(values, ", "))
 }
 
 func (m *Migrator) generateReturn(stmt *ast.ReturnStatement) string {

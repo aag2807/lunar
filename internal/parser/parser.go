@@ -1225,6 +1225,12 @@ func (p *Parser) parseKeywordFunctionType() ast.Expression {
 		Token: p.curToken, // 'function'
 	}
 
+	// A bare `function` means any callable; leaving Parameters nil marks it as
+	// unconstrained, which an empty (but non-nil) list would not.
+	if !p.peekTokenIs(lexer.LPAREN) {
+		return funcType
+	}
+
 	if !p.expectPeek(lexer.LPAREN) {
 		return nil
 	}
@@ -2169,16 +2175,44 @@ func (p *Parser) parseExpressionStatement() ast.Statement {
 	// Try to parse as expression first
 	expr := p.parseExpression(LOWEST)
 
+	// Lua allows several assignment targets: a, b = b, a
+	targets := []ast.Expression{expr}
+	if p.peekTokenIs(lexer.COMMA) {
+		state := p.SaveState()
+
+		for p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // consume ','
+			p.nextToken() // move to next target
+			targets = append(targets, p.parseExpression(LOWEST))
+		}
+
+		if !p.peekTokenIs(lexer.ASSIGN) {
+			// Not an assignment after all; leave the comma to the caller.
+			p.RestoreState(state)
+			return &ast.ExpressionStatement{
+				Token:      p.curToken,
+				Expression: expr,
+			}
+		}
+	}
+
 	// Check if this is an assignment
 	if p.peekTokenIs(lexer.ASSIGN) {
 		assignToken := p.peekToken
 		p.nextToken() // consume '='
-		p.nextToken() // move to value expression
+		p.nextToken() // move to first value expression
+
+		values := []ast.Expression{p.parseExpression(LOWEST)}
+		for p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // consume ','
+			p.nextToken() // move to next value
+			values = append(values, p.parseExpression(LOWEST))
+		}
 
 		return &ast.AssignmentStatement{
-			Token: assignToken,
-			Name:  expr,
-			Value: p.parseExpression(LOWEST),
+			Token:   assignToken,
+			Targets: targets,
+			Values:  values,
 		}
 	}
 

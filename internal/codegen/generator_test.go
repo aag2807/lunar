@@ -231,11 +231,13 @@ func TestGenerateClass(t *testing.T) {
 				Statements: []ast.Statement{
 					&ast.AssignmentStatement{
 						Token: lexer.Token{Type: lexer.ASSIGN, Literal: "="},
-						Name: &ast.DotExpression{
-							Left:  &ast.Identifier{Value: "self"},
-							Right: &ast.Identifier{Value: "brand"},
+						Targets: []ast.Expression{
+							&ast.DotExpression{
+								Left:  &ast.Identifier{Value: "self"},
+								Right: &ast.Identifier{Value: "brand"},
+							},
 						},
-						Value: &ast.Identifier{Value: "brand"},
+						Values: []ast.Expression{&ast.Identifier{Value: "brand"}},
 					},
 				},
 			},

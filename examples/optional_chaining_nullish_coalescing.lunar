@@ -206,23 +206,25 @@ end
 -- ============================================
 -- Best Practices
 -- ============================================
+-- The snippets below are illustrations, not runnable code: they name
+-- variables this file never defines, so they stay commented out.
 
 -- ✅ DO: Use ?. for safe property access
-const safeName = user?.profile?.name
+-- const safeName = user?.profile?.name
 
 -- ✅ DO: Use ?? for nil-specific defaults
-const port = config?.port ?? 8080
+-- const port = config?.port ?? 8080
 
 -- ✅ DO: Combine them for robust code
-const email = user?.contact?.email ?? "no-email@example.com"
+-- const email = user?.contact?.email ?? "no-email@example.com"
 
 -- ❌ DON'T: Use ?? when you want to check falsy values
 -- Use 'or' instead if you want false/0 to use the default
-const value = someValue or defaultValue  -- Uses default for false/nil/0
+-- const value = someValue or defaultValue  -- Uses default for false/nil/0
 
 -- ❌ DON'T: Chain too deeply without reason
 -- Consider restructuring if you need more than 3-4 levels
-const tooDeep = a?.b?.c?.d?.e?.f?.g  -- Maybe refactor?
+-- const tooDeep = a?.b?.c?.d?.e?.f?.g  -- Maybe refactor?
 
-print("=== Optional Chaining & Nullish Coalescing Examples ===")
-print("These operators make Lunar code safer and more concise!")
+-- print("=== Optional Chaining & Nullish Coalescing Examples ===")
+-- print("These operators make Lunar code safer and more concise!")

@@ -227,3 +227,41 @@ func TestParseOptionalCallSetsFlag(t *testing.T) {
 		t.Errorf("expected 1 argument, got %d", len(call.Arguments))
 	}
 }
+
+func TestParseMultipleAssignment(t *testing.T) {
+	statements := parseSource(t, "a, b = b, a")
+
+	assign, ok := statements[0].(*ast.AssignmentStatement)
+	if !ok {
+		t.Fatalf("expected AssignmentStatement, got %T", statements[0])
+	}
+
+	if len(assign.Targets) != 2 {
+		t.Errorf("expected 2 targets, got %d", len(assign.Targets))
+	}
+	if len(assign.Values) != 2 {
+		t.Errorf("expected 2 values, got %d", len(assign.Values))
+	}
+}
+
+// A comma-separated expression that is not an assignment must not be consumed
+// as one; the parser has to roll all the way back.
+func TestCommaWithoutAssignIsNotAnAssignment(t *testing.T) {
+	statements := parseSource(t, `print(a, b)`)
+
+	if _, ok := statements[0].(*ast.ExpressionStatement); !ok {
+		t.Fatalf("expected ExpressionStatement, got %T", statements[0])
+	}
+}
+
+// A bare `function` type means "any callable".
+func TestBareFunctionTypeParses(t *testing.T) {
+	for _, input := range []string{
+		"function map(arr: any[], fn: function): any[]\n\treturn arr\nend",
+		`local f: function = other`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			parseSource(t, input)
+		})
+	}
+}

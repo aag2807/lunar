@@ -906,6 +906,11 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		return &TupleType{Elements: elements}
 
 	case *ast.FunctionType:
+		// A bare `function` type constrains nothing beyond being callable.
+		if node.Parameters == nil && node.ReturnType == nil {
+			return Any
+		}
+
 		params := make([]Type, len(node.Parameters))
 		optionalParams := make([]bool, len(node.Parameters))
 		hasRestParam := false
@@ -2443,10 +2448,55 @@ func (c *Checker) checkBlockStatement(node *ast.BlockStatement) {
 	c.env = prevEnv
 }
 
-// checkAssignmentStatement checks an assignment statement
+// checkAssignmentStatement checks an assignment statement, which may have
+// several targets (a, b = b, a).
 func (c *Checker) checkAssignmentStatement(node *ast.AssignmentStatement) {
+	// One expression can fill several targets, as in `n, s = two()` where two()
+	// returns (number, string).
+	if len(node.Targets) > 1 && len(node.Values) == 1 {
+		valueType := c.checkExpression(node.Values[0])
+
+		if tuple, ok := valueType.(*TupleType); ok {
+			for i, target := range node.Targets {
+				var elem Type
+				if i < len(tuple.Elements) {
+					elem = tuple.Elements[i]
+				}
+				c.checkAssignmentTarget(node, target, elem)
+			}
+			return
+		}
+
+		// Anything else assigns to the first target and leaves the rest nil.
+		for i, target := range node.Targets {
+			if i == 0 {
+				c.checkAssignmentTarget(node, target, valueType)
+			} else {
+				c.checkAssignmentTarget(node, target, nil)
+			}
+		}
+		return
+	}
+
+	for i, target := range node.Targets {
+		var valueType Type
+		if i < len(node.Values) {
+			valueType = c.checkExpression(node.Values[i])
+		}
+		c.checkAssignmentTarget(node, target, valueType)
+	}
+
+	// Values beyond the target count still need checking for their own errors.
+	for i := len(node.Targets); i < len(node.Values); i++ {
+		c.checkExpression(node.Values[i])
+	}
+}
+
+// checkAssignmentTarget checks one target of an assignment. A nil valueType
+// means the target is filled from a multi-value expression and is not checked.
+func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target ast.Expression, valueType Type) {
 	// Check if trying to assign to a const variable
-	if ident, ok := node.Name.(*ast.Identifier); ok {
+	if ident, ok := target.(*ast.Identifier); ok {
 		if c.env.IsConst(ident.Value) {
 			c.addError(
 				fmt.Sprintf("Cannot assign to const variable '%s'", ident.Value),
@@ -2457,7 +2507,7 @@ func (c *Checker) checkAssignmentStatement(node *ast.AssignmentStatement) {
 	}
 
 	// Check if trying to assign to a readonly property
-	if dotExpr, ok := node.Name.(*ast.DotExpression); ok {
+	if dotExpr, ok := target.(*ast.DotExpression); ok {
 		leftType := c.checkExpression(dotExpr.Left)
 		if classType, ok := leftType.(*ClassType); ok {
 			if rightIdent, ok := dotExpr.Right.(*ast.Identifier); ok {
@@ -2486,8 +2536,10 @@ func (c *Checker) checkAssignmentStatement(node *ast.AssignmentStatement) {
 		}
 	}
 
-	targetType := c.checkExpression(node.Name)
-	valueType := c.checkExpression(node.Value)
+	targetType := c.checkExpression(target)
+	if valueType == nil {
+		return
+	}
 
 	if !valueType.IsAssignableTo(targetType) {
 		c.addError(

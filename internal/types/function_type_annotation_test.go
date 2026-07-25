@@ -129,3 +129,28 @@ func TestMethodSatisfiesInterfaceMethod(t *testing.T) {
 		t.Errorf("unexpected type error: %s", err.Message)
 	}
 }
+
+// A class must be able to name itself in its own member signatures.
+func TestClassCanReferenceItsOwnType(t *testing.T) {
+	input := `
+class Account
+	private balance: number
+
+	constructor(balance: number)
+		self.balance = balance
+	end
+
+	static open(): Account
+		return Account(0)
+	end
+
+	merge(other: Account): Account
+		return Account(self.balance + other.balance)
+	end
+end
+`
+
+	for _, err := range checkSource(t, input) {
+		t.Errorf("unexpected type error: %s", err.Message)
+	}
+}

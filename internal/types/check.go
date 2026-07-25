@@ -480,6 +480,12 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		SetterVisibility:    make(map[string]string),
 	}
 
+	// Publish the (still empty) class before resolving its members so that a
+	// member signature can name the class itself, as in
+	// `static open(owner: string): Account`. Members fill in the same pointer.
+	c.classes[classType.Name] = classType
+	c.env.Set(classType.Name, classType)
+
 	// Add generic type parameters to scope temporarily
 	prevEnv := c.env
 	if len(node.GenericParams) > 0 {
@@ -666,9 +672,6 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 	if len(node.GenericParams) > 0 {
 		c.env = prevEnv
 	}
-
-	c.classes[classType.Name] = classType
-	c.env.Set(classType.Name, classType)
 }
 
 // registerInterface registers an interface type

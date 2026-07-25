@@ -201,6 +201,8 @@ func (g *Generator) trackStatementMapping(stmt ast.Statement) {
 		token = node.Token
 	case *ast.WhileStatement:
 		token = node.Token
+	case *ast.RepeatStatement:
+		token = node.Token
 	case *ast.ForStatement:
 		token = node.Token
 	case *ast.DoStatement:
@@ -273,6 +275,8 @@ func (g *Generator) generateStatement(stmt ast.Statement) string {
 		return g.generateIfStatement(node)
 	case *ast.WhileStatement:
 		return g.generateWhileStatement(node)
+	case *ast.RepeatStatement:
+		return g.generateRepeatStatement(node)
 	case *ast.ForStatement:
 		return g.generateForStatement(node)
 	case *ast.DoStatement:
@@ -368,6 +372,9 @@ func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) s
 	g.trackParameterReceivers(node.Parameters)
 
 	output.WriteString(g.generateIndent())
+	if node.IsLocal {
+		output.WriteString("local ")
+	}
 	output.WriteString("function ")
 	output.WriteString(node.Name.Value)
 	output.WriteString("(")
@@ -505,6 +512,27 @@ func (g *Generator) generateWhileStatement(node *ast.WhileStatement) string {
 
 	output.WriteString(g.generateIndent())
 	output.WriteString("end\n")
+
+	return output.String()
+}
+
+// generateRepeatStatement generates code for a repeat ... until loop
+func (g *Generator) generateRepeatStatement(node *ast.RepeatStatement) string {
+	var output strings.Builder
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("repeat\n")
+
+	g.indent++
+	for _, stmt := range node.Body.Statements {
+		output.WriteString(g.generateStatement(stmt))
+	}
+	g.indent--
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("until ")
+	output.WriteString(g.generateExpression(node.Condition))
+	output.WriteString("\n")
 
 	return output.String()
 }
@@ -1461,6 +1489,23 @@ func (g *Generator) usesImplicitSelf(dotExpr *ast.DotExpression, property string
 
 // generateCallExpression generates code for a function call
 func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
+	// super(...) inside a constructor runs the parent's constructor and copies
+	// the fields it set onto the instance being built. Without this it compiled
+	// to a bare `Parent(args)` call, which is not even a function in the
+	// generated Lua, so any subclass crashed on construction.
+	if _, isSuper := node.Function.(*ast.SuperExpression); isSuper {
+		parent := g.generateExpression(node.Function)
+		args := make([]string, len(node.Arguments))
+		for i, arg := range node.Arguments {
+			args[i] = g.generateExpression(arg)
+		}
+		// A do block, not a call expression: a statement starting with '(' would
+		// be read as a continuation of the preceding line.
+		return fmt.Sprintf(
+			"do local __parent = %s.new(%s); for __k, __v in pairs(__parent) do self[__k] = __v end end",
+			parent, strings.Join(args, ", "))
+	}
+
 	// Optional call (fn?.()) evaluates the callee once and yields nil when it
 	// is absent, instead of erroring on a nil call.
 	if node.IsOptional {

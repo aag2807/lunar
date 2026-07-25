@@ -2127,6 +2127,12 @@ func (p *Parser) parseFunctionExpression() ast.Expression {
 }
 
 func (p *Parser) parseBlockStatement() *ast.BlockStatement {
+	return p.parseBlockStatementUntil(lexer.END)
+}
+
+// parseBlockStatementUntil parses statements up to a terminator, which is 'end'
+// for most blocks and 'until' for a repeat loop.
+func (p *Parser) parseBlockStatementUntil(terminator lexer.TokenType) *ast.BlockStatement {
 	block := &ast.BlockStatement{
 		Token:      p.curToken,
 		Statements: []ast.Statement{},
@@ -2134,7 +2140,7 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 
 	p.nextToken()
 
-	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+	for !p.curTokenIs(terminator) && !p.curTokenIs(lexer.EOF) {
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
@@ -2232,11 +2238,22 @@ func (p *Parser) parseStatement() ast.Statement {
 	case lexer.RETURN:
 		return p.parseReturnStatement()
 	case lexer.LOCAL, lexer.CONST:
+		// `local function f() ... end` is a function declaration, not a variable.
+		if p.curTokenIs(lexer.LOCAL) && p.peekTokenIs(lexer.FUNCTION) {
+			p.nextToken() // move onto 'function'
+			fn := p.parseFunctionDeclaration()
+			if fn != nil {
+				fn.IsLocal = true
+			}
+			return fn
+		}
 		return p.parseVariableDeclaration()
 	case lexer.IF:
 		return p.parseIfStatement()
 	case lexer.WHILE:
 		return p.parseWhileStatement()
+	case lexer.REPEAT:
+		return p.parseRepeatStatement()
 	case lexer.FOR:
 		return p.parseForStatement()
 	case lexer.DO:
@@ -2335,6 +2352,23 @@ func (p *Parser) parseWhileStatement() *ast.WhileStatement {
 
 	// Parse body
 	stmt.Body = p.parseBlockStatement()
+
+	return stmt
+}
+
+func (p *Parser) parseRepeatStatement() *ast.RepeatStatement {
+	stmt := &ast.RepeatStatement{Token: p.curToken}
+
+	// The body runs up to 'until' rather than 'end'.
+	stmt.Body = p.parseBlockStatementUntil(lexer.UNTIL)
+
+	if !p.curTokenIs(lexer.UNTIL) {
+		p.addError(fmt.Sprintf("expected 'until' to close repeat, got %s", p.curToken.Type), p.curToken)
+		return nil
+	}
+
+	p.nextToken() // move onto the condition
+	stmt.Condition = p.parseExpression(LOWEST)
 
 	return stmt
 }
@@ -2723,10 +2757,42 @@ func (p *Parser) parseMethodDeclaration(isAbstract bool) *ast.FunctionDeclaratio
 		method.ReturnType = p.parseType()
 	}
 
-	// Parse body - parseBlockStatement will handle both cases
+	method.IsAbstract = isAbstract
+
+	// An abstract method declares a signature and stops there; parsing a body
+	// would swallow the members that follow it, up to the class's own 'end'.
+	// A body written anyway is still consumed, so the checker can report it
+	// rather than the parser choking on the leftovers.
+	if isAbstract && !p.abstractMethodHasBody() {
+		return method
+	}
+
 	method.Body = p.parseBlockStatement()
 
 	return method
+}
+
+// abstractMethodHasBody reports whether an abstract method signature is
+// followed by statements rather than by the next member or the class's end.
+func (p *Parser) abstractMethodHasBody() bool {
+	switch p.peekToken.Type {
+	case lexer.END, lexer.EOF, lexer.CONSTRUCTOR, lexer.PUBLIC, lexer.PRIVATE,
+		lexer.PROTECTED, lexer.STATIC, lexer.ABSTRACT, lexer.READONLY, lexer.GET, lexer.SET:
+		return false
+	}
+
+	if !lexer.CanBeFieldName(p.peekToken) {
+		// A keyword Lua reserves starts a statement, so this is a body.
+		return true
+	}
+
+	// A name followed by '(' or ':' is the next method or property.
+	state := p.SaveState()
+	defer p.RestoreState(state)
+
+	p.nextToken()
+
+	return !p.peekTokenIs(lexer.LPAREN) && !p.peekTokenIs(lexer.COLON)
 }
 
 func (p *Parser) parseConstructorDeclaration() *ast.ConstructorDeclaration {

@@ -85,6 +85,8 @@ const (
 	THEN        = "then"
 	FOR         = "for"
 	WHILE       = "while"
+	REPEAT      = "repeat"
+	UNTIL       = "until"
 	DO          = "do"
 	BREAK       = "break"
 	IN          = "in"
@@ -156,6 +158,8 @@ var keywords = map[string]TokenType{
 	"then":        THEN,
 	"for":         FOR,
 	"while":       WHILE,
+	"repeat":      REPEAT,
+	"until":       UNTIL,
 	"do":          DO,
 	"break":       BREAK,
 	"in":          IN,

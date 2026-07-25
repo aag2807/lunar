@@ -610,6 +610,7 @@ type FunctionDeclaration struct {
 	IsStatic      bool         // static method (when used in class)
 	IsAbstract    bool         // abstract method (when used in class)
 	IsAsync       bool         // async function (returns Promise/coroutine)
+	IsLocal       bool         // declared as `local function f()`
 	Visibility    string       // visibility modifier: public, private, protected (when used in class)
 	Decorators    []*Decorator // decorators applied to the function
 }
@@ -792,6 +793,27 @@ func (ws *WhileStatement) String() string {
 	out.WriteString(" do\n")
 	out.WriteString(ws.Body.String())
 	out.WriteString("\nend")
+
+	return out.String()
+}
+
+// RepeatStatement is Lua's repeat ... until loop: the body runs at least once
+// and the condition is evaluated after each pass.
+type RepeatStatement struct {
+	Token     lexer.Token // 'repeat' token
+	Body      *BlockStatement
+	Condition Expression
+}
+
+func (rs *RepeatStatement) statementNode()       {}
+func (rs *RepeatStatement) TokenLiteral() string { return rs.Token.Literal }
+func (rs *RepeatStatement) String() string {
+	var out strings.Builder
+
+	out.WriteString("repeat\n")
+	out.WriteString(rs.Body.String())
+	out.WriteString("\nuntil ")
+	out.WriteString(rs.Condition.String())
 
 	return out.String()
 }

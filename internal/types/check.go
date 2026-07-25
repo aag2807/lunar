@@ -1897,6 +1897,8 @@ func (c *Checker) checkStatement(stmt ast.Statement) {
 		c.checkIfStatement(node)
 	case *ast.WhileStatement:
 		c.checkWhileStatement(node)
+	case *ast.RepeatStatement:
+		c.checkRepeatStatement(node)
 	case *ast.ForStatement:
 		c.checkForStatement(node)
 	case *ast.DoStatement:
@@ -2560,6 +2562,29 @@ func (c *Checker) variantMatchesDiscriminant(variantType Type, propName string, 
 }
 
 // checkWhileStatement checks a while statement
+// checkRepeatStatement checks a repeat ... until loop. Lua scopes the
+// condition inside the body, so names declared in the body are visible to it.
+func (c *Checker) checkRepeatStatement(node *ast.RepeatStatement) {
+	prevEnv := c.env
+	c.env = NewEnclosedEnvironment(prevEnv)
+
+	if node.Body != nil {
+		for _, stmt := range node.Body.Statements {
+			c.checkStatement(stmt)
+		}
+	}
+
+	condType := c.checkExpression(node.Condition)
+	if !IsBooleanType(condType) && !condType.Equals(Any) {
+		c.addError(
+			fmt.Sprintf("Repeat condition must be boolean, got '%s'", condType.String()),
+			node.Token,
+		)
+	}
+
+	c.env = prevEnv
+}
+
 func (c *Checker) checkWhileStatement(node *ast.WhileStatement) {
 	condType := c.checkExpression(node.Condition)
 	if !IsBooleanType(condType) && !condType.Equals(Any) {
@@ -3550,8 +3575,13 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 
 	// Check if it's a class type (constructor call)
 	if classType, ok := funcType.(*ClassType); ok {
+		// super(...) runs the parent's constructor from a subclass; that is
+		// exactly what an abstract base class exists for, so it is not an
+		// instantiation of one.
+		_, viaSuper := node.Function.(*ast.SuperExpression)
+
 		// Check if trying to instantiate an abstract class
-		if classType.IsAbstract {
+		if classType.IsAbstract && !viaSuper {
 			c.addError(
 				fmt.Sprintf("Cannot instantiate abstract class '%s'", classType.Name),
 				node.Token,

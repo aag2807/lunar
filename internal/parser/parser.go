@@ -523,11 +523,11 @@ func (p *Parser) parseDotExpression(left ast.Expression) ast.Expression {
 	}
 
 	// Right side of dot expression must be an identifier - allows context-aware keywords
-	if !p.expectPeekIdentOrContextual() {
+	if !p.expectPeekFieldName() {
 		return nil
 	}
 
-	exp.Right = p.parseIdentifierOrContextual()
+	exp.Right = p.parseFieldName()
 
 	return exp
 }
@@ -542,11 +542,11 @@ func (p *Parser) parseMethodCallExpression(left ast.Expression) ast.Expression {
 		IsMethodCall: true,
 	}
 
-	if !p.expectPeekIdentOrContextual() {
+	if !p.expectPeekFieldName() {
 		return nil
 	}
 
-	exp.Right = p.parseIdentifierOrContextual()
+	exp.Right = p.parseFieldName()
 
 	return exp
 }
@@ -564,7 +564,7 @@ func (p *Parser) isColonMethodCall() bool {
 	defer p.RestoreState(state)
 
 	p.nextToken() // curToken = ':'
-	if !p.peekTokenIsIdentOrContextual() {
+	if !lexer.CanBeFieldName(p.peekToken) {
 		return false
 	}
 
@@ -704,9 +704,11 @@ func (p *Parser) parseGenericOrLessThan(left ast.Expression) ast.Expression {
 // tryParseGenericType attempts to parse generic type arguments
 // Returns nil if this isn't a generic type instantiation
 func (p *Parser) tryParseGenericType(baseExpr ast.Expression) ast.Expression {
-	// Save current position in case we need to backtrack
+	// Save the full parser state, lexer included: backtracking by restoring the
+	// two lookahead tokens alone would silently drop every token the attempt
+	// pulled from the lexer, turning `x < 10 then` into `x < 10` + lost `then`.
+	startState := p.SaveState()
 	startToken := p.curToken
-	startPeek := p.peekToken
 
 	// Current token is '<', move past it
 	p.nextToken()
@@ -717,15 +719,13 @@ func (p *Parser) tryParseGenericType(baseExpr ast.Expression) ast.Expression {
 	// Parse first type argument
 	if !p.isTypeToken(p.curToken.Type) {
 		// Not a type token, this is a less-than operator
-		p.curToken = startToken
-		p.peekToken = startPeek
+		p.RestoreState(startState)
 		return nil
 	}
 
 	firstArg := p.parseType()
 	if firstArg == nil {
-		p.curToken = startToken
-		p.peekToken = startPeek
+		p.RestoreState(startState)
 		return nil
 	}
 	typeArgs = append(typeArgs, firstArg)
@@ -736,8 +736,7 @@ func (p *Parser) tryParseGenericType(baseExpr ast.Expression) ast.Expression {
 		p.nextToken() // move to next type
 		arg := p.parseType()
 		if arg == nil {
-			p.curToken = startToken
-			p.peekToken = startPeek
+			p.RestoreState(startState)
 			return nil
 		}
 		typeArgs = append(typeArgs, arg)
@@ -745,8 +744,7 @@ func (p *Parser) tryParseGenericType(baseExpr ast.Expression) ast.Expression {
 
 	// Must end with '>' (or >> which we split for nested generics)
 	if !p.peekTokenIs(lexer.GT) && !p.peekTokenIs(lexer.RIGHT_SHIFT) {
-		p.curToken = startToken
-		p.peekToken = startPeek
+		p.RestoreState(startState)
 		return nil
 	}
 
@@ -1782,6 +1780,31 @@ func (p *Parser) expectPeekIdentOrContextual() bool {
 
 	p.peekError(lexer.IDENT)
 	return false
+}
+
+// expectPeekFieldName advances when the next token can serve as a field name.
+// Used where a name follows '.' or ':', which is unambiguous enough to accept
+// any Lunar keyword Lua does not reserve (s:match(...), event.type, ...).
+func (p *Parser) expectPeekFieldName() bool {
+	if lexer.CanBeFieldName(p.peekToken) {
+		p.nextToken()
+		return true
+	}
+
+	p.peekError(lexer.IDENT)
+	return false
+}
+
+// parseFieldName builds an identifier from a field-name token.
+func (p *Parser) parseFieldName() *ast.Identifier {
+	if !lexer.CanBeFieldName(p.curToken) {
+		return nil
+	}
+
+	return &ast.Identifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
 }
 
 func (p *Parser) parseIdentifierOrContextual() *ast.Identifier {
@@ -3328,8 +3351,9 @@ func (p *Parser) parseStructPattern() ast.Pattern {
 
 	// Parse fields
 	for {
-		// Expect field name
-		if !p.curTokenIs(lexer.IDENT) {
+		// Expect field name. Lunar keywords that Lua does not reserve are valid
+		// field names, so discriminated unions can match on { type: "click" }.
+		if !lexer.CanBeFieldName(p.curToken) {
 			p.addError(fmt.Sprintf("expected field name in struct pattern, got %s", p.curToken.Type), p.curToken)
 			return nil
 		}

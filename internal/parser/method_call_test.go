@@ -129,3 +129,54 @@ func TestParseColonMethodCallOnSelf(t *testing.T) {
 		t.Fatalf("expected self:other() to parse as a method call, got %T", call.Function)
 	}
 }
+
+// Lunar keywords that Lua does not reserve are legal field names, so a
+// discriminated union can be matched on its `type` tag.
+func TestStructPatternAcceptsKeywordFieldNames(t *testing.T) {
+	statements := parseSource(t, "function f(e: any): string\n\treturn match e with\n\t\t| { type: \"click\", button: b } -> \"click\"\n\t\t| _ -> \"other\"\n\tend\nend")
+
+	if len(statements) == 0 {
+		t.Fatal("expected a parsed function declaration")
+	}
+}
+
+func TestMemberAccessAcceptsKeywordNames(t *testing.T) {
+	for _, input := range []string{
+		`local x = event.type`,
+		`local y = s:match("a")`,
+		`local z = obj.from`,
+		`local w = obj:with(1)`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			parseSource(t, input)
+		})
+	}
+}
+
+// tryParseGenericType backtracks when '<' turns out to be a comparison; the
+// rollback has to restore the lexer too, or the tokens it read are dropped.
+func TestLessThanIsNotMistakenForGenerics(t *testing.T) {
+	for _, input := range []string{
+		"if x < 10 then\n\tprint(1)\nend",
+		`local b = x < 3`,
+		"while i < n do\n\ti = i + 1\nend",
+		"function f(x: any): string\n\treturn match x with\n\t\t| c when c < 300 -> \"small\"\n\t\t| _ -> \"other\"\n\tend\nend",
+	} {
+		t.Run(input, func(t *testing.T) {
+			parseSource(t, input)
+		})
+	}
+}
+
+// Real generic instantiations must still parse after the backtracking fix.
+func TestGenericInstantiationStillParses(t *testing.T) {
+	for _, input := range []string{
+		`local b: Box<number> = other`,
+		`local m: Map<string, number> = other`,
+		`local n: Box<Box<number>> = other`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			parseSource(t, input)
+		})
+	}
+}

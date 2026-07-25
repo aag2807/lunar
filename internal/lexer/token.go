@@ -204,3 +204,37 @@ func LookupIdent(ident string) TokenType {
 
 	return IDENT
 }
+
+// luaReserved lists the words Lua itself reserves. Most Lunar keywords (type,
+// match, class, ...) are ordinary identifiers to Lua, so they remain legal
+// field names in generated code.
+var luaReserved = map[string]bool{
+	"and": true, "break": true, "do": true, "else": true, "elseif": true,
+	"end": true, "false": true, "for": true, "function": true, "goto": true,
+	"if": true, "in": true, "local": true, "nil": true, "not": true,
+	"or": true, "repeat": true, "return": true, "then": true, "true": true,
+	"until": true, "while": true,
+}
+
+// IsLuaReserved reports whether a word is reserved by Lua itself.
+func IsLuaReserved(word string) bool {
+	return luaReserved[word]
+}
+
+// IsKeyword reports whether a word is a Lunar keyword.
+func IsKeyword(word string) bool {
+	_, ok := keywords[word]
+	return ok
+}
+
+// CanBeFieldName reports whether a token may stand in for a field name in
+// positions where no ambiguity is possible, such as after '.' or as a struct
+// pattern's field. Identifiers always qualify; keywords qualify unless Lua
+// reserves them, since the name has to survive into the generated Lua.
+func CanBeFieldName(tok Token) bool {
+	if tok.Type == IDENT {
+		return true
+	}
+
+	return IsKeyword(tok.Literal) && !IsLuaReserved(tok.Literal)
+}

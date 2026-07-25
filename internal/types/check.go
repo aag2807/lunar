@@ -907,17 +907,29 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 
 	case *ast.FunctionType:
 		params := make([]Type, len(node.Parameters))
+		optionalParams := make([]bool, len(node.Parameters))
+		hasRestParam := false
 		for i, param := range node.Parameters {
-			params[i] = c.resolveTypeExpression(param.Type)
+			paramType := c.resolveTypeExpression(param.Type)
+			if param.IsRest {
+				hasRestParam = true
+				if _, ok := paramType.(*ArrayType); !ok {
+					paramType = &ArrayType{ElementType: paramType}
+				}
+			}
+			optionalParams[i] = param.IsOptional
+			params[i] = paramType
 		}
 		var returnType Type = Void
 		if node.ReturnType != nil {
 			returnType = c.resolveTypeExpression(node.ReturnType)
 		}
 		return &FunctionType{
-			Parameters:    params,
-			ReturnType:    returnType,
-			GenericParams: []string{}, // Function types in annotations are not generic
+			Parameters:       params,
+			ReturnType:       returnType,
+			GenericParams:    []string{}, // Function types in annotations are not generic
+			OptionalParams:   optionalParams,
+			HasRestParameter: hasRestParam,
 		}
 
 	case *ast.GenericType:
@@ -2707,6 +2719,23 @@ func (c *Checker) checkClassImplementsInterface(class *ClassType, iface *Interfa
 	for propName, ifaceProp := range iface.Properties {
 		classProp, ok := class.GetProperty(propName)
 		if !ok {
+			// A function-typed property and a method are different things in Lua:
+			// the property is a field called as f(...), the method takes an
+			// implicit self and is called as obj:f(...). Say so, because the two
+			// look identical at the call site.
+			if _, isFunc := ifaceProp.(*FunctionType); isFunc {
+				if _, hasMethod := class.GetMethod(propName); hasMethod {
+					c.addError(
+						fmt.Sprintf("Class '%s' implements '%s' as a method, but interface '%s' declares it as a function-typed property. "+
+							"A property is called as %s(...) while a method takes an implicit self and is called as obj:%s(...). "+
+							"Declare it in the interface as a method ('%s(...)') to match the class.",
+							class.Name, propName, iface.Name, propName, propName, propName),
+						token,
+					)
+					continue
+				}
+			}
+
 			c.addError(
 				fmt.Sprintf("Class '%s' does not implement property '%s' from interface '%s'",
 					class.Name, propName, iface.Name),

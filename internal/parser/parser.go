@@ -1018,6 +1018,9 @@ func (p *Parser) parseType() ast.Expression {
 	case lexer.LPAREN:
 		// Could be tuple type or function type
 		return p.parseTupleOrFunctionType()
+	case lexer.FUNCTION:
+		// function(params): Return
+		return p.parseKeywordFunctionType()
 	case lexer.LBRACE:
 		// Mapped type: { [K in T]: U }
 		return p.parseMappedType()
@@ -1202,6 +1205,8 @@ func (p *Parser) parseSimpleType() ast.Expression {
 	switch p.curToken.Type {
 	case lexer.LPAREN:
 		return p.parseTupleOrFunctionType()
+	case lexer.FUNCTION:
+		return p.parseKeywordFunctionType()
 	case lexer.TABLE:
 		return p.parseTableType()
 	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
@@ -1209,6 +1214,33 @@ func (p *Parser) parseSimpleType() ast.Expression {
 	default:
 		return nil
 	}
+}
+
+// parseKeywordFunctionType parses the `function(params): Return` type form used
+// by declaration files, as in `insert: function(t: any, pos: number?): void`.
+// Without it the whole annotation was skipped and the member silently became
+// 'any' -- and the parameter names leaked out as extra interface properties.
+func (p *Parser) parseKeywordFunctionType() ast.Expression {
+	funcType := &ast.FunctionType{
+		Token: p.curToken, // 'function'
+	}
+
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+
+	funcType.Parameters = p.parseFunctionParameters()
+	if funcType.Parameters == nil {
+		return nil
+	}
+
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // consume ':'
+		p.nextToken() // move to return type
+		funcType.ReturnType = p.parseType()
+	}
+
+	return funcType
 }
 
 func (p *Parser) parseTypeSuffix(baseType ast.Expression) ast.Expression {
@@ -1407,6 +1439,8 @@ func (p *Parser) parseSimpleTypeWithSuffixes(skipOptional bool) ast.Expression {
 	switch p.curToken.Type {
 	case lexer.LPAREN:
 		return p.parseTupleOrFunctionType()
+	case lexer.FUNCTION:
+		return p.parseKeywordFunctionType()
 	case lexer.TABLE:
 		typeExpr = p.parseTableType()
 	case lexer.KEYOF:
@@ -1560,6 +1594,9 @@ func (p *Parser) parseNonUnionIntersectionType(skipOptional bool) ast.Expression
 	case lexer.LPAREN:
 		// Could be tuple type or function type
 		return p.parseTupleOrFunctionType()
+	case lexer.FUNCTION:
+		// function(params): Return, e.g. `string | function(s: string): string`
+		return p.parseKeywordFunctionType()
 	case lexer.TABLE:
 		// table<K, V>
 		typeExpr = p.parseTableType()
@@ -1915,6 +1952,10 @@ func (p *Parser) parseParameter() *ast.Parameter {
 			if p.peekTokenIs(lexer.COLON) {
 				p.nextToken() // consume :
 				p.nextToken() // move onto type
+				param.Type = p.parseType()
+			} else if p.isTypeToken(p.peekToken.Type) {
+				// Unnamed typed vararg written without a colon, as in `...any`.
+				p.nextToken()
 				param.Type = p.parseType()
 			}
 

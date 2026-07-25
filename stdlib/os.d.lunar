@@ -15,21 +15,21 @@ end
 
 declare interface OSLib
 	-- Date and Time
-	date: function(format: string, time: number): string | DateTable
-	time: function(table: DateTable): number
+	date: function(format?: string, time?: number): string | DateTable
+	time: function(table?: DateTable): number
 	clock: function(): number
 	difftime: function(t2: number, t1: number): number
 
 	-- System Operations
-	execute: function(command: string): number
-	exit: function(code: number): void
+	execute: function(command?: string): number
+	exit: function(code?: number): void
 	getenv: function(varname: string): string | nil
 	remove: function(filename: string): boolean
 	rename: function(oldname: string, newname: string): boolean
 	tmpname: function(): string
 
 	-- Locale
-	setlocale: function(locale: string, category: string): string
+	setlocale: function(locale?: string, category?: string): string
 end
 
 declare const os: OSLib

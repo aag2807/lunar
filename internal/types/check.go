@@ -790,13 +790,34 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 
 // registerInterface registers an interface type
 func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
+	genericParams := make([]string, len(node.GenericParams))
+	for i, param := range node.GenericParams {
+		genericParams[i] = param.Value
+	}
+
 	interfaceType := &InterfaceType{
 		Name:          node.Name.Value,
+		GenericParams: genericParams,
 		Methods:       make(map[string]*FunctionType),
 		Properties:    make(map[string]Type),
 		Extends:       []*InterfaceType{},
 		StaticProps:   make(map[string]bool),
 		StaticMethods: make(map[string]bool),
+	}
+
+	// The interface's own type parameters have to be in scope while its members
+	// resolve, or every mention of T is an unknown type.
+	prevEnv := c.env
+	if len(node.GenericParams) > 0 {
+		c.env = NewEnclosedEnvironment(prevEnv)
+		for _, param := range node.GenericParams {
+			c.env.Set(param.Value, &GenericParamType{Name: param.Value})
+		}
+		defer func() {
+			c.env = prevEnv
+			// Publish into the enclosing scope, not the temporary one.
+			c.env.Set(interfaceType.Name, interfaceType)
+		}()
 	}
 
 	// Publish the (still empty) interface before resolving its members, so a
@@ -1171,6 +1192,19 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 					return Any
 				}
 				return c.parametersType(typeArgs[0])
+			}
+
+			// Check if it's a generic interface
+			if interfaceType, exists := c.interfaces[baseIdent.Value]; exists && len(interfaceType.GenericParams) > 0 {
+				if len(typeArgs) != len(interfaceType.GenericParams) {
+					c.addError(
+						fmt.Sprintf("Interface '%s' expects %d type arguments, got %d",
+							interfaceType.Name, len(interfaceType.GenericParams), len(typeArgs)),
+						lexer.Token{},
+					)
+					return interfaceType
+				}
+				return c.instantiateGenericInterface(interfaceType, typeArgs)
 			}
 
 			// Check if it's a generic class
@@ -1831,6 +1865,39 @@ func (c *Checker) substituteTypeParams(body ast.Expression, typeParams []string,
 }
 
 // instantiateGenericClass creates a new ClassType with type parameters substituted
+// instantiateGenericInterface substitutes an interface's type parameters, so
+// Expectation<number> has toBe(expected: number) rather than toBe(expected: T).
+func (c *Checker) instantiateGenericInterface(interfaceType *InterfaceType, typeArgs []Type) *InterfaceType {
+	substitutions := make(map[string]Type)
+	for i, param := range interfaceType.GenericParams {
+		if i < len(typeArgs) {
+			substitutions[param] = typeArgs[i]
+		}
+	}
+
+	instantiated := &InterfaceType{
+		Name:           interfaceType.Name,
+		GenericParams:  []string{}, // an instantiated interface is not generic
+		Methods:        make(map[string]*FunctionType),
+		Properties:     make(map[string]Type),
+		Extends:        interfaceType.Extends,
+		IndexSignature: interfaceType.IndexSignature,
+		ReadonlyProps:  interfaceType.ReadonlyProps,
+		StaticProps:    interfaceType.StaticProps,
+		StaticMethods:  interfaceType.StaticMethods,
+	}
+
+	for name, typ := range interfaceType.Properties {
+		instantiated.Properties[name] = c.substituteType(typ, substitutions)
+	}
+
+	for name, funcType := range interfaceType.Methods {
+		instantiated.Methods[name] = c.substituteFunctionType(funcType, substitutions)
+	}
+
+	return instantiated
+}
+
 func (c *Checker) instantiateGenericClass(classType *ClassType, typeArgs []Type) *ClassType {
 	// Create substitution map
 	substitutions := make(map[string]Type)
@@ -4494,6 +4561,19 @@ func (c *Checker) checkGenericInstantiation(node *ast.GenericType) Type {
 		typeArgs[i] = c.resolveTypeExpression(arg)
 	}
 
+	// Check if it's a generic interface
+	if interfaceType, exists := c.interfaces[baseIdent.Value]; exists && len(interfaceType.GenericParams) > 0 {
+		if len(typeArgs) != len(interfaceType.GenericParams) {
+			c.addError(
+				fmt.Sprintf("Interface '%s' expects %d type arguments, got %d",
+					interfaceType.Name, len(interfaceType.GenericParams), len(typeArgs)),
+				node.Token,
+			)
+			return interfaceType
+		}
+		return c.instantiateGenericInterface(interfaceType, typeArgs)
+	}
+
 	// Check if it's a generic class
 	if classType, exists := c.classes[baseIdent.Value]; exists {
 		if len(classType.GenericParams) == 0 {
@@ -4934,7 +5014,18 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 		}
 
 	case *ast.FunctionDeclaration:
-		// Register the function signature without checking the body
+		// Register the function signature without checking the body. Its own
+		// type parameters have to be in scope while the signature resolves, or
+		// `declare function expect<T>(value: T): Expectation<T>` cannot see T.
+		prevEnv := c.env
+		if len(decl.GenericParams) > 0 {
+			c.env = NewEnclosedEnvironment(prevEnv)
+			for _, param := range decl.GenericParams {
+				c.env.Set(param.Value, &GenericParamType{Name: param.Value})
+			}
+			defer func() { c.env = prevEnv }()
+		}
+
 		params := make([]Type, len(decl.Parameters))
 		hasRestParam := false
 		for i, param := range decl.Parameters {

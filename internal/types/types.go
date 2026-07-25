@@ -946,6 +946,7 @@ func (t *ClassType) IsChildOf(other *ClassType) bool {
 // InterfaceType represents an interface type
 type InterfaceType struct {
 	Name           string
+	GenericParams  []string // type parameter names, e.g. ["T"] for Box<T>
 	Methods        map[string]*FunctionType
 	Properties     map[string]Type
 	Extends        []*InterfaceType

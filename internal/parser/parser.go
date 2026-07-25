@@ -2937,6 +2937,12 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 	}
 	iface.Name = p.parseIdentifierOrContextual()
 
+	// Parse generic parameters if present: <T, U>
+	if p.peekTokenIs(lexer.LT) {
+		p.nextToken() // consume '<'
+		iface.GenericParams = p.parseGenericParameters()
+	}
+
 	// Parse extends clause
 	if p.peekTokenIs(lexer.EXTENDS) {
 		p.nextToken() // consume 'extends'

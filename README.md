@@ -38,7 +38,7 @@ end
 ✅ **Classes & OOP** - Modern object-oriented programming with inheritance
 ✅ **Interfaces** - Define contracts and ensure implementation
 ✅ **Enums** - Type-safe enumeration values
-✅ **Generics** - Write reusable, type-safe code
+✅ **Generics** - Reusable, type-safe classes, functions and interfaces
 ✅ **Union Types** - Flexible type combinations (`string | number`)
 ✅ **Intersection Types** - Combine multiple types (`T1 & T2`)
 ✅ **Pattern Matching** - Powerful match expressions with discriminated unions, guards, and destructuring
@@ -243,9 +243,8 @@ Lunar accepts Lua's own syntax alongside its type annotations:
 ✅ **Vendor Libraries** - Built-in libraries for testing, JSON, HTTP, and formatting
 ✅ **Clean Lua Output** - Generates readable, efficient Lua code
 
-Not yet accepted: dotted function names (`function love.draw()`) -- write
-`love.draw = function(): void ... end` instead -- and generic interfaces
-(`interface Box<T>`); generic classes and functions do work.
+Not yet accepted: dotted function names (`function love.draw()`); write
+`love.draw = function(): void ... end` instead.
 
 ## Installation
 
@@ -940,6 +939,7 @@ lunar/
 - [x] Type-checked standard library calls
 - [x] Hexadecimal (`0xFF`) and scientific (`1e6`) number literals
 - [x] Bare `table` type, self-referential interfaces
+- [x] Generic interfaces (`interface Container<T>`)
 - [x] Feature examples under `examples/features/`, verified by running them
 
 ### v2.0 (Future)

@@ -8,7 +8,7 @@ declare function type(value: any): string end
 declare function tonumber(value: any): any end
 declare function tostring(value: any): string end
 declare function error(message: string): void end
-declare function assert(condition: any): any end
+declare function assert(condition: any, message?: any): any end
 declare function pcall(func: any, ...args: any): any end
 declare function xpcall(func: any, errorHandler: any, ...args: any): any end
 

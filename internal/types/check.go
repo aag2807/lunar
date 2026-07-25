@@ -233,6 +233,10 @@ type Checker struct {
 
 	// Current function return type (for checking return statements)
 	currentFunctionReturnType Type
+	// inferringReturn is set while checking a function that declared no return
+	// type; the return statements found are collected in inferredReturns.
+	inferringReturn bool
+	inferredReturns []Type
 
 	// Current class context (for visibility checking)
 	currentClass *ClassType
@@ -2093,6 +2097,12 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	c.env = NewEnclosedEnvironment(c.env)
 	c.currentFunctionReturnType = returnType
 
+	// Without an annotation the return type is inferred from the body rather
+	// than forced to void, so plain Lua functions keep working.
+	prevInferring, prevInferred := c.inferringReturn, c.inferredReturns
+	c.inferringReturn = node.ReturnType == nil
+	c.inferredReturns = nil
+
 	// Add generic type parameters to scope
 	for _, genericParam := range node.GenericParams {
 		c.env.Set(genericParam.Value, Any)
@@ -2106,14 +2116,65 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	// Check body
 	c.checkBlockStatement(node.Body)
 
+	if c.inferringReturn {
+		// funcType is already registered; callers see the inferred type because
+		// they hold the same pointer.
+		funcType.ReturnType = combineReturnTypes(c.inferredReturns)
+	}
+
+	c.inferringReturn, c.inferredReturns = prevInferring, prevInferred
 	c.env = prevEnv
 	c.currentFunctionReturnType = prevReturnType
+}
+
+// combineReturnTypes reduces the return types seen in a body to one type: void
+// when nothing is returned, the single type when they agree, otherwise a union.
+func combineReturnTypes(types []Type) Type {
+	if len(types) == 0 {
+		return Void
+	}
+
+	unique := make([]Type, 0, len(types))
+	seen := make(map[string]bool)
+	for _, t := range types {
+		// An inferred return widens its literals, the same as an inferred
+		// variable: `function f() return 1 end` returns number, not 1.
+		t = widenLiteralType(t)
+		if key := t.String(); !seen[key] {
+			seen[key] = true
+			unique = append(unique, t)
+		}
+	}
+
+	if len(unique) == 1 {
+		return unique[0]
+	}
+
+	return &UnionType{Types: unique}
 }
 
 // checkReturnStatement checks a return statement
 func (c *Checker) checkReturnStatement(node *ast.ReturnStatement) {
 	if c.currentFunctionReturnType == nil {
 		c.addError("Return statement outside of function", node.Token)
+		return
+	}
+
+	// The enclosing function declared no return type: collect what it actually
+	// returns instead of checking against a type nobody wrote.
+	if c.inferringReturn {
+		switch len(node.ReturnValues) {
+		case 0:
+			c.inferredReturns = append(c.inferredReturns, Void)
+		case 1:
+			c.inferredReturns = append(c.inferredReturns, c.checkExpression(node.ReturnValues[0]))
+		default:
+			elements := make([]Type, len(node.ReturnValues))
+			for i, val := range node.ReturnValues {
+				elements[i] = c.checkExpression(val)
+			}
+			c.inferredReturns = append(c.inferredReturns, &TupleType{Elements: elements})
+		}
 		return
 	}
 

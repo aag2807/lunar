@@ -190,9 +190,9 @@ func (m *Migrator) inferTableType(table *ast.TableLiteral) string {
 	if len(table.Pairs) == 0 && len(table.Values) > 0 {
 		if len(table.Values) > 0 {
 			elemType := m.inferExpressionType(table.Values[0])
-			return fmt.Sprintf("array<%s>", elemType)
+			return fmt.Sprintf("%s[]", elemType)
 		}
-		return "array<any>"
+		return "any[]"
 	}
 
 	if len(table.Pairs) > 0 {

@@ -661,8 +661,10 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 	output.WriteString(fmt.Sprintf("%s.__index = %s\n", className, className))
 	output.WriteString("\n")
 
-	// Generate constructor as new() function
-	if node.Constructor != nil || len(node.Properties) > 0 {
+	// Generate constructor as new() function. Every class needs one: the
+	// generator turns `Calculator()` into `Calculator.new()`, so a class with
+	// only methods was impossible to instantiate without it.
+	{
 		output.WriteString(g.generateIndent())
 		output.WriteString(fmt.Sprintf("function %s.new(", className))
 
@@ -1036,6 +1038,9 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 		return "nil"
 	case *ast.VarargExpression:
 		return "..."
+	case *ast.GenericType:
+		// Type arguments are erased: Stack<number>() is just Stack() in Lua.
+		return g.generateExpression(node.BaseType)
 	case *ast.TableLiteral:
 		return g.generateTableLiteral(node)
 	case *ast.PrefixExpression:
@@ -1353,10 +1358,15 @@ func (g *Generator) isSelfReceiver(name string) bool {
 // typeNeedsSelfDispatch reports whether a declared type annotation describes a
 // receiver whose methods are called with ':' (a class instance or a string).
 func (g *Generator) typeNeedsSelfDispatch(typeExpr ast.Expression) bool {
+	if generic, ok := typeExpr.(*ast.GenericType); ok {
+		typeExpr = generic.BaseType
+	}
+
 	ident, ok := typeExpr.(*ast.Identifier)
 	if !ok {
 		return false
 	}
+
 	return g.classes[ident.Value] || ident.Value == "string"
 }
 
@@ -1367,7 +1377,11 @@ func (g *Generator) valueNeedsSelfDispatch(value ast.Expression) bool {
 	case *ast.StringLiteral, *ast.TemplateLiteral:
 		return true
 	case *ast.CallExpression:
-		if ident, ok := v.Function.(*ast.Identifier); ok {
+		callee := v.Function
+		if generic, ok := callee.(*ast.GenericType); ok {
+			callee = generic.BaseType
+		}
+		if ident, ok := callee.(*ast.Identifier); ok {
 			return g.classes[ident.Value]
 		}
 	}
@@ -1535,8 +1549,13 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 	// Not a method call - generate normally
 	function := g.generateExpression(node.Function)
 
-	// Check if calling a class constructor (simple identifier that's a known class)
-	if ident, ok := node.Function.(*ast.Identifier); ok {
+	// Check if calling a class constructor. The callee is an identifier, or a
+	// generic instantiation of one as in Stack<number>().
+	callee := node.Function
+	if generic, ok := callee.(*ast.GenericType); ok {
+		callee = generic.BaseType
+	}
+	if ident, ok := callee.(*ast.Identifier); ok {
 		if g.classes[ident.Value] {
 			function = function + ".new"
 		}

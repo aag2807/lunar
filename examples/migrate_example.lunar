@@ -1,7 +1,7 @@
 local name: string = "Alice"
 local age: number = 30
 local isActive: boolean = true
-local items: array<number> = {1, 2, 3, 4, 5}
+local items: number[] = {1, 2, 3, 4, 5}
 function greet(person): string
 	return ("Hello, " .. person)
 end

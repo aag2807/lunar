@@ -85,3 +85,45 @@ func TestParseEmptyMethodBody(t *testing.T) {
 		t.Error("expected the first method to have an empty body")
 	}
 }
+
+// Hex literals reach the parser as one token and have to be converted with the
+// right base; Go's ParseFloat rejects them.
+func TestParseHexLiteralValue(t *testing.T) {
+	statements := parseSource(t, `local flags = 0xFF`)
+
+	decl := statements[0].(*ast.VariableDeclaration)
+	number, ok := decl.Values[0].(*ast.NumberLiteral)
+	if !ok {
+		t.Fatalf("expected NumberLiteral, got %T", decl.Values[0])
+	}
+
+	if number.Value != 255 {
+		t.Errorf("expected 0xFF to be 255, got %v", number.Value)
+	}
+}
+
+// `table` on its own is a documented type meaning a table of anything.
+func TestParseBareTableType(t *testing.T) {
+	parseSource(t, "local t: table = {}")
+	parseSource(t, "local t: table<string, number> = {}")
+}
+
+// Imported names may be words Lunar reserves but Lua does not.
+func TestImportKeywordNames(t *testing.T) {
+	statements := parseSource(t, `import { get, post, type } from "vendor/http"`)
+
+	imp, ok := statements[0].(*ast.ImportStatement)
+	if !ok {
+		t.Fatalf("expected ImportStatement, got %T", statements[0])
+	}
+
+	if len(imp.Names) != 3 {
+		t.Errorf("expected 3 imported names, got %d", len(imp.Names))
+	}
+}
+
+// get and set are only accessor keywords inside a class body.
+func TestGetSetUsableAsValues(t *testing.T) {
+	parseSource(t, `local value = get("url")`)
+	parseSource(t, `set("key", 1)`)
+}

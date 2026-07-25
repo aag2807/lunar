@@ -49,6 +49,10 @@ end
 ✅ **Method Overloading** - Multiple function signatures with automatic resolution
 ✅ **Constructor Parameter Properties** - TypeScript-style shorthand for class properties
 ✅ **Readonly Properties** - Immutable properties that can only be set in constructors
+✅ **Return Type Inference** - Omit the return type and it is inferred from the body
+✅ **Nil Narrowing** - `if x == nil then return end` refines `x` for the rest of the block
+✅ **Forward References** - Call a function declared later in the file; mutual recursion works
+✅ **Getters & Setters** - `get name()` / `set name(value)` dispatched through the metatable
 
 ## Language Reference
 
@@ -78,12 +82,13 @@ Lunar includes the following keywords:
 - `local` - Local variable (Lua standard)
 - `const` - Constant variable (enforced at compile-time)
 - `return` - Return from function
-- `async` - Async function (planned feature)
-- `await` - Await async operation (planned feature)
+- `async` - Async function (compiles to a coroutine)
+- `await` - Await an async operation
 
 **Control Flow:**
 - `if`, `then`, `else`, `elseif` - Conditional statements
 - `while`, `do` - While loop
+- `repeat`, `until` - Repeat loop (body runs at least once)
 - `for`, `in` - For loop
 - `break` - Break from loop
 - `match`, `with` - Pattern matching
@@ -93,7 +98,7 @@ Lunar includes the following keywords:
 - `import` - Import from module
 - `export` - Export from module
 - `from` - Specify module source
-- `namespace` - Namespace declaration (planned)
+- `namespace` - Namespace declaration
 
 **Type System:**
 - `is` - Type guard (`value is Type`)
@@ -105,7 +110,7 @@ Lunar includes the following keywords:
 - `constructor` - Class constructor
 - `self` - Reference to current instance
 - `super` - Reference to parent class
-- `get`, `set` - Property accessors (planned)
+- `get`, `set` - Property accessors
 
 ### Primitive Types
 
@@ -125,7 +130,7 @@ Lunar includes the following keywords:
 - `"hello"` - String literals
 
 **Composite Types:**
-- `table` - Lua table type
+- `table` - Lua table type (any keys, any values)
 - `table<K, V>` - Generic table with key and value types
 - `Type[]` - Array type
 - `(Type1, Type2)` - Tuple type (multiple return values)
@@ -225,12 +230,22 @@ For complete language documentation, see:
 ✅ **Tree Shaking** - Remove unused exports from bundles
 
 ### Lua Compatibility
+Lunar accepts Lua's own syntax alongside its type annotations:
+
+✅ **Method Calls** - `s:len()`, `obj:method(arg)`
+✅ **Local Functions** - `local function helper() ... end`
+✅ **Repeat Loops** - `repeat ... until condition`
+✅ **Multiple Assignment** - `a, b = b, a` and `ok, err = pcall(f)`
+✅ **Varargs** - `function f(...)`, `{...}`, `select("#", ...)`
 ✅ **Context-Aware Keywords** - `string`, `table`, `type` work as both types and identifiers
 ✅ **Declaration Files** - Type definitions for existing Lua libraries (`.d.lunar`)
 ✅ **Complete Standard Library Types** - Full type coverage for all Lua stdlib modules
 ✅ **Vendor Libraries** - Built-in libraries for testing, JSON, HTTP, and formatting
 ✅ **Clean Lua Output** - Generates readable, efficient Lua code
-✅ **100% Lua Compatible** - Use any Lua library seamlessly
+
+Not yet accepted: dotted function names (`function love.draw()`) -- write
+`love.draw = function(): void ... end` instead -- and generic interfaces
+(`interface Box<T>`); generic classes and functions do work.
 
 ## Installation
 
@@ -456,6 +471,9 @@ Hello, Lunar
 - **[Standard Library](stdlib/README.md)** - Type declarations for Lua stdlib
 - **[Declaration Generator](cmd/lunar2decl/README.md)** - Generate `.d.lunar` files
 - **[Examples](examples/)** - Sample code and use cases
+- **[Feature Examples](examples/features/)** - One runnable program per language feature
+- **[Todo App](examples/todo_app.lunar)** - A small program using classes, enums and pattern matching
+- **[LÖVE 2D Balls](examples/love_bouncing_balls.lunar)** - Bouncing balls for the LÖVE game framework
 
 ## Examples
 
@@ -893,7 +911,7 @@ lunar/
 - [x] Advanced type features (mapped, conditional, template literal types)
 - [x] VS Code extension and Neovim plugin
 
-### v1.6 (Current) ✅
+### v1.6 ✅
 - [x] Better test runner with colored output
 - [x] Test filtering by pattern (`--filter`)
 - [x] Test timing and statistics
@@ -905,6 +923,24 @@ lunar/
 - [x] Project scaffolding tool (`lunar create` with templates)
 - [x] Test coverage infrastructure (debug hook-based tracking)
 - [x] Advanced compiler features (WASM, JIT hints, plugin system)
+
+### v1.7 (Current) ✅
+- [x] Lua method call syntax (`s:len()`, `obj:method()`)
+- [x] `local function` declarations
+- [x] `repeat ... until` loops
+- [x] Multiple assignment (`a, b = b, a`, `ok, err = pcall(f)`)
+- [x] Function hoisting: forward references and mutual recursion
+- [x] Return type inference for unannotated functions
+- [x] Nil narrowing for optionals (`if x == nil then return end`)
+- [x] Optional index (`items?[1]`) and optional call (`fn?.()`)
+- [x] Working getters and setters
+- [x] `Readonly<T>` utility type
+- [x] Correct operator semantics: `^` is exponentiation, binary `~` is XOR
+- [x] Full Lua standard library in scope (`os`, `io`, `coroutine`, `debug`, `package`)
+- [x] Type-checked standard library calls
+- [x] Hexadecimal (`0xFF`) and scientific (`1e6`) number literals
+- [x] Bare `table` type, self-referential interfaces
+- [x] Feature examples under `examples/features/`, verified by running them
 
 ### v2.0 (Future)
 - [ ] Null coalescing assignment (`??=`)

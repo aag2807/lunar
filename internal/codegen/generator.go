@@ -885,14 +885,16 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 		output.WriteString("\n")
 	}
 
-	// Generate metamethod dispatching for getters/setters if any exist
+	// Generate metamethod dispatching for getters/setters if any exist.
+	// These belong on the instance metatable, which is the class table itself
+	// (an instance is setmetatable({}, Class)). Installing them on the class's
+	// own metatable instead made every property read recurse until the stack
+	// blew, because the lookup meant to resolve the accessor re-entered the
+	// same handler.
 	if len(node.Getters) > 0 || len(node.Setters) > 0 {
-		// Generate __index metamethod for getters
 		if len(node.Getters) > 0 {
 			output.WriteString(g.generateIndent())
-			output.WriteString(fmt.Sprintf("local %s_mt = getmetatable(%s) or {}\n", className, className))
-			output.WriteString(g.generateIndent())
-			output.WriteString(fmt.Sprintf("%s_mt.__index = function(self, key)\n", className))
+			output.WriteString(fmt.Sprintf("%s.__index = function(self, key)\n", className))
 			g.indent++
 
 			for _, getter := range node.Getters {
@@ -906,21 +908,47 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 				output.WriteString("end\n")
 			}
 
+			// rawget keeps the class table's own lookup from re-entering this
+			// function; the parent chain is followed explicitly instead.
 			output.WriteString(g.generateIndent())
-			output.WriteString(fmt.Sprintf("return %s[key]\n", className))
+			output.WriteString(fmt.Sprintf("local member = rawget(%s, key)\n", className))
+			output.WriteString(g.generateIndent())
+			output.WriteString("if member ~= nil then\n")
+			g.indent++
+			output.WriteString(g.generateIndent())
+			output.WriteString("return member\n")
+			g.indent--
+			output.WriteString(g.generateIndent())
+			output.WriteString("end\n")
+
+			if parentName, ok := g.classParents[className]; ok {
+				// Defer to the parent's handler when it has one, so an
+				// inherited getter still runs; otherwise index it directly.
+				output.WriteString(g.generateIndent())
+				output.WriteString(fmt.Sprintf("local parentIndex = %s.__index\n", parentName))
+				output.WriteString(g.generateIndent())
+				output.WriteString("if type(parentIndex) == \"function\" then\n")
+				g.indent++
+				output.WriteString(g.generateIndent())
+				output.WriteString("return parentIndex(self, key)\n")
+				g.indent--
+				output.WriteString(g.generateIndent())
+				output.WriteString("end\n")
+				output.WriteString(g.generateIndent())
+				output.WriteString(fmt.Sprintf("return %s[key]\n", parentName))
+			} else {
+				output.WriteString(g.generateIndent())
+				output.WriteString("return nil\n")
+			}
+
 			g.indent--
 			output.WriteString(g.generateIndent())
 			output.WriteString("end\n")
 		}
 
-		// Generate __newindex metamethod for setters
 		if len(node.Setters) > 0 {
-			if len(node.Getters) == 0 {
-				output.WriteString(g.generateIndent())
-				output.WriteString(fmt.Sprintf("local %s_mt = getmetatable(%s) or {}\n", className, className))
-			}
 			output.WriteString(g.generateIndent())
-			output.WriteString(fmt.Sprintf("%s_mt.__newindex = function(self, key, value)\n", className))
+			output.WriteString(fmt.Sprintf("%s.__newindex = function(self, key, value)\n", className))
 			g.indent++
 
 			for _, setter := range node.Setters {
@@ -943,8 +971,6 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 			output.WriteString("end\n")
 		}
 
-		output.WriteString(g.generateIndent())
-		output.WriteString(fmt.Sprintf("setmetatable(%s, %s_mt)\n", className, className))
 		output.WriteString("\n")
 	}
 

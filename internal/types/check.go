@@ -799,6 +799,12 @@ func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
 		StaticMethods: make(map[string]bool),
 	}
 
+	// Publish the (still empty) interface before resolving its members, so a
+	// member can name the interface itself -- crypto's DigestContext returns
+	// one from every method.
+	c.interfaces[interfaceType.Name] = interfaceType
+	c.env.Set(interfaceType.Name, interfaceType)
+
 	// Register properties
 	for _, prop := range node.Properties {
 		propType := c.resolveTypeExpression(prop.Type)

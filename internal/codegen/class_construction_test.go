@@ -55,3 +55,26 @@ b.get()
 	assertContains(t, output, "Box.new(1)")
 	assertContains(t, output, "b:get()")
 }
+
+// Accessors belong on the instance metatable. Installing them on the class's
+// own metatable made every property read recurse until the stack blew.
+func TestAccessorsAreOnTheInstanceMetatable(t *testing.T) {
+	output := generate(t, `
+class Account
+	private balance: number
+
+	get amount(): number
+		return self.balance
+	end
+
+	set amount(value: number)
+		self.balance = value
+	end
+end
+`)
+
+	assertContains(t, output, "Account.__index = function(self, key)")
+	assertContains(t, output, "Account.__newindex = function(self, key, value)")
+	assertContains(t, output, "rawget(Account, key)")
+	assertNotContains(t, output, "setmetatable(Account, Account_mt)")
+}

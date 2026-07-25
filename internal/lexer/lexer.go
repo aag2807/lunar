@@ -262,6 +262,18 @@ func (l *Lexer) readIdentifier() string {
 
 func (l *Lexer) readNumber() string {
 	position := l.position
+
+	// Hexadecimal, as in Lua: 0xFF. Without this the 'x' started an
+	// identifier and 0xFF lexed as the number 0 followed by a name.
+	if l.ch == '0' && (l.peekChar() == 'x' || l.peekChar() == 'X') {
+		l.readChar() // consume '0'
+		l.readChar() // consume 'x'
+		for isHexDigit(l.ch) {
+			l.readChar()
+		}
+		return l.input[position:l.position]
+	}
+
 	for isDigit(l.ch) {
 		l.readChar()
 	}
@@ -270,6 +282,20 @@ func (l *Lexer) readNumber() string {
 		l.readChar()
 		for isDigit(l.ch) {
 			l.readChar()
+		}
+	}
+
+	// Scientific notation: 1e6, 2.5e-3
+	if l.ch == 'e' || l.ch == 'E' {
+		next := l.peekChar()
+		if isDigit(next) || ((next == '+' || next == '-') && isDigit(l.peekCharAt(2))) {
+			l.readChar() // consume 'e'
+			if l.ch == '+' || l.ch == '-' {
+				l.readChar()
+			}
+			for isDigit(l.ch) {
+				l.readChar()
+			}
 		}
 	}
 
@@ -490,6 +516,17 @@ func (l *Lexer) peekChar() byte {
 	}
 
 	return l.input[l.readPosition]
+}
+
+// peekCharAt looks ahead by offset characters from the current position, where
+// offset 1 is the same as peekChar.
+func (l *Lexer) peekCharAt(offset int) byte {
+	index := l.position + offset
+	if index >= len(l.input) {
+		return 0
+	}
+
+	return l.input[index]
 }
 
 func newToken(tokenType TokenType, ch byte, line, column int) Token {

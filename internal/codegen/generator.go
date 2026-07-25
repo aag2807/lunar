@@ -5,6 +5,7 @@ import (
 	"lunar/internal/ast"
 	"lunar/internal/lexer"
 	"lunar/internal/sourcemap"
+	"sort"
 	"strings"
 )
 
@@ -1917,15 +1918,15 @@ func (g *Generator) generateMatchExpression(node *ast.MatchExpression) string {
 			}
 
 			output.WriteString(" then\n")
+		}
 
-			// Add pattern bindings (if no guard, or bindings already added)
-			if matchCase.Guard == nil {
-				for _, binding := range bindings {
-					output.WriteString("    ")
-					output.WriteString(binding)
-					output.WriteString("\n")
-				}
-			}
+		// Bind the pattern variables for the body. When a guard is present the
+		// bindings above live inside the guard's own closure, so the body still
+		// needs its own copies to see them.
+		for _, binding := range bindings {
+			output.WriteString("    ")
+			output.WriteString(binding)
+			output.WriteString("\n")
 		}
 
 		// Return the body expression
@@ -2001,9 +2002,26 @@ func (g *Generator) generatePatternCondition(pattern ast.Pattern, valueName stri
 		var conditions []string
 		conditions = append(conditions, fmt.Sprintf("type(%s) == 'table'", valueName))
 
+		// Field order in the generated condition must not depend on map
+		// iteration order, or the same source compiles to different output.
+		fieldNames := make([]string, 0, len(p.Fields))
+		for fieldName := range p.Fields {
+			fieldNames = append(fieldNames, fieldName)
+		}
+		sort.Strings(fieldNames)
+
 		// Generate conditions and bindings for each field
-		for fieldName, fieldPattern := range p.Fields {
+		for _, fieldName := range fieldNames {
+			fieldPattern := p.Fields[fieldName]
 			fieldValue := fmt.Sprintf("%s.%s", valueName, fieldName)
+
+			// A named field has to be present for the pattern to match, so
+			// { name: n, age: a } does not match a table that has no age.
+			// Matching a field against nil explicitly is the one exception.
+			if !patternMatchesNil(fieldPattern) {
+				conditions = append(conditions, fmt.Sprintf("%s ~= nil", fieldValue))
+			}
+
 			fieldCond, fieldBindings := g.generatePatternCondition(fieldPattern, fieldValue)
 
 			// Only add non-trivial conditions (not "true")
@@ -2021,4 +2039,16 @@ func (g *Generator) generatePatternCondition(pattern ast.Pattern, valueName stri
 		// Unknown pattern type
 		return "false", bindings
 	}
+}
+
+// patternMatchesNil reports whether a pattern is written to match a nil value,
+// in which case a struct field carrying it must not be required to be present.
+func patternMatchesNil(pattern ast.Pattern) bool {
+	literal, ok := pattern.(*ast.LiteralPattern)
+	if !ok {
+		return false
+	}
+
+	_, isNil := literal.Value.(*ast.NilLiteral)
+	return isNil
 }

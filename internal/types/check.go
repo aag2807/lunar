@@ -1933,6 +1933,12 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 		} else {
 			// Infer type from value
 			finalType = valueType
+
+			// A mutable binding widens a literal to its base type unless the
+			// value explicitly asked to stay literal with `as const`.
+			if !node.IsConstant && (i >= len(node.Values) || !isConstAssertion(node.Values[i])) {
+				finalType = widenLiteralType(finalType)
+			}
 		}
 
 		// Register variable
@@ -1942,6 +1948,35 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 			c.env.Set(name.Value, finalType)
 		}
 	}
+}
+
+// widenLiteralType generalises a literal type to its base type. A mutable
+// binding declared without an annotation has to accept later values of the same
+// base type, so `local state = "idle"` is a string rather than the type "idle".
+// An explicit annotation or `as const` is how a literal type is kept.
+func widenLiteralType(t Type) Type {
+	switch t.(type) {
+	case *StringLiteralType:
+		return String
+	case *NumberLiteralType:
+		return Number
+	case *BooleanLiteralType:
+		return Boolean
+	}
+
+	return t
+}
+
+// isConstAssertion reports whether an expression ends in `as const`, which asks
+// for the literal type to be preserved.
+func isConstAssertion(expr ast.Expression) bool {
+	assertion, ok := expr.(*ast.TypeAssertion)
+	if !ok {
+		return false
+	}
+
+	ident, ok := assertion.TargetType.(*ast.Identifier)
+	return ok && ident.Value == "const"
 }
 
 // checkFunctionDeclaration checks a function declaration

@@ -334,6 +334,31 @@ func (g *Generator) generateVariableDeclaration(node *ast.VariableDeclaration) s
 }
 
 // generateFunctionDeclaration generates code for a function declaration
+// renderParameters returns the Lua parameter list for a signature along with
+// the rest parameter that needs unpacking, if any. Lua's bare vararg ("...")
+// is passed straight through and never packed into a local.
+func (g *Generator) renderParameters(parameters []*ast.Parameter) (string, *ast.Parameter) {
+	params := make([]string, 0, len(parameters))
+	var restParam *ast.Parameter
+
+	for _, param := range parameters {
+		if param.IsRest {
+			params = append(params, "...")
+			if param.Name != nil && param.Name.Value != "..." {
+				restParam = param
+			}
+			// Lua allows nothing after the vararg.
+			break
+		}
+
+		if param.Name != nil {
+			params = append(params, param.Name.Value)
+		}
+	}
+
+	return strings.Join(params, ", "), restParam
+}
+
 func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) string {
 	var output strings.Builder
 
@@ -347,24 +372,8 @@ func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) s
 	output.WriteString("(")
 
 	// Parameters (without type annotations)
-	params := make([]string, 0, len(node.Parameters))
-	var restParam *ast.Parameter
-	for i, param := range node.Parameters {
-		if param.IsRest {
-			restParam = param
-			// Add ... to parameter list
-			params = append(params, "...")
-			break
-		}
-		params = append(params, param.Name.Value)
-		// Check if next param is rest, if so don't include regular params after
-		if i+1 < len(node.Parameters) && node.Parameters[i+1].IsRest {
-			restParam = node.Parameters[i+1]
-			params = append(params, "...")
-			break
-		}
-	}
-	output.WriteString(strings.Join(params, ", "))
+	paramList, restParam := g.renderParameters(node.Parameters)
+	output.WriteString(paramList)
 	output.WriteString(")\n")
 
 	// Body
@@ -742,14 +751,15 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 			output.WriteString(fmt.Sprintf("function %s:%s(", className, method.Name.Value))
 		}
 
-		params := make([]string, len(method.Parameters))
-		for i, param := range method.Parameters {
-			params[i] = param.Name.Value
-		}
-		output.WriteString(strings.Join(params, ", "))
+		methodParams, methodRest := g.renderParameters(method.Parameters)
+		output.WriteString(methodParams)
 		output.WriteString(")\n")
 
 		g.indent++
+		if methodRest != nil {
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("local %s = {...}\n", methodRest.Name.Value))
+		}
 		if method.Body != nil {
 			for _, stmt := range method.Body.Statements {
 				output.WriteString(g.generateStatement(stmt))
@@ -1009,6 +1019,8 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 		return "false"
 	case *ast.NilLiteral:
 		return "nil"
+	case *ast.VarargExpression:
+		return "..."
 	case *ast.TableLiteral:
 		return g.generateTableLiteral(node)
 	case *ast.PrefixExpression:
@@ -1588,15 +1600,16 @@ func (g *Generator) generateFunctionExpression(node *ast.FunctionExpression) str
 	output.WriteString("function(")
 
 	// Parameters (without type annotations)
-	params := make([]string, len(node.Parameters))
-	for i, param := range node.Parameters {
-		params[i] = param.Name.Value
-	}
-	output.WriteString(strings.Join(params, ", "))
+	paramList, restParam := g.renderParameters(node.Parameters)
+	output.WriteString(paramList)
 	output.WriteString(")\n")
 
 	// Body
 	g.indent++
+	if restParam != nil {
+		output.WriteString(g.generateIndent())
+		output.WriteString(fmt.Sprintf("local %s = {...}\n", restParam.Name.Value))
+	}
 	for _, stmt := range node.Body.Statements {
 		output.WriteString(g.generateStatement(stmt))
 	}

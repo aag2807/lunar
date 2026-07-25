@@ -795,6 +795,12 @@ func (p *Parser) parsePrefixExpression() ast.Expression {
 }
 
 func (p *Parser) parseSpreadExpression() ast.Expression {
+	// A bare '...' is Lua's vararg expression; only '...' followed by an operand
+	// is a spread, as in {...items}.
+	if !p.peekStartsExpression() {
+		return &ast.VarargExpression{Token: p.curToken}
+	}
+
 	expression := &ast.SpreadExpression{
 		Token: p.curToken,
 	}
@@ -803,6 +809,12 @@ func (p *Parser) parseSpreadExpression() ast.Expression {
 	expression.Value = p.parseExpression(LOWEST)
 
 	return expression
+}
+
+// peekStartsExpression reports whether the next token could begin an operand.
+func (p *Parser) peekStartsExpression() bool {
+	_, ok := p.prefixParseFns[p.peekToken.Type]
+	return ok
 }
 
 func (p *Parser) parseAwaitExpression() ast.Expression {
@@ -1843,12 +1855,24 @@ func (p *Parser) parseParameter() *ast.Parameter {
 		}
 	}
 
-	// Check for rest parameter (...name)
+	// Check for rest parameter (...name) or Lua's bare vararg (... / ...: T)
 	if p.curTokenIs(lexer.ELLIPSIS) {
 		param.IsRest = true
-		if !p.expectPeek(lexer.IDENT) {
-			return nil
+
+		if !p.peekTokenIsIdentOrContextual() {
+			// Bare vararg: the name stays "..." so it passes straight through to Lua.
+			param.Name = &ast.Identifier{Token: p.curToken, Value: "..."}
+
+			if p.peekTokenIs(lexer.COLON) {
+				p.nextToken() // consume :
+				p.nextToken() // move onto type
+				param.Type = p.parseType()
+			}
+
+			return param
 		}
+
+		p.nextToken()
 	}
 
 	param.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}

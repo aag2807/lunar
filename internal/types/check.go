@@ -310,8 +310,20 @@ func (c *Checker) registerUtilityTypes() {
 
 // loadStdlib loads the Lua standard library type definitions
 func (c *Checker) loadStdlib() {
-	// List of stdlib files to load
-	stdlibFiles := []string{"lua.d.lunar", "table.d.lunar", "string.d.lunar", "math.d.lunar"}
+	// Lua's own standard libraries are always in scope. Bindings for third-party
+	// rocks (lfs, lpeg, ...) also live in stdlib/ but stay opt-in, so that using
+	// one without installing it is still reported.
+	stdlibFiles := []string{
+		"lua.d.lunar",
+		"table.d.lunar",
+		"string.d.lunar",
+		"math.d.lunar",
+		"os.d.lunar",
+		"io.d.lunar",
+		"coroutine.d.lunar",
+		"debug.d.lunar",
+		"package.d.lunar",
+	}
 
 	var foundDir string
 
@@ -2886,6 +2898,9 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 		return c.checkGenericInstantiation(node)
 	case *ast.SpreadExpression:
 		return c.checkSpreadExpression(node)
+	case *ast.VarargExpression:
+		// Lua's '...' expands to a value list whose contents are not tracked.
+		return Any
 	case *ast.TypeAssertion:
 		return c.checkTypeAssertion(node)
 	case *ast.AwaitExpression:
@@ -3056,10 +3071,21 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 
 	// Resolve parameter types and add to environment
 	paramTypes := make([]Type, len(node.Parameters))
+	hasRestParam := false
+	optionalParams := make([]bool, len(node.Parameters))
 	for i, param := range node.Parameters {
 		paramType := c.resolveTypeExpression(param.Type)
+		if param.IsRest {
+			hasRestParam = true
+			if _, ok := paramType.(*ArrayType); !ok {
+				paramType = &ArrayType{ElementType: paramType}
+			}
+		}
+		optionalParams[i] = param.IsOptional
 		paramTypes[i] = paramType
-		c.env.Set(param.Name.Value, paramType)
+		if param.Name != nil {
+			c.env.Set(param.Name.Value, paramType)
+		}
 	}
 
 	// Resolve return type
@@ -3091,9 +3117,11 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 
 	// Return the function type
 	return &FunctionType{
-		Parameters:    paramTypes,
-		ReturnType:    returnType,
-		GenericParams: []string{}, // Function expressions are not generic
+		Parameters:       paramTypes,
+		ReturnType:       returnType,
+		GenericParams:    []string{}, // Function expressions are not generic
+		HasRestParameter: hasRestParam,
+		OptionalParams:   optionalParams,
 	}
 }
 

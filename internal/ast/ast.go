@@ -207,6 +207,16 @@ func (se *SpreadExpression) String() string {
 	return fmt.Sprintf("...%s", se.Value.String())
 }
 
+// VarargExpression represents Lua's bare vararg expression, as in {...} or
+// select("#", ...). Unlike SpreadExpression it has no operand.
+type VarargExpression struct {
+	Token lexer.Token // '...' token
+}
+
+func (ve *VarargExpression) expressionNode()      {}
+func (ve *VarargExpression) TokenLiteral() string { return ve.Token.Literal }
+func (ve *VarargExpression) String() string       { return "..." }
+
 // TypeAssertion represents type assertion syntax value as Type
 type TypeAssertion struct {
 	Token      lexer.Token // 'as' token

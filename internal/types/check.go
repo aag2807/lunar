@@ -237,6 +237,10 @@ type Checker struct {
 	// type; the return statements found are collected in inferredReturns.
 	inferringReturn bool
 	inferredReturns []Type
+	// hoisted holds the placeholder signatures registered ahead of their
+	// declaration, so the real declaration replaces them rather than being
+	// treated as an overload of itself.
+	hoisted map[string]*FunctionType
 
 	// Current class context (for visibility checking)
 	currentClass *ClassType
@@ -397,12 +401,94 @@ func (c *Checker) Check(statements []ast.Statement) []*TypeError {
 		c.registerTypeDefinition(stmt)
 	}
 
-	// Second pass: check all statements
+	// Second pass: publish function signatures so a body can call a function
+	// declared further down the file.
+	c.hoistFunctionSignatures(statements)
+
+	// Third pass: check all statements
 	for _, stmt := range statements {
 		c.checkStatement(stmt)
 	}
 
 	return c.errors
+}
+
+// hoistFunctionSignatures registers a placeholder signature for every function
+// declared in a statement list, before any body is checked. A Lua function
+// declaration binds a global, so calling one declared later in the file is
+// normal; without this, forward references and mutual recursion both fail with
+// "Undefined variable".
+func (c *Checker) hoistFunctionSignatures(statements []ast.Statement) {
+	for _, stmt := range statements {
+		fn, ok := stmt.(*ast.FunctionDeclaration)
+		if !ok || fn.Name == nil {
+			continue
+		}
+
+		// A name that already resolves is left alone: it may be an overload set
+		// being built up, or a local shadowing something.
+		if _, exists := c.env.Get(fn.Name.Value); exists {
+			continue
+		}
+
+		placeholder := c.hoistedSignature(fn)
+		if c.hoisted == nil {
+			c.hoisted = make(map[string]*FunctionType)
+		}
+		c.hoisted[fn.Name.Value] = placeholder
+		c.env.Set(fn.Name.Value, placeholder)
+	}
+}
+
+// hoistedSignature builds the placeholder type for a hoisted function. Types
+// that cannot be resolved yet fall back to 'any'; the real declaration replaces
+// the whole signature when it is checked.
+func (c *Checker) hoistedSignature(fn *ast.FunctionDeclaration) *FunctionType {
+	// The signature's own type parameters have to be in scope while its
+	// parameter and return types resolve.
+	prevEnv := c.env
+	if len(fn.GenericParams) > 0 {
+		c.env = NewEnclosedEnvironment(prevEnv)
+		for _, genericParam := range fn.GenericParams {
+			c.env.Set(genericParam.Value, &GenericParamType{Name: genericParam.Value})
+		}
+		defer func() { c.env = prevEnv }()
+	}
+
+	params := make([]Type, len(fn.Parameters))
+	optionalParams := make([]bool, len(fn.Parameters))
+	hasRestParam := false
+
+	for i, param := range fn.Parameters {
+		paramType := c.resolveTypeExpression(param.Type)
+		if param.IsRest {
+			hasRestParam = true
+			if _, ok := paramType.(*ArrayType); !ok {
+				paramType = &ArrayType{ElementType: paramType}
+			}
+		}
+		optionalParams[i] = param.IsOptional
+		params[i] = paramType
+	}
+
+	// An unannotated return type is only known once the body is checked.
+	var returnType Type = Any
+	if fn.ReturnType != nil {
+		returnType = c.resolveTypeExpression(fn.ReturnType)
+	}
+
+	genericParams := make([]string, len(fn.GenericParams))
+	for i, param := range fn.GenericParams {
+		genericParams[i] = param.Value
+	}
+
+	return &FunctionType{
+		Parameters:       params,
+		ReturnType:       returnType,
+		GenericParams:    genericParams,
+		HasRestParameter: hasRestParam,
+		OptionalParams:   optionalParams,
+	}
 }
 
 // GetEnv returns the type environment for LSP integration
@@ -2074,8 +2160,17 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		c.env = prevEnv
 	}
 
+	// A placeholder this checker hoisted is replaced, not overloaded: the
+	// declaration being checked now is the same function.
+	if placeholder, wasHoisted := c.hoisted[node.Name.Value]; wasHoisted {
+		if existingType, ok := c.env.Get(node.Name.Value); ok && existingType == Type(placeholder) {
+			delete(c.hoisted, node.Name.Value)
+			c.env.Set(node.Name.Value, funcType)
+		}
+	}
+
 	// Check if function with same name already exists (for method overloading)
-	if existingType, ok := c.env.Get(node.Name.Value); ok {
+	if existingType, ok := c.env.Get(node.Name.Value); ok && existingType != Type(funcType) {
 		if existingFunc, ok := existingType.(*FunctionType); ok {
 			// Add this as an overload to the existing function
 			existingFunc.Overloads = append(existingFunc.Overloads, funcType)
@@ -2102,6 +2197,13 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	prevInferring, prevInferred := c.inferringReturn, c.inferredReturns
 	c.inferringReturn = node.ReturnType == nil
 	c.inferredReturns = nil
+
+	if c.inferringReturn {
+		// The signature is already visible to the body, so a recursive call
+		// would otherwise be checked against the not-yet-inferred placeholder
+		// and report things like "'*' cannot be applied to type 'void'".
+		funcType.ReturnType = Any
+	}
 
 	// Add generic type parameters to scope
 	for _, genericParam := range node.GenericParams {
@@ -2148,6 +2250,14 @@ func combineReturnTypes(types []Type) Type {
 
 	if len(unique) == 1 {
 		return unique[0]
+	}
+
+	// A union that includes 'any' is just 'any'. This is what a recursive call
+	// contributes while its own return type is still being inferred.
+	for _, t := range unique {
+		if t.Equals(Any) {
+			return Any
+		}
 	}
 
 	return &UnionType{Types: unique}

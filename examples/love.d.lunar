@@ -72,6 +72,12 @@ declare interface AudioModule
 	setVolume: function(volume: number): void
 end
 
+-- Event module
+declare interface EventModule
+	quit: function(): void
+	push: function(name: string): void
+end
+
 -- Main LÖVE table
 declare interface Love
 	graphics: GraphicsModule
@@ -80,6 +86,17 @@ declare interface Love
 	mouse: MouseModule
 	timer: TimerModule
 	audio: AudioModule
+	event: EventModule
+
+	-- Callbacks. LÖVE looks these up on the love table itself, so a game
+	-- assigns them: love.draw = function(): void ... end
+	load: function(): void
+	update: function(dt: number): void
+	draw: function(): void
+	keypressed: function(key: string): void
+	keyreleased: function(key: string): void
+	mousepressed: function(x: number, y: number, button: number): void
+	mousereleased: function(x: number, y: number, button: number): void
 end
 
 -- Global love object

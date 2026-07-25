@@ -66,3 +66,22 @@ func TestParseAbstractMethodWithoutBody(t *testing.T) {
 		t.Error("expected the concrete method to keep its body")
 	}
 }
+
+// A method with an empty body still has an 'end', and the class parser has to
+// step past it or the class terminates early.
+func TestParseEmptyMethodBody(t *testing.T) {
+	statements := parseSource(t, "class C\n\tnoop(): void\n\tend\n\n\tvalue(): number\n\t\treturn 1\n\tend\nend")
+
+	class, ok := statements[0].(*ast.ClassDeclaration)
+	if !ok {
+		t.Fatalf("expected ClassDeclaration, got %T", statements[0])
+	}
+
+	if len(class.Methods) != 2 {
+		t.Fatalf("expected 2 methods, got %d", len(class.Methods))
+	}
+
+	if class.Methods[0].Body == nil || len(class.Methods[0].Body.Statements) != 0 {
+		t.Error("expected the first method to have an empty body")
+	}
+}

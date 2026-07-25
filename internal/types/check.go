@@ -2880,25 +2880,56 @@ func (c *Checker) checkWhileStatement(node *ast.WhileStatement) {
 }
 
 // checkForStatement checks a for statement
+// iterationTypes works out what a generic for loop's key and value variables
+// hold. The iterator is usually ipairs(t) or pairs(t), whose declared return
+// type says nothing, so the collection being passed is what gets inspected.
+func (c *Checker) iterationTypes(iterator ast.Expression, iterType Type) (Type, Type) {
+	collection := iterType
+
+	if call, ok := iterator.(*ast.CallExpression); ok && len(call.Arguments) == 1 {
+		if ident, ok := call.Function.(*ast.Identifier); ok {
+			switch ident.Value {
+			case "ipairs", "pairs":
+				collection = c.checkExpression(call.Arguments[0])
+			default:
+				return Any, Any
+			}
+		}
+	}
+
+	switch typ := collection.(type) {
+	case *ArrayType:
+		return Number, typ.ElementType
+	case *TableType:
+		return typ.KeyType, typ.ValueType
+	}
+
+	return Any, Any
+}
+
 func (c *Checker) checkForStatement(node *ast.ForStatement) {
 	// Create new scope for loop
 	prevEnv := c.env
 	c.env = NewEnclosedEnvironment(prevEnv)
 
-	// Check loop variables
-	for _, variable := range node.Variables {
-		// For generic for loops, variables can be any type (index, value, etc.)
-		// For numeric for loops, variable is a number (loop counter)
-		if node.IsGeneric {
-			c.env.Set(variable.Value, Any)
-		} else {
-			c.env.Set(variable.Value, Number)
-		}
-	}
-
 	if node.IsGeneric {
 		// Generic for loop (for-in)
 		iterType := c.checkExpression(node.Iterator)
+
+		// Give the loop variables the key and value types of whatever is being
+		// iterated. Leaving them as 'any' means a method call on the element
+		// cannot be resolved, and codegen then picks the wrong call syntax.
+		keyType, valueType := c.iterationTypes(node.Iterator, iterType)
+		for i, variable := range node.Variables {
+			if i == 0 {
+				c.env.Set(variable.Value, keyType)
+			} else if i == 1 {
+				c.env.Set(variable.Value, valueType)
+			} else {
+				c.env.Set(variable.Value, Any)
+			}
+		}
+
 		// Check if iterator is iterable (array or table)
 		if _, isArray := iterType.(*ArrayType); !isArray {
 			if _, isTable := iterType.(*TableType); !isTable {
@@ -2911,6 +2942,10 @@ func (c *Checker) checkForStatement(node *ast.ForStatement) {
 			}
 		}
 	} else {
+		for _, variable := range node.Variables {
+			c.env.Set(variable.Value, Number)
+		}
+
 		// Numeric for loop
 		startType := c.checkExpression(node.Start)
 		endType := c.checkExpression(node.End)

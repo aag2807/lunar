@@ -1,0 +1,110 @@
+-- Bouncing balls for LÖVE 2D.
+--
+--   space      spawn a ball
+--   backspace  clear them
+--   escape     quit
+--
+-- Compile it next to love.d.lunar, which types the LÖVE API:
+--   lunar examples/love_bouncing_balls.lunar -o main.lua
+--   love .
+
+class Ball
+    private x: number
+    private y: number
+    private vx: number
+    private vy: number
+    private radius: number
+    private red: number
+    private green: number
+    private blue: number
+
+    constructor(x: number, y: number)
+        self.x = x
+        self.y = y
+        self.vx = math.random(-260, 260)
+        self.vy = math.random(-160, 40)
+        self.radius = math.random(10, 28)
+        self.red = 0.35 + math.random() * 0.65
+        self.green = 0.35 + math.random() * 0.65
+        self.blue = 0.35 + math.random() * 0.65
+    end
+
+    update(dt: number, gravity: number, width: number, height: number): void
+        self.vy = self.vy + gravity * dt
+        self.x = self.x + self.vx * dt
+        self.y = self.y + self.vy * dt
+
+        -- Walls: reflect and step back to the edge, so a ball cannot be
+        -- pushed through when the frame is long.
+        if self.x - self.radius < 0 then
+            self.x = self.radius
+            self.vx = -self.vx * 0.9
+        elseif self.x + self.radius > width then
+            self.x = width - self.radius
+            self.vx = -self.vx * 0.9
+        end
+
+        if self.y - self.radius < 0 then
+            self.y = self.radius
+            self.vy = -self.vy * 0.9
+        elseif self.y + self.radius > height then
+            self.y = height - self.radius
+            self.vy = -self.vy * 0.75
+
+            -- Bleed off horizontal speed while rolling on the floor.
+            self.vx = self.vx * 0.98
+        end
+    end
+
+    draw(): void
+        love.graphics.setColor(self.red, self.green, self.blue, 1)
+        love.graphics.circle("fill", self.x, self.y, self.radius)
+    end
+end
+
+local balls: Ball[] = {}
+local gravity: number = 900
+
+function spawn(): void
+    local width: number = love.window.getWidth()
+    local height: number = love.window.getHeight()
+
+    table.insert(balls, Ball(width / 2, height / 3))
+end
+
+love.load = function(): void
+    love.window.setTitle("Lunar - bouncing balls")
+    love.window.setMode(800, 600)
+    love.graphics.setBackgroundColor(0.09, 0.10, 0.15)
+
+    spawn()
+end
+
+love.update = function(dt: number): void
+    local width: number = love.window.getWidth()
+    local height: number = love.window.getHeight()
+
+    for _, ball in ipairs(balls) do
+        ball.update(dt, gravity, width, height)
+    end
+end
+
+love.draw = function(): void
+    for _, ball in ipairs(balls) do
+        ball.draw()
+    end
+
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.print("space: spawn    backspace: clear    escape: quit", 12, 12)
+    love.graphics.print(string.format("balls: %d", #balls), 12, 30)
+end
+
+love.keypressed = function(key: string): void
+    if key == "space" then
+        spawn()
+    elseif key == "backspace" then
+        balls = {}
+    elseif key == "escape" then
+        love.event.quit()
+    end
+end

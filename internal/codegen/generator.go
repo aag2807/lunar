@@ -16,25 +16,27 @@ type Generator struct {
 	currentLine      int
 	currentColumn    int
 	sourceFile       string
-	classes          map[string]bool              // Track defined classes for constructor calls
-	classParents     map[string]string            // Track parent class names for super
-	staticMethods    map[string]map[string]bool   // Track static methods: class -> method -> isStatic
-	currentClassName string                       // Current class being generated
-	exports          []string                     // Track exported names for module generation
-	target           string                       // Target Lua version: lua51, lua52, lua53, lua54, luajit
-	selfReceivers    []map[string]bool            // Scoped set of locals whose methods take an implicit self
+	classes          map[string]bool            // Track defined classes for constructor calls
+	classParents     map[string]string          // Track parent class names for super
+	staticMethods    map[string]map[string]bool // Track static methods: class -> method -> isStatic
+	currentClassName string                     // Current class being generated
+	exports          []string                   // Track exported names for module generation
+	target           string                     // Target Lua version: lua51, lua52, lua53, lua54, luajit
+	selfReceivers    []map[string]bool          // Scoped set of locals whose methods take an implicit self
+	instanceArrays   map[string]bool            // Locals holding a collection of class instances
 }
 
 // New creates a new code generator
 func New() *Generator {
 	return &Generator{
-		indent:        0,
-		classes:       make(map[string]bool),
-		classParents:  make(map[string]string),
-		staticMethods: make(map[string]map[string]bool),
-		exports:       make([]string, 0),
-		target:        "lua53",
-		selfReceivers: []map[string]bool{make(map[string]bool)},
+		indent:         0,
+		classes:        make(map[string]bool),
+		classParents:   make(map[string]string),
+		staticMethods:  make(map[string]map[string]bool),
+		exports:        make([]string, 0),
+		target:         "lua53",
+		selfReceivers:  []map[string]bool{make(map[string]bool)},
+		instanceArrays: make(map[string]bool),
 	}
 }
 
@@ -44,13 +46,14 @@ func NewWithTarget(target string) *Generator {
 		target = "lua53"
 	}
 	return &Generator{
-		indent:        0,
-		classes:       make(map[string]bool),
-		classParents:  make(map[string]string),
-		staticMethods: make(map[string]map[string]bool),
-		exports:       make([]string, 0),
-		target:        target,
-		selfReceivers: []map[string]bool{make(map[string]bool)},
+		indent:         0,
+		classes:        make(map[string]bool),
+		classParents:   make(map[string]string),
+		staticMethods:  make(map[string]map[string]bool),
+		exports:        make([]string, 0),
+		target:         target,
+		selfReceivers:  []map[string]bool{make(map[string]bool)},
+		instanceArrays: make(map[string]bool),
 	}
 }
 
@@ -571,16 +574,40 @@ func (g *Generator) generateForStatement(node *ast.ForStatement) string {
 
 	output.WriteString(" do\n")
 
+	g.pushReceiverScope()
+	if node.IsGeneric && g.iteratesInstances(node.Iterator) && len(node.Variables) > 1 {
+		// The value variable holds an instance, so its methods take self.
+		g.markSelfReceiver(node.Variables[1].Value)
+	}
+
 	g.indent++
 	for _, stmt := range node.Body.Statements {
 		output.WriteString(g.generateStatement(stmt))
 	}
 	g.indent--
+	g.popReceiverScope()
 
 	output.WriteString(g.generateIndent())
 	output.WriteString("end\n")
 
 	return output.String()
+}
+
+// iteratesInstances reports whether a generic for iterates a collection known
+// to hold class instances, as in `for _, ball in ipairs(balls)`.
+func (g *Generator) iteratesInstances(iterator ast.Expression) bool {
+	collection := iterator
+
+	if call, ok := iterator.(*ast.CallExpression); ok && len(call.Arguments) == 1 {
+		if ident, ok := call.Function.(*ast.Identifier); ok &&
+			(ident.Value == "ipairs" || ident.Value == "pairs") {
+			collection = call.Arguments[0]
+		}
+	}
+
+	ident, ok := collection.(*ast.Identifier)
+
+	return ok && g.instanceArrays[ident.Value]
 }
 
 // generateDoStatement generates code for a do statement
@@ -1455,9 +1482,17 @@ func (g *Generator) trackDeclaredReceivers(names []*ast.Identifier, typeExprs []
 		if name == nil {
 			continue
 		}
-		if i < len(typeExprs) && typeExprs[i] != nil && g.typeNeedsSelfDispatch(typeExprs[i]) {
-			g.markSelfReceiver(name.Value)
-			continue
+		if i < len(typeExprs) && typeExprs[i] != nil {
+			if g.typeNeedsSelfDispatch(typeExprs[i]) {
+				g.markSelfReceiver(name.Value)
+				continue
+			}
+
+			// `local balls: Ball[]` means iterating it yields instances.
+			if arrayType, ok := typeExprs[i].(*ast.ArrayType); ok && g.typeNeedsSelfDispatch(arrayType.ElementType) {
+				g.instanceArrays[name.Value] = true
+				continue
+			}
 		}
 		if i < len(values) && values[i] != nil && g.valueNeedsSelfDispatch(values[i]) {
 			g.markSelfReceiver(name.Value)

@@ -212,6 +212,14 @@ func (t *GenericParamType) IsAssignableTo(other Type) bool {
 	if _, isUnknown := other.(*UnknownType); isUnknown {
 		return true
 	}
+	// T fits a union that lists it, which is what a `T?` return type is.
+	if union, ok := other.(*UnionType); ok {
+		for _, member := range union.Types {
+			if t.IsAssignableTo(member) {
+				return true
+			}
+		}
+	}
 	return false
 }
 

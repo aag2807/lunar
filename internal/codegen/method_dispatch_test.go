@@ -173,3 +173,21 @@ mod.doThing(1)
 	assertContains(t, output, "mod.doThing(1)")
 	assertNotContains(t, output, "mod:doThing")
 }
+
+// The element of a typed array is an instance, so its methods take self.
+func TestLoopElementUsesColonSyntax(t *testing.T) {
+	output := generate(t, `
+class Ball
+	draw(): void
+	end
+end
+
+local balls: Ball[] = {}
+
+for _, ball in ipairs(balls) do
+	ball.draw()
+end
+`)
+
+	assertContains(t, output, "ball:draw()")
+}

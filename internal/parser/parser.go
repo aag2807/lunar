@@ -2649,7 +2649,10 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 				method.IsAbstract = isAbstract
 				method.Visibility = visibility
 				class.Methods = append(class.Methods, method)
-				if method.Body != nil && len(method.Body.Statements) > 0 {
+				// Advance past the method's own 'end'. An empty body still has
+				// one, so testing for statements left the parser sitting on it
+				// and ended the class early.
+				if method.Body != nil {
 					p.nextToken()
 				}
 			} else {
@@ -2671,7 +2674,10 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 				method.IsAbstract = isAbstract
 				method.Visibility = visibility
 				class.Methods = append(class.Methods, method)
-				if method.Body != nil && len(method.Body.Statements) > 0 {
+				// Advance past the method's own 'end'. An empty body still has
+				// one, so testing for statements left the parser sitting on it
+				// and ended the class early.
+				if method.Body != nil {
 					p.nextToken()
 				}
 			} else {
@@ -2700,9 +2706,11 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 				method.IsAbstract = isAbstract
 				method.Visibility = visibility
 				class.Methods = append(class.Methods, method)
-				// Only advance past 'end' if method has statements (i.e., has a body)
-				if method.Body != nil && len(method.Body.Statements) > 0 {
-					p.nextToken() // Advance past method's end
+				// Advance past the method's own 'end'. An empty body still has
+				// one, so testing for statements left the parser sitting on it
+				// and ended the class early.
+				if method.Body != nil {
+					p.nextToken()
 				}
 			} else {
 				p.nextToken()

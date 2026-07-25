@@ -1080,11 +1080,10 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 		var output strings.Builder
 		output.WriteString("(function() local __temp = {}; ")
 
-		// First, merge all spread expressions (they spread key-value pairs)
+		// First, merge all spread expressions
 		for _, val := range node.Values {
 			if spread, ok := val.(*ast.SpreadExpression); ok {
-				spreadValue := g.generateExpression(spread.Value)
-				output.WriteString(fmt.Sprintf("for __k, __v in pairs(%s) do __temp[__k] = __v end; ", spreadValue))
+				output.WriteString(spreadMerge(g.generateExpression(spread.Value)))
 			} else {
 				// Non-spread values in mixed context are added as array elements
 				output.WriteString(fmt.Sprintf("table.insert(__temp, %s); ", g.generateExpression(val)))
@@ -1092,15 +1091,12 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 		}
 
 		// Then add explicit key-value pairs (they can override spread values)
-		for key, val := range node.Pairs {
-			valStr := g.generateExpression(val)
-
-			// For identifier keys, use string literal; for others, use the expression
-			if ident, ok := key.(*ast.Identifier); ok {
-				output.WriteString(fmt.Sprintf("__temp[\"%s\"] = %s; ", ident.Value, valStr))
+		for _, pair := range g.sortedPairs(node.Pairs) {
+			key, val := pair[0], pair[1]
+			if isLuaIdentifier(key) {
+				output.WriteString(fmt.Sprintf("__temp[\"%s\"] = %s; ", key, val))
 			} else {
-				keyStr := g.generateExpression(key)
-				output.WriteString(fmt.Sprintf("__temp[%s] = %s; ", keyStr, valStr))
+				output.WriteString(fmt.Sprintf("__temp[%s] = %s; ", key, val))
 			}
 		}
 
@@ -1115,9 +1111,8 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 
 		for _, val := range node.Values {
 			if spread, ok := val.(*ast.SpreadExpression); ok {
-				// Insert all elements from the spread array
-				spreadValue := g.generateExpression(spread.Value)
-				output.WriteString(fmt.Sprintf("for _, __v in ipairs(%s) do table.insert(__temp, __v) end; ", spreadValue))
+				// Merge the spread source, whatever shape it has
+				output.WriteString(spreadMerge(g.generateExpression(spread.Value)))
 			} else {
 				// Insert single element
 				output.WriteString(fmt.Sprintf("table.insert(__temp, %s); ", g.generateExpression(val)))
@@ -1148,16 +1143,14 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 		}
 
 		pairs := []string{}
-		for key, val := range node.Pairs {
-			valStr := g.generateExpression(val)
+		for _, pair := range g.sortedPairs(node.Pairs) {
+			key, val := pair[0], pair[1]
 
-			// Check if key is a simple identifier - if so, use it directly without brackets
-			if ident, ok := key.(*ast.Identifier); ok {
-				pairs = append(pairs, fmt.Sprintf("%s = %s", ident.Value, valStr))
+			// A plain identifier key needs no brackets
+			if isLuaIdentifier(key) {
+				pairs = append(pairs, fmt.Sprintf("%s = %s", key, val))
 			} else {
-				// For complex keys (expressions, string literals, etc.), use brackets
-				keyStr := g.generateExpression(key)
-				pairs = append(pairs, fmt.Sprintf("[%s] = %s", keyStr, valStr))
+				pairs = append(pairs, fmt.Sprintf("[%s] = %s", key, val))
 			}
 		}
 		output.WriteString(strings.Join(pairs, ", "))
@@ -1165,6 +1158,60 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 
 	output.WriteString("}")
 	return output.String()
+}
+
+// isLuaIdentifier reports whether a rendered table key is a bare name that Lua
+// accepts without brackets. Anything else -- a quoted string, an expression, a
+// word Lua reserves -- has to be written as [key].
+func isLuaIdentifier(key string) bool {
+	if key == "" || lexer.IsLuaReserved(key) {
+		return false
+	}
+
+	for i, r := range key {
+		isLetter := r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		isDigit := r >= '0' && r <= '9'
+
+		if !isLetter && !(isDigit && i > 0) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// spreadMerge emits the Lua that merges one spread source into __temp. It works
+// for arrays, records and mixed tables: the sequence part is appended in order
+// and every other key is copied. The source is bound to a local first so an
+// expression with side effects is evaluated once.
+func spreadMerge(source string) string {
+	return fmt.Sprintf(
+		"do local __src = %s; local __len = #__src; "+
+			"for __i = 1, __len do table.insert(__temp, __src[__i]) end; "+
+			"for __k, __v in pairs(__src) do if type(__k) ~= 'number' or __k > __len then __temp[__k] = __v end end "+
+			"end; ",
+		source)
+}
+
+// sortedPairs renders a table literal's key/value pairs in a stable order.
+// Ranging over the map directly makes the same source compile to different
+// output from run to run.
+func (g *Generator) sortedPairs(pairs map[ast.Expression]ast.Expression) [][2]string {
+	rendered := make([][2]string, 0, len(pairs))
+
+	for key, val := range pairs {
+		keyStr := ""
+		if ident, ok := key.(*ast.Identifier); ok {
+			keyStr = ident.Value
+		} else {
+			keyStr = g.generateExpression(key)
+		}
+		rendered = append(rendered, [2]string{keyStr, g.generateExpression(val)})
+	}
+
+	sort.Slice(rendered, func(i, j int) bool { return rendered[i][0] < rendered[j][0] })
+
+	return rendered
 }
 
 // generatePrefixExpression generates code for a prefix expression

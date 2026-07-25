@@ -3142,6 +3142,14 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 		}
 	}
 
+	// A table built only from spreads of records is itself a record: the merge
+	// of their fields, with later spreads winning, as in {...defaults, ...opts}.
+	if len(node.Pairs) == 0 && len(node.Values) > 0 {
+		if merged := c.mergeSpreadRecords(node.Values); merged != nil {
+			return merged
+		}
+	}
+
 	// Check if this is an array-style table (has sequential Values, or empty with no Pairs)
 	if len(node.Pairs) == 0 {
 		// Infer element type from the values
@@ -3180,6 +3188,40 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 
 	// For mixed or key-value tables, return a generic table type
 	return &TableType{KeyType: Any, ValueType: Any}
+}
+
+// mergeSpreadRecords merges the fields of table values that are all spreads of
+// record-like tables. It returns nil when the values are anything else, leaving
+// the caller to infer an array type.
+func (c *Checker) mergeSpreadRecords(values []ast.Expression) Type {
+	properties := make(map[string]Type)
+	methods := make(map[string]*FunctionType)
+
+	for _, value := range values {
+		spread, ok := value.(*ast.SpreadExpression)
+		if !ok {
+			return nil
+		}
+
+		record, ok := c.checkExpression(spread.Value).(*InterfaceType)
+		if !ok {
+			return nil
+		}
+
+		for name, propType := range record.Properties {
+			properties[name] = propType
+		}
+		for name, methodType := range record.Methods {
+			methods[name] = methodType
+		}
+	}
+
+	return &InterfaceType{
+		Name:       "<table literal>",
+		Properties: properties,
+		Methods:    methods,
+		Extends:    []*InterfaceType{},
+	}
 }
 
 // checkFunctionExpression checks an anonymous function expression
@@ -3994,13 +4036,19 @@ func (c *Checker) checkSpreadExpression(node *ast.SpreadExpression) Type {
 		return tableType
 	}
 
+	// A record-like table literal is typed structurally as an interface; those
+	// spread too, merging their key/value pairs.
+	if interfaceType, ok := valueType.(*InterfaceType); ok {
+		return interfaceType
+	}
+
 	// If it's Any, allow it
 	if valueType.Equals(Any) {
 		return Any
 	}
 
 	c.addError(
-		fmt.Sprintf("Cannot spread type '%s', expected array or table", valueType.String()),
+		fmt.Sprintf("Cannot spread type '%s', expected an array, table or record", valueType.String()),
 		node.Token,
 	)
 	return Any

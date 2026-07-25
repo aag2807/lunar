@@ -10,7 +10,8 @@
       "Bash(python:*)",
       "Bash(find:*)",
       "Bash(timeout 3 python:*)",
-      "Bash(go test:*)"
+      "Bash(go test:*)",
+      "mcp__Claude_Code_Remote__send_later"
     ],
     "deny": [],
     "ask": []

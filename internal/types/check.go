@@ -233,6 +233,14 @@ type Checker struct {
 
 	// Current function return type (for checking return statements)
 	currentFunctionReturnType Type
+	// inferringReturn is set while checking a function that declared no return
+	// type; the return statements found are collected in inferredReturns.
+	inferringReturn bool
+	inferredReturns []Type
+	// hoisted holds the placeholder signatures registered ahead of their
+	// declaration, so the real declaration replaces them rather than being
+	// treated as an overload of itself.
+	hoisted map[string]*FunctionType
 
 	// Current class context (for visibility checking)
 	currentClass *ClassType
@@ -304,14 +312,27 @@ func (c *Checker) registerUtilityTypes() {
 	c.env.Set("Record", Any)        // Record<K, V>
 	c.env.Set("Partial", Any)       // Partial<T>
 	c.env.Set("Required", Any)      // Required<T>
+	c.env.Set("Readonly", Any)      // Readonly<T>
 	c.env.Set("ReturnType", Any)    // ReturnType<F>
 	c.env.Set("Parameters", Any)    // Parameters<F>
 }
 
 // loadStdlib loads the Lua standard library type definitions
 func (c *Checker) loadStdlib() {
-	// List of stdlib files to load
-	stdlibFiles := []string{"lua.d.lunar", "table.d.lunar", "string.d.lunar", "math.d.lunar"}
+	// Lua's own standard libraries are always in scope. Bindings for third-party
+	// rocks (lfs, lpeg, ...) also live in stdlib/ but stay opt-in, so that using
+	// one without installing it is still reported.
+	stdlibFiles := []string{
+		"lua.d.lunar",
+		"table.d.lunar",
+		"string.d.lunar",
+		"math.d.lunar",
+		"os.d.lunar",
+		"io.d.lunar",
+		"coroutine.d.lunar",
+		"debug.d.lunar",
+		"package.d.lunar",
+	}
 
 	var foundDir string
 
@@ -381,12 +402,94 @@ func (c *Checker) Check(statements []ast.Statement) []*TypeError {
 		c.registerTypeDefinition(stmt)
 	}
 
-	// Second pass: check all statements
+	// Second pass: publish function signatures so a body can call a function
+	// declared further down the file.
+	c.hoistFunctionSignatures(statements)
+
+	// Third pass: check all statements
 	for _, stmt := range statements {
 		c.checkStatement(stmt)
 	}
 
 	return c.errors
+}
+
+// hoistFunctionSignatures registers a placeholder signature for every function
+// declared in a statement list, before any body is checked. A Lua function
+// declaration binds a global, so calling one declared later in the file is
+// normal; without this, forward references and mutual recursion both fail with
+// "Undefined variable".
+func (c *Checker) hoistFunctionSignatures(statements []ast.Statement) {
+	for _, stmt := range statements {
+		fn, ok := stmt.(*ast.FunctionDeclaration)
+		if !ok || fn.Name == nil {
+			continue
+		}
+
+		// A name that already resolves is left alone: it may be an overload set
+		// being built up, or a local shadowing something.
+		if _, exists := c.env.Get(fn.Name.Value); exists {
+			continue
+		}
+
+		placeholder := c.hoistedSignature(fn)
+		if c.hoisted == nil {
+			c.hoisted = make(map[string]*FunctionType)
+		}
+		c.hoisted[fn.Name.Value] = placeholder
+		c.env.Set(fn.Name.Value, placeholder)
+	}
+}
+
+// hoistedSignature builds the placeholder type for a hoisted function. Types
+// that cannot be resolved yet fall back to 'any'; the real declaration replaces
+// the whole signature when it is checked.
+func (c *Checker) hoistedSignature(fn *ast.FunctionDeclaration) *FunctionType {
+	// The signature's own type parameters have to be in scope while its
+	// parameter and return types resolve.
+	prevEnv := c.env
+	if len(fn.GenericParams) > 0 {
+		c.env = NewEnclosedEnvironment(prevEnv)
+		for _, genericParam := range fn.GenericParams {
+			c.env.Set(genericParam.Value, &GenericParamType{Name: genericParam.Value})
+		}
+		defer func() { c.env = prevEnv }()
+	}
+
+	params := make([]Type, len(fn.Parameters))
+	optionalParams := make([]bool, len(fn.Parameters))
+	hasRestParam := false
+
+	for i, param := range fn.Parameters {
+		paramType := c.resolveTypeExpression(param.Type)
+		if param.IsRest {
+			hasRestParam = true
+			if _, ok := paramType.(*ArrayType); !ok {
+				paramType = &ArrayType{ElementType: paramType}
+			}
+		}
+		optionalParams[i] = paramIsOptional(param, paramType)
+		params[i] = paramType
+	}
+
+	// An unannotated return type is only known once the body is checked.
+	var returnType Type = Any
+	if fn.ReturnType != nil {
+		returnType = c.resolveTypeExpression(fn.ReturnType)
+	}
+
+	genericParams := make([]string, len(fn.GenericParams))
+	for i, param := range fn.GenericParams {
+		genericParams[i] = param.Value
+	}
+
+	return &FunctionType{
+		Parameters:       params,
+		ReturnType:       returnType,
+		GenericParams:    genericParams,
+		HasRestParameter: hasRestParam,
+		OptionalParams:   optionalParams,
+	}
 }
 
 // GetEnv returns the type environment for LSP integration
@@ -468,6 +571,12 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		SetterVisibility:    make(map[string]string),
 	}
 
+	// Publish the (still empty) class before resolving its members so that a
+	// member signature can name the class itself, as in
+	// `static open(owner: string): Account`. Members fill in the same pointer.
+	c.classes[classType.Name] = classType
+	c.env.Set(classType.Name, classType)
+
 	// Add generic type parameters to scope temporarily
 	prevEnv := c.env
 	if len(node.GenericParams) > 0 {
@@ -506,12 +615,22 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 	// Register constructor
 	if node.Constructor != nil {
 		params := make([]Type, len(node.Constructor.Parameters))
+		ctorOptional := make([]bool, len(node.Constructor.Parameters))
+		ctorHasRest := false
 		for i, param := range node.Constructor.Parameters {
 			if param.Type != nil {
 				params[i] = c.resolveTypeExpression(param.Type)
 			} else {
 				params[i] = Any
 			}
+
+			if param.IsRest {
+				ctorHasRest = true
+				if _, ok := params[i].(*ArrayType); !ok {
+					params[i] = &ArrayType{ElementType: params[i]}
+				}
+			}
+			ctorOptional[i] = paramIsOptional(param, params[i])
 
 			// Handle constructor parameter properties
 			if param.Visibility != "" {
@@ -531,26 +650,39 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 			}
 		}
 		classType.Constructor = &FunctionType{
-			Parameters:    params,
-			ReturnType:    classType, // Constructor returns an instance of the class
-			GenericParams: []string{}, // Constructors are not separately generic
+			Parameters:       params,
+			ReturnType:       classType,  // Constructor returns an instance of the class
+			GenericParams:    []string{}, // Constructors are not separately generic
+			OptionalParams:   ctorOptional,
+			HasRestParameter: ctorHasRest,
 		}
 	}
 
 	// Register methods
 	for _, method := range node.Methods {
 		params := make([]Type, len(method.Parameters))
+		optionalParams := make([]bool, len(method.Parameters))
+		hasRestParam := false
 		for i, param := range method.Parameters {
 			params[i] = c.resolveTypeExpression(param.Type)
+			if param.IsRest {
+				hasRestParam = true
+				if _, ok := params[i].(*ArrayType); !ok {
+					params[i] = &ArrayType{ElementType: params[i]}
+				}
+			}
+			optionalParams[i] = paramIsOptional(param, params[i])
 		}
 		var returnType Type = Void
 		if method.ReturnType != nil {
 			returnType = c.resolveTypeExpression(method.ReturnType)
 		}
 		funcType := &FunctionType{
-			Parameters:    params,
-			ReturnType:    returnType,
-			GenericParams: []string{}, // Methods are not separately generic
+			Parameters:       params,
+			ReturnType:       returnType,
+			GenericParams:    []string{}, // Methods are not separately generic
+			OptionalParams:   optionalParams,
+			HasRestParameter: hasRestParam,
 		}
 		methodName := method.Name.Value
 
@@ -654,9 +786,6 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 	if len(node.GenericParams) > 0 {
 		c.env = prevEnv
 	}
-
-	c.classes[classType.Name] = classType
-	c.env.Set(classType.Name, classType)
 }
 
 // registerInterface registers an interface type
@@ -894,18 +1023,35 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		return &TupleType{Elements: elements}
 
 	case *ast.FunctionType:
+		// A bare `function` type constrains nothing beyond being callable.
+		if node.Parameters == nil && node.ReturnType == nil {
+			return Any
+		}
+
 		params := make([]Type, len(node.Parameters))
+		optionalParams := make([]bool, len(node.Parameters))
+		hasRestParam := false
 		for i, param := range node.Parameters {
-			params[i] = c.resolveTypeExpression(param.Type)
+			paramType := c.resolveTypeExpression(param.Type)
+			if param.IsRest {
+				hasRestParam = true
+				if _, ok := paramType.(*ArrayType); !ok {
+					paramType = &ArrayType{ElementType: paramType}
+				}
+			}
+			optionalParams[i] = paramIsOptional(param, paramType)
+			params[i] = paramType
 		}
 		var returnType Type = Void
 		if node.ReturnType != nil {
 			returnType = c.resolveTypeExpression(node.ReturnType)
 		}
 		return &FunctionType{
-			Parameters:    params,
-			ReturnType:    returnType,
-			GenericParams: []string{}, // Function types in annotations are not generic
+			Parameters:       params,
+			ReturnType:       returnType,
+			GenericParams:    []string{}, // Function types in annotations are not generic
+			OptionalParams:   optionalParams,
+			HasRestParameter: hasRestParam,
 		}
 
 	case *ast.GenericType:
@@ -998,6 +1144,13 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 					return Any
 				}
 				return c.requiredType(typeArgs[0])
+
+			case "Readonly":
+				if len(typeArgs) != 1 {
+					c.addError("Readonly<T> expects 1 type argument", lexer.Token{})
+					return Any
+				}
+				return c.readonlyType(typeArgs[0])
 
 			case "ReturnType":
 				if len(typeArgs) != 1 {
@@ -1408,6 +1561,53 @@ func (c *Checker) recordType(keys Type, valueType Type) Type {
 
 // partialType implements Partial<T> utility type
 // Makes all properties in T optional
+// readonlyType implements Readonly<T>: the same shape, with every property
+// marked readonly so assigning to one is reported.
+func (c *Checker) readonlyType(t Type) Type {
+	switch objType := t.(type) {
+	case *InterfaceType:
+		readonly := &InterfaceType{
+			Name:        objType.Name + "_Readonly",
+			Properties:  make(map[string]Type),
+			Methods:     make(map[string]*FunctionType),
+			StaticProps: make(map[string]bool),
+			Extends:     []*InterfaceType{},
+		}
+
+		for name, propType := range objType.Properties {
+			readonly.Properties[name] = propType
+			if objType.StaticProps != nil && objType.StaticProps[name] {
+				readonly.StaticProps[name] = true
+			}
+		}
+		for name, methodType := range objType.Methods {
+			readonly.Methods[name] = methodType
+		}
+
+		return readonly
+
+	case *ClassType:
+		readonly := &ClassType{
+			Name:          objType.Name + "_Readonly",
+			Properties:    make(map[string]Type),
+			Methods:       make(map[string]*FunctionType),
+			ReadonlyProps: make(map[string]bool),
+		}
+
+		for name, propType := range objType.Properties {
+			readonly.Properties[name] = propType
+			readonly.ReadonlyProps[name] = true
+		}
+		for name, methodType := range objType.Methods {
+			readonly.Methods[name] = methodType
+		}
+
+		return readonly
+	}
+
+	return t
+}
+
 func (c *Checker) partialType(t Type) Type {
 	switch objType := t.(type) {
 	case *InterfaceType:
@@ -1775,6 +1975,8 @@ func (c *Checker) checkStatement(stmt ast.Statement) {
 		c.checkIfStatement(node)
 	case *ast.WhileStatement:
 		c.checkWhileStatement(node)
+	case *ast.RepeatStatement:
+		c.checkRepeatStatement(node)
 	case *ast.ForStatement:
 		c.checkForStatement(node)
 	case *ast.DoStatement:
@@ -1856,6 +2058,14 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 		}
 	}
 
+	// A call or '...' can yield more values than its type records, which is how
+	// `local ok, err = pcall(f)` is written, so extra names take 'any'.
+	if len(node.Names) > len(valueTypes) && len(node.Values) == 1 && yieldsMultipleValues(node.Values[0]) {
+		for len(valueTypes) < len(node.Names) {
+			valueTypes = append(valueTypes, Any)
+		}
+	}
+
 	// Check that the number of variables matches number of values
 	if len(node.Names) != len(valueTypes) {
 		c.addError(
@@ -1901,6 +2111,12 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 		} else {
 			// Infer type from value
 			finalType = valueType
+
+			// A mutable binding widens a literal to its base type unless the
+			// value explicitly asked to stay literal with `as const`.
+			if !node.IsConstant && (i >= len(node.Values) || !isConstAssertion(node.Values[i])) {
+				finalType = widenLiteralType(finalType)
+			}
 		}
 
 		// Register variable
@@ -1910,6 +2126,73 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 			c.env.Set(name.Value, finalType)
 		}
 	}
+}
+
+// requiredParamCount returns how many arguments a signature demands, which is
+// the number of parameters before the first optional one.
+func requiredParamCount(fnType *FunctionType) int {
+	for i, isOptional := range fnType.OptionalParams {
+		if isOptional {
+			return i
+		}
+	}
+
+	return len(fnType.Parameters)
+}
+
+// yieldsMultipleValues reports whether an expression can produce more than one
+// value in Lua. Only calls and the vararg expression can.
+func yieldsMultipleValues(expr ast.Expression) bool {
+	switch expr.(type) {
+	case *ast.CallExpression, *ast.VarargExpression:
+		return true
+	}
+
+	return false
+}
+
+// paramIsOptional reports whether a parameter may be omitted at a call site.
+// Both spellings count: `b?: number` and the documented `b: number?`, which is
+// the same thing in Lua, where a missing argument arrives as nil.
+func paramIsOptional(param *ast.Parameter, resolved Type) bool {
+	if param.IsOptional {
+		return true
+	}
+
+	// `number?` resolves to the union `number | nil`, so ask whether nil is one
+	// of the type's members rather than looking for a specific representation.
+	_, admitsNil := removeNil(resolved)
+
+	return admitsNil
+}
+
+// widenLiteralType generalises a literal type to its base type. A mutable
+// binding declared without an annotation has to accept later values of the same
+// base type, so `local state = "idle"` is a string rather than the type "idle".
+// An explicit annotation or `as const` is how a literal type is kept.
+func widenLiteralType(t Type) Type {
+	switch t.(type) {
+	case *StringLiteralType:
+		return String
+	case *NumberLiteralType:
+		return Number
+	case *BooleanLiteralType:
+		return Boolean
+	}
+
+	return t
+}
+
+// isConstAssertion reports whether an expression ends in `as const`, which asks
+// for the literal type to be preserved.
+func isConstAssertion(expr ast.Expression) bool {
+	assertion, ok := expr.(*ast.TypeAssertion)
+	if !ok {
+		return false
+	}
+
+	ident, ok := assertion.TargetType.(*ast.Identifier)
+	return ok && ident.Value == "const"
 }
 
 // checkFunctionDeclaration checks a function declaration
@@ -1941,14 +2224,13 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 			if i != len(node.Parameters)-1 {
 				c.addError("Rest parameter must be the last parameter", param.Token)
 			}
-			// Rest parameter type should be an array
+			// A rest parameter may be annotated with the element type (...n: number)
+			// or with the array it collects (...n: number[]); function type
+			// annotations already accept both, so declarations do too.
 			if param.Type != nil {
 				paramType := c.resolveTypeExpression(param.Type)
-				if _, ok := paramType.(*ArrayType); !ok && !paramType.Equals(Any) {
-					c.addError(
-						fmt.Sprintf("Rest parameter must have array type, got '%s'", paramType.String()),
-						param.Token,
-					)
+				if _, ok := paramType.(*ArrayType); !ok {
+					paramType = &ArrayType{ElementType: paramType}
 				}
 				params[i] = paramType
 			} else {
@@ -1957,7 +2239,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 			}
 		} else {
 			// Validate optional parameter ordering
-			if param.IsOptional {
+			if paramIsOptional(param, c.resolveTypeExpression(param.Type)) {
 				hasOptional = true
 				optionalParams[i] = true
 			} else if hasOptional && !param.IsRest {
@@ -2003,8 +2285,17 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		c.env = prevEnv
 	}
 
+	// A placeholder this checker hoisted is replaced, not overloaded: the
+	// declaration being checked now is the same function.
+	if placeholder, wasHoisted := c.hoisted[node.Name.Value]; wasHoisted {
+		if existingType, ok := c.env.Get(node.Name.Value); ok && existingType == Type(placeholder) {
+			delete(c.hoisted, node.Name.Value)
+			c.env.Set(node.Name.Value, funcType)
+		}
+	}
+
 	// Check if function with same name already exists (for method overloading)
-	if existingType, ok := c.env.Get(node.Name.Value); ok {
+	if existingType, ok := c.env.Get(node.Name.Value); ok && existingType != Type(funcType) {
 		if existingFunc, ok := existingType.(*FunctionType); ok {
 			// Add this as an overload to the existing function
 			existingFunc.Overloads = append(existingFunc.Overloads, funcType)
@@ -2026,6 +2317,19 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	c.env = NewEnclosedEnvironment(c.env)
 	c.currentFunctionReturnType = returnType
 
+	// Without an annotation the return type is inferred from the body rather
+	// than forced to void, so plain Lua functions keep working.
+	prevInferring, prevInferred := c.inferringReturn, c.inferredReturns
+	c.inferringReturn = node.ReturnType == nil
+	c.inferredReturns = nil
+
+	if c.inferringReturn {
+		// The signature is already visible to the body, so a recursive call
+		// would otherwise be checked against the not-yet-inferred placeholder
+		// and report things like "'*' cannot be applied to type 'void'".
+		funcType.ReturnType = Any
+	}
+
 	// Add generic type parameters to scope
 	for _, genericParam := range node.GenericParams {
 		c.env.Set(genericParam.Value, Any)
@@ -2039,14 +2343,73 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	// Check body
 	c.checkBlockStatement(node.Body)
 
+	if c.inferringReturn {
+		// funcType is already registered; callers see the inferred type because
+		// they hold the same pointer.
+		funcType.ReturnType = combineReturnTypes(c.inferredReturns)
+	}
+
+	c.inferringReturn, c.inferredReturns = prevInferring, prevInferred
 	c.env = prevEnv
 	c.currentFunctionReturnType = prevReturnType
+}
+
+// combineReturnTypes reduces the return types seen in a body to one type: void
+// when nothing is returned, the single type when they agree, otherwise a union.
+func combineReturnTypes(types []Type) Type {
+	if len(types) == 0 {
+		return Void
+	}
+
+	unique := make([]Type, 0, len(types))
+	seen := make(map[string]bool)
+	for _, t := range types {
+		// An inferred return widens its literals, the same as an inferred
+		// variable: `function f() return 1 end` returns number, not 1.
+		t = widenLiteralType(t)
+		if key := t.String(); !seen[key] {
+			seen[key] = true
+			unique = append(unique, t)
+		}
+	}
+
+	if len(unique) == 1 {
+		return unique[0]
+	}
+
+	// A union that includes 'any' is just 'any'. This is what a recursive call
+	// contributes while its own return type is still being inferred.
+	for _, t := range unique {
+		if t.Equals(Any) {
+			return Any
+		}
+	}
+
+	return &UnionType{Types: unique}
 }
 
 // checkReturnStatement checks a return statement
 func (c *Checker) checkReturnStatement(node *ast.ReturnStatement) {
 	if c.currentFunctionReturnType == nil {
 		c.addError("Return statement outside of function", node.Token)
+		return
+	}
+
+	// The enclosing function declared no return type: collect what it actually
+	// returns instead of checking against a type nobody wrote.
+	if c.inferringReturn {
+		switch len(node.ReturnValues) {
+		case 0:
+			c.inferredReturns = append(c.inferredReturns, Void)
+		case 1:
+			c.inferredReturns = append(c.inferredReturns, c.checkExpression(node.ReturnValues[0]))
+		default:
+			elements := make([]Type, len(node.ReturnValues))
+			for i, val := range node.ReturnValues {
+				elements[i] = c.checkExpression(val)
+			}
+			c.inferredReturns = append(c.inferredReturns, &TupleType{Elements: elements})
+		}
 		return
 	}
 
@@ -2124,6 +2487,13 @@ func (c *Checker) checkIfStatement(node *ast.IfStatement) {
 		)
 	}
 
+	// A nil check refines an optional in both branches, and when the nil branch
+	// always exits it refines the rest of the enclosing block too.
+	if nilCheck, ok := c.nilNarrowing(node.Condition); ok {
+		c.checkIfWithNilNarrowing(node, nilCheck)
+		return
+	}
+
 	// Check for type narrowing from type guard functions
 	varName, narrowedType := c.extractTypeNarrowing(node.Condition)
 
@@ -2165,6 +2535,158 @@ func (c *Checker) checkIfStatement(node *ast.IfStatement) {
 			c.checkBlockStatement(node.Alternative)
 		}
 	}
+}
+
+// nilCheck describes an `x == nil` / `x ~= nil` test on an optional variable.
+type nilCheck struct {
+	varName string
+	// nonNil is the variable's type with nil removed.
+	nonNil Type
+	// nilInThen is true when the then-branch is the one where x is nil.
+	nilInThen bool
+}
+
+// nilNarrowing recognises a comparison of a variable against nil and reports how
+// each branch refines it. Without this an optional parameter stays 'T | nil'
+// after its own nil check and cannot be used.
+func (c *Checker) nilNarrowing(expr ast.Expression) (nilCheck, bool) {
+	infix, ok := expr.(*ast.InfixExpression)
+	if !ok {
+		return nilCheck{}, false
+	}
+
+	var equality bool
+	switch infix.Operator {
+	case "==":
+		equality = true
+	case "~=", "!=":
+		equality = false
+	default:
+		return nilCheck{}, false
+	}
+
+	// Accept the comparison written either way round.
+	ident, nilOK := identComparedToNil(infix.Left, infix.Right)
+	if !nilOK {
+		ident, nilOK = identComparedToNil(infix.Right, infix.Left)
+	}
+	if !nilOK {
+		return nilCheck{}, false
+	}
+
+	current, exists := c.env.Get(ident.Value)
+	if !exists {
+		return nilCheck{}, false
+	}
+
+	nonNil, isOptional := removeNil(current)
+	if !isOptional {
+		return nilCheck{}, false
+	}
+
+	return nilCheck{varName: ident.Value, nonNil: nonNil, nilInThen: equality}, true
+}
+
+// identComparedToNil returns the identifier when one side of a comparison is a
+// plain name and the other is the nil literal.
+func identComparedToNil(candidate, other ast.Expression) (*ast.Identifier, bool) {
+	ident, ok := candidate.(*ast.Identifier)
+	if !ok {
+		return nil, false
+	}
+
+	if _, isNil := other.(*ast.NilLiteral); !isNil {
+		return nil, false
+	}
+
+	return ident, true
+}
+
+// removeNil strips nil from an optional or a union that includes it.
+func removeNil(t Type) (Type, bool) {
+	if optType, ok := t.(*OptionalType); ok {
+		return optType.BaseType, true
+	}
+
+	union, ok := t.(*UnionType)
+	if !ok {
+		return t, false
+	}
+
+	remaining := make([]Type, 0, len(union.Types))
+	foundNil := false
+	for _, member := range union.Types {
+		if IsNilType(member) {
+			foundNil = true
+			continue
+		}
+		remaining = append(remaining, member)
+	}
+
+	if !foundNil || len(remaining) == 0 {
+		return t, false
+	}
+
+	if len(remaining) == 1 {
+		return remaining[0], true
+	}
+
+	return &UnionType{Types: remaining}, true
+}
+
+// checkIfWithNilNarrowing checks both branches with the variable refined, and
+// carries the refinement past the statement when the nil branch always exits.
+func (c *Checker) checkIfWithNilNarrowing(node *ast.IfStatement, check nilCheck) {
+	prevEnv := c.env
+
+	thenType, elseType := check.nonNil, Type(Nil)
+	if check.nilInThen {
+		thenType, elseType = Nil, check.nonNil
+	}
+
+	c.env = NewEnclosedEnvironment(prevEnv)
+	c.env.Set(check.varName, thenType)
+	c.checkBlockStatement(node.Consequence)
+	c.env = prevEnv
+
+	if node.Alternative != nil {
+		c.env = NewEnclosedEnvironment(prevEnv)
+		c.env.Set(check.varName, elseType)
+		c.checkBlockStatement(node.Alternative)
+		c.env = prevEnv
+	}
+
+	// `if x == nil then return end` leaves x non-nil for everything after it.
+	nilBranch := node.Alternative
+	if check.nilInThen {
+		nilBranch = node.Consequence
+	}
+	if nilBranch != nil && blockAlwaysExits(nilBranch) {
+		c.env.Set(check.varName, check.nonNil)
+	}
+}
+
+// blockAlwaysExits reports whether a block ends in a statement that leaves the
+// enclosing function or loop, so the code after it only runs otherwise.
+func blockAlwaysExits(block *ast.BlockStatement) bool {
+	if block == nil || len(block.Statements) == 0 {
+		return false
+	}
+
+	switch last := block.Statements[len(block.Statements)-1].(type) {
+	case *ast.ReturnStatement, *ast.BreakStatement:
+		return true
+	case *ast.ExpressionStatement:
+		// A call to error() does not return either.
+		call, ok := last.Expression.(*ast.CallExpression)
+		if !ok {
+			return false
+		}
+		ident, ok := call.Function.(*ast.Identifier)
+		return ok && ident.Value == "error"
+	}
+
+	return false
 }
 
 // extractTypeNarrowing checks if the expression is a type guard call or discriminated union check
@@ -2322,6 +2844,29 @@ func (c *Checker) variantMatchesDiscriminant(variantType Type, propName string, 
 }
 
 // checkWhileStatement checks a while statement
+// checkRepeatStatement checks a repeat ... until loop. Lua scopes the
+// condition inside the body, so names declared in the body are visible to it.
+func (c *Checker) checkRepeatStatement(node *ast.RepeatStatement) {
+	prevEnv := c.env
+	c.env = NewEnclosedEnvironment(prevEnv)
+
+	if node.Body != nil {
+		for _, stmt := range node.Body.Statements {
+			c.checkStatement(stmt)
+		}
+	}
+
+	condType := c.checkExpression(node.Condition)
+	if !IsBooleanType(condType) && !condType.Equals(Any) {
+		c.addError(
+			fmt.Sprintf("Repeat condition must be boolean, got '%s'", condType.String()),
+			node.Token,
+		)
+	}
+
+	c.env = prevEnv
+}
+
 func (c *Checker) checkWhileStatement(node *ast.WhileStatement) {
 	condType := c.checkExpression(node.Condition)
 	if !IsBooleanType(condType) && !condType.Equals(Any) {
@@ -2335,25 +2880,56 @@ func (c *Checker) checkWhileStatement(node *ast.WhileStatement) {
 }
 
 // checkForStatement checks a for statement
+// iterationTypes works out what a generic for loop's key and value variables
+// hold. The iterator is usually ipairs(t) or pairs(t), whose declared return
+// type says nothing, so the collection being passed is what gets inspected.
+func (c *Checker) iterationTypes(iterator ast.Expression, iterType Type) (Type, Type) {
+	collection := iterType
+
+	if call, ok := iterator.(*ast.CallExpression); ok && len(call.Arguments) == 1 {
+		if ident, ok := call.Function.(*ast.Identifier); ok {
+			switch ident.Value {
+			case "ipairs", "pairs":
+				collection = c.checkExpression(call.Arguments[0])
+			default:
+				return Any, Any
+			}
+		}
+	}
+
+	switch typ := collection.(type) {
+	case *ArrayType:
+		return Number, typ.ElementType
+	case *TableType:
+		return typ.KeyType, typ.ValueType
+	}
+
+	return Any, Any
+}
+
 func (c *Checker) checkForStatement(node *ast.ForStatement) {
 	// Create new scope for loop
 	prevEnv := c.env
 	c.env = NewEnclosedEnvironment(prevEnv)
 
-	// Check loop variables
-	for _, variable := range node.Variables {
-		// For generic for loops, variables can be any type (index, value, etc.)
-		// For numeric for loops, variable is a number (loop counter)
-		if node.IsGeneric {
-			c.env.Set(variable.Value, Any)
-		} else {
-			c.env.Set(variable.Value, Number)
-		}
-	}
-
 	if node.IsGeneric {
 		// Generic for loop (for-in)
 		iterType := c.checkExpression(node.Iterator)
+
+		// Give the loop variables the key and value types of whatever is being
+		// iterated. Leaving them as 'any' means a method call on the element
+		// cannot be resolved, and codegen then picks the wrong call syntax.
+		keyType, valueType := c.iterationTypes(node.Iterator, iterType)
+		for i, variable := range node.Variables {
+			if i == 0 {
+				c.env.Set(variable.Value, keyType)
+			} else if i == 1 {
+				c.env.Set(variable.Value, valueType)
+			} else {
+				c.env.Set(variable.Value, Any)
+			}
+		}
+
 		// Check if iterator is iterable (array or table)
 		if _, isArray := iterType.(*ArrayType); !isArray {
 			if _, isTable := iterType.(*TableType); !isTable {
@@ -2366,6 +2942,10 @@ func (c *Checker) checkForStatement(node *ast.ForStatement) {
 			}
 		}
 	} else {
+		for _, variable := range node.Variables {
+			c.env.Set(variable.Value, Number)
+		}
+
 		// Numeric for loop
 		startType := c.checkExpression(node.Start)
 		endType := c.checkExpression(node.End)
@@ -2419,10 +2999,55 @@ func (c *Checker) checkBlockStatement(node *ast.BlockStatement) {
 	c.env = prevEnv
 }
 
-// checkAssignmentStatement checks an assignment statement
+// checkAssignmentStatement checks an assignment statement, which may have
+// several targets (a, b = b, a).
 func (c *Checker) checkAssignmentStatement(node *ast.AssignmentStatement) {
+	// One expression can fill several targets, as in `n, s = two()` where two()
+	// returns (number, string).
+	if len(node.Targets) > 1 && len(node.Values) == 1 {
+		valueType := c.checkExpression(node.Values[0])
+
+		if tuple, ok := valueType.(*TupleType); ok {
+			for i, target := range node.Targets {
+				var elem Type
+				if i < len(tuple.Elements) {
+					elem = tuple.Elements[i]
+				}
+				c.checkAssignmentTarget(node, target, elem)
+			}
+			return
+		}
+
+		// Anything else assigns to the first target and leaves the rest nil.
+		for i, target := range node.Targets {
+			if i == 0 {
+				c.checkAssignmentTarget(node, target, valueType)
+			} else {
+				c.checkAssignmentTarget(node, target, nil)
+			}
+		}
+		return
+	}
+
+	for i, target := range node.Targets {
+		var valueType Type
+		if i < len(node.Values) {
+			valueType = c.checkExpression(node.Values[i])
+		}
+		c.checkAssignmentTarget(node, target, valueType)
+	}
+
+	// Values beyond the target count still need checking for their own errors.
+	for i := len(node.Targets); i < len(node.Values); i++ {
+		c.checkExpression(node.Values[i])
+	}
+}
+
+// checkAssignmentTarget checks one target of an assignment. A nil valueType
+// means the target is filled from a multi-value expression and is not checked.
+func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target ast.Expression, valueType Type) {
 	// Check if trying to assign to a const variable
-	if ident, ok := node.Name.(*ast.Identifier); ok {
+	if ident, ok := target.(*ast.Identifier); ok {
 		if c.env.IsConst(ident.Value) {
 			c.addError(
 				fmt.Sprintf("Cannot assign to const variable '%s'", ident.Value),
@@ -2433,7 +3058,7 @@ func (c *Checker) checkAssignmentStatement(node *ast.AssignmentStatement) {
 	}
 
 	// Check if trying to assign to a readonly property
-	if dotExpr, ok := node.Name.(*ast.DotExpression); ok {
+	if dotExpr, ok := target.(*ast.DotExpression); ok {
 		leftType := c.checkExpression(dotExpr.Left)
 		if classType, ok := leftType.(*ClassType); ok {
 			if rightIdent, ok := dotExpr.Right.(*ast.Identifier); ok {
@@ -2462,8 +3087,10 @@ func (c *Checker) checkAssignmentStatement(node *ast.AssignmentStatement) {
 		}
 	}
 
-	targetType := c.checkExpression(node.Name)
-	valueType := c.checkExpression(node.Value)
+	targetType := c.checkExpression(target)
+	if valueType == nil {
+		return
+	}
 
 	if !valueType.IsAssignableTo(targetType) {
 		c.addError(
@@ -2695,6 +3322,23 @@ func (c *Checker) checkClassImplementsInterface(class *ClassType, iface *Interfa
 	for propName, ifaceProp := range iface.Properties {
 		classProp, ok := class.GetProperty(propName)
 		if !ok {
+			// A function-typed property and a method are different things in Lua:
+			// the property is a field called as f(...), the method takes an
+			// implicit self and is called as obj:f(...). Say so, because the two
+			// look identical at the call site.
+			if _, isFunc := ifaceProp.(*FunctionType); isFunc {
+				if _, hasMethod := class.GetMethod(propName); hasMethod {
+					c.addError(
+						fmt.Sprintf("Class '%s' implements '%s' as a method, but interface '%s' declares it as a function-typed property. "+
+							"A property is called as %s(...) while a method takes an implicit self and is called as obj:%s(...). "+
+							"Declare it in the interface as a method ('%s(...)') to match the class.",
+							class.Name, propName, iface.Name, propName, propName, propName),
+						token,
+					)
+					continue
+				}
+			}
+
 			c.addError(
 				fmt.Sprintf("Class '%s' does not implement property '%s' from interface '%s'",
 					class.Name, propName, iface.Name),
@@ -2886,6 +3530,9 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 		return c.checkGenericInstantiation(node)
 	case *ast.SpreadExpression:
 		return c.checkSpreadExpression(node)
+	case *ast.VarargExpression:
+		// Lua's '...' expands to a value list whose contents are not tracked.
+		return Any
 	case *ast.TypeAssertion:
 		return c.checkTypeAssertion(node)
 	case *ast.AwaitExpression:
@@ -3008,6 +3655,14 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 		}
 	}
 
+	// A table built only from spreads of records is itself a record: the merge
+	// of their fields, with later spreads winning, as in {...defaults, ...opts}.
+	if len(node.Pairs) == 0 && len(node.Values) > 0 {
+		if merged := c.mergeSpreadRecords(node.Values); merged != nil {
+			return merged
+		}
+	}
+
 	// Check if this is an array-style table (has sequential Values, or empty with no Pairs)
 	if len(node.Pairs) == 0 {
 		// Infer element type from the values
@@ -3048,6 +3703,40 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 	return &TableType{KeyType: Any, ValueType: Any}
 }
 
+// mergeSpreadRecords merges the fields of table values that are all spreads of
+// record-like tables. It returns nil when the values are anything else, leaving
+// the caller to infer an array type.
+func (c *Checker) mergeSpreadRecords(values []ast.Expression) Type {
+	properties := make(map[string]Type)
+	methods := make(map[string]*FunctionType)
+
+	for _, value := range values {
+		spread, ok := value.(*ast.SpreadExpression)
+		if !ok {
+			return nil
+		}
+
+		record, ok := c.checkExpression(spread.Value).(*InterfaceType)
+		if !ok {
+			return nil
+		}
+
+		for name, propType := range record.Properties {
+			properties[name] = propType
+		}
+		for name, methodType := range record.Methods {
+			methods[name] = methodType
+		}
+	}
+
+	return &InterfaceType{
+		Name:       "<table literal>",
+		Properties: properties,
+		Methods:    methods,
+		Extends:    []*InterfaceType{},
+	}
+}
+
 // checkFunctionExpression checks an anonymous function expression
 func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 	// Create new environment for function scope
@@ -3056,10 +3745,21 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 
 	// Resolve parameter types and add to environment
 	paramTypes := make([]Type, len(node.Parameters))
+	hasRestParam := false
+	optionalParams := make([]bool, len(node.Parameters))
 	for i, param := range node.Parameters {
 		paramType := c.resolveTypeExpression(param.Type)
+		if param.IsRest {
+			hasRestParam = true
+			if _, ok := paramType.(*ArrayType); !ok {
+				paramType = &ArrayType{ElementType: paramType}
+			}
+		}
+		optionalParams[i] = paramIsOptional(param, paramType)
 		paramTypes[i] = paramType
-		c.env.Set(param.Name.Value, paramType)
+		if param.Name != nil {
+			c.env.Set(param.Name.Value, paramType)
+		}
 	}
 
 	// Resolve return type
@@ -3091,9 +3791,11 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 
 	// Return the function type
 	return &FunctionType{
-		Parameters:    paramTypes,
-		ReturnType:    returnType,
-		GenericParams: []string{}, // Function expressions are not generic
+		Parameters:       paramTypes,
+		ReturnType:       returnType,
+		GenericParams:    []string{}, // Function expressions are not generic
+		HasRestParameter: hasRestParam,
+		OptionalParams:   optionalParams,
 	}
 }
 
@@ -3173,10 +3875,30 @@ func (c *Checker) checkInfixExpression(node *ast.InfixExpression) Type {
 func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 	funcType := c.checkExpression(node.Function)
 
+	// An optional call tolerates a missing callee, so unwrap the optional before
+	// checking the signature and make the result optional in turn.
+	if node.IsOptional {
+		if optType, ok := funcType.(*OptionalType); ok {
+			funcType = optType.BaseType
+		}
+		return &OptionalType{BaseType: c.checkCallWithType(node, funcType)}
+	}
+
+	return c.checkCallWithType(node, funcType)
+}
+
+// checkCallWithType checks a call whose callee type has already been resolved.
+func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Type {
+
 	// Check if it's a class type (constructor call)
 	if classType, ok := funcType.(*ClassType); ok {
+		// super(...) runs the parent's constructor from a subclass; that is
+		// exactly what an abstract base class exists for, so it is not an
+		// instantiation of one.
+		_, viaSuper := node.Function.(*ast.SuperExpression)
+
 		// Check if trying to instantiate an abstract class
-		if classType.IsAbstract {
+		if classType.IsAbstract && !viaSuper {
 			c.addError(
 				fmt.Sprintf("Cannot instantiate abstract class '%s'", classType.Name),
 				node.Token,
@@ -3207,8 +3929,9 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 			}
 		}
 
-		// Check argument count (skip if there are spread arguments)
-		if !hasSpread && len(node.Arguments) != len(fnType.Parameters) {
+		// Check argument count (skip if there are spread arguments). Trailing
+		// optional parameters may be omitted, as with any other call.
+		if !hasSpread && (len(node.Arguments) < requiredParamCount(fnType) || len(node.Arguments) > len(fnType.Parameters)) {
 			c.addError(
 				fmt.Sprintf("Constructor expects %d arguments, got %d",
 					len(fnType.Parameters), len(node.Arguments)),
@@ -3581,6 +4304,16 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		return resultType
 	}
 
+	// Record how the member resolved so codegen knows whether a call through
+	// this expression needs Lua's implicit-self ':' or a plain '.'.
+	resolved := func(dispatch string, resultType Type) Type {
+		// An explicit obj:method() in the source already states its intent.
+		if !node.IsMethodCall {
+			node.MethodDispatch = dispatch
+		}
+		return wrapIfOptional(resultType)
+	}
+
 	// Check if left type has the property
 	switch typ := actualLeftType.(type) {
 	case *ClassType:
@@ -3597,7 +4330,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return wrapIfOptional(propType)
+			return resolved(ast.DispatchPlain, propType)
 		}
 		// Check static methods
 		if methodType, ok := typ.GetStaticMethod(propertyName); ok {
@@ -3612,7 +4345,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return wrapIfOptional(methodType)
+			return resolved(ast.DispatchPlain, methodType)
 		}
 		// Check instance properties
 		if propType, ok := typ.GetProperty(propertyName); ok {
@@ -3624,7 +4357,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return wrapIfOptional(propType)
+			return resolved(ast.DispatchPlain, propType)
 		}
 		// Check instance methods
 		if methodType, ok := typ.GetMethod(propertyName); ok {
@@ -3636,7 +4369,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return wrapIfOptional(methodType)
+			return resolved(ast.DispatchSelf, methodType)
 		}
 		// In Lua, accessing a non-existent property returns nil at runtime
 		// Allow this for type guards and dynamic property access
@@ -3644,13 +4377,15 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		return wrapIfOptional(Any)
 
 	case *InterfaceType:
-		// Check properties
+		// Check properties. A function-typed property is a plain field holding a
+		// function (this is how the stdlib declares table.insert, math.floor, ...),
+		// so it is called with '.' and never takes an implicit self.
 		if propType, ok := typ.GetProperty(propertyName); ok {
-			return wrapIfOptional(propType)
+			return resolved(ast.DispatchPlain, propType)
 		}
 		// Check methods
 		if methodType, ok := typ.GetMethod(propertyName); ok {
-			return wrapIfOptional(methodType)
+			return resolved(ast.DispatchSelf, methodType)
 		}
 		c.addError(
 			fmt.Sprintf("Type '%s' has no property or method '%s'", typ.String(), propertyName),
@@ -3669,6 +4404,22 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		)
 		return wrapIfOptional(Any)
 
+	case *StringType:
+		// Lua exposes the string library through every string value's metatable,
+		// so s.upper() is really string.upper(s) and needs implicit-self syntax.
+		// The member type stays 'any': the declared StringLib signatures include
+		// the receiver and mark every parameter as required, so checking calls
+		// against them would reject correct code like s:match(pattern).
+		if lib, ok := c.interfaces["StringLib"]; ok {
+			if _, ok := lib.GetProperty(propertyName); ok {
+				return resolved(ast.DispatchSelf, Any)
+			}
+			if _, ok := lib.GetMethod(propertyName); ok {
+				return resolved(ast.DispatchSelf, Any)
+			}
+		}
+		return wrapIfOptional(Any)
+
 	default:
 		// For other types, allow any property access (could be table access)
 		return wrapIfOptional(Any)
@@ -3680,6 +4431,21 @@ func (c *Checker) checkIndexExpression(node *ast.IndexExpression) Type {
 	leftType := c.checkExpression(node.Left)
 	indexType := c.checkExpression(node.Index)
 
+	// Optional index access unwraps an optional receiver and makes the result
+	// optional, mirroring how '?.' is handled.
+	isLeftOptional := false
+	if optType, ok := leftType.(*OptionalType); ok {
+		isLeftOptional = true
+		leftType = optType.BaseType
+	}
+
+	result := func(resultType Type) Type {
+		if node.IsOptional || isLeftOptional {
+			return &OptionalType{BaseType: resultType}
+		}
+		return resultType
+	}
+
 	switch typ := leftType.(type) {
 	case *ArrayType:
 		// Index must be a number
@@ -3689,7 +4455,7 @@ func (c *Checker) checkIndexExpression(node *ast.IndexExpression) Type {
 				node.Token,
 			)
 		}
-		return typ.ElementType
+		return result(typ.ElementType)
 
 	case *TableType:
 		// Index must match key type
@@ -3699,7 +4465,7 @@ func (c *Checker) checkIndexExpression(node *ast.IndexExpression) Type {
 				node.Token,
 			)
 		}
-		return typ.ValueType
+		return result(typ.ValueType)
 
 	default:
 		// For other types, allow any index access
@@ -3789,13 +4555,19 @@ func (c *Checker) checkSpreadExpression(node *ast.SpreadExpression) Type {
 		return tableType
 	}
 
+	// A record-like table literal is typed structurally as an interface; those
+	// spread too, merging their key/value pairs.
+	if interfaceType, ok := valueType.(*InterfaceType); ok {
+		return interfaceType
+	}
+
 	// If it's Any, allow it
 	if valueType.Equals(Any) {
 		return Any
 	}
 
 	c.addError(
-		fmt.Sprintf("Cannot spread type '%s', expected array or table", valueType.String()),
+		fmt.Sprintf("Cannot spread type '%s', expected an array, table or record", valueType.String()),
 		node.Token,
 	)
 	return Any

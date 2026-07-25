@@ -196,8 +196,12 @@ func (l *Linter) lintStatement(stmt ast.Statement) {
 	case *ast.ExpressionStatement:
 		l.lintExpression(s.Expression)
 	case *ast.AssignmentStatement:
-		l.lintExpression(s.Name)
-		l.lintExpression(s.Value)
+		for _, target := range s.Targets {
+			l.lintExpression(target)
+		}
+		for _, value := range s.Values {
+			l.lintExpression(value)
+		}
 	case *ast.BlockStatement:
 		l.lintBlockStatement(s)
 	}

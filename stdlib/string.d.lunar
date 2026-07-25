@@ -3,21 +3,21 @@
 
 declare interface StringLib
 	-- String Searching
-	find: function(s: string, pattern: string, init: number, plain: boolean): number | nil
-	match: function(s: string, pattern: string, init: number): string | nil
+	find: function(s: string, pattern: string, init?: number, plain?: boolean): number | nil
+	match: function(s: string, pattern: string, init?: number): string | nil
 	gmatch: function(s: string, pattern: string): function(): string
-	gsub: function(s: string, pattern: string, repl: string | function(match: string): string, n: number): string
+	gsub: function(s: string, pattern: string, repl: string | function(match: string): string, n?: number): string
 
 	-- String Manipulation
-	sub: function(s: string, i: number, j: number): string
+	sub: function(s: string, i: number, j?: number): string
 	upper: function(s: string): string
 	lower: function(s: string): string
 	reverse: function(s: string): string
-	rep: function(s: string, n: number): string
+	rep: function(s: string, n: number, sep?: string): string
 
 	-- String Formatting
 	format: function(formatstring: string, ...: any): string
-	byte: function(s: string, i: number, j: number): number
+	byte: function(s: string, i?: number, j?: number): number
 	char: function(...: number): string
 
 	-- String Length

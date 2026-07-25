@@ -16,7 +16,7 @@ declare interface MathLib
 
 	-- Exponential and Logarithmic
 	exp: function(x: number): number
-	log: function(x: number, base: number): number
+	log: function(x: number, base?: number): number
 	log10: function(x: number): number
 	sqrt: function(x: number): number
 	pow: function(x: number, y: number): number
@@ -28,7 +28,7 @@ declare interface MathLib
 	modf: function(x: number): number
 
 	-- Random Numbers
-	random: function(m: number, n: number): number
+	random: function(m?: number, n?: number): number
 	randomseed: function(x: number): void
 
 	-- Limits and Constants

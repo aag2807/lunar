@@ -175,8 +175,8 @@ Lunar includes the following keywords:
 **Bitwise:**
 - `&` - Bitwise AND
 - `|` - Bitwise OR
-- `^` - Bitwise XOR
-- `~` - Bitwise NOT
+- `~` - Bitwise XOR (binary), Bitwise NOT (unary), as in Lua
+- `^` - Exponentiation, **not** XOR (Lua semantics)
 - `<<` - Left shift
 - `>>` - Right shift
 
@@ -221,7 +221,7 @@ For complete language documentation, see:
 ### Lua Targets
 ✅ **Multi-Target Support** - Compile for Lua 5.1, 5.2, 5.3, 5.4, or LuaJIT
 ✅ **Automatic Compatibility** - Integer division (`//`) and bitwise ops auto-convert per target
-✅ **Bitwise Operators** - `&`, `|`, `^`, `~`, `<<`, `>>` work across all Lua versions
+✅ **Bitwise Operators** - `&`, `|`, `~`, `<<`, `>>` work across all Lua versions
 ✅ **Tree Shaking** - Remove unused exports from bundles
 
 ### Lua Compatibility
@@ -643,7 +643,7 @@ local flags: number = 0x0F  -- 0b00001111
 -- Bitwise AND, OR, XOR
 local masked: number = flags & 0x0C     -- 0b00001100
 local combined: number = flags | 0x30   -- 0b00111111
-local flipped: number = flags ^ 0xFF    -- 0b11110000
+local flipped: number = flags ~ 0xFF     -- 0b11110000 (binary ~ is XOR)
 
 -- Bitwise NOT
 local inverted: number = ~flags         -- 0b11110000

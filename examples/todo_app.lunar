@@ -1,0 +1,181 @@
+-- A small todo list, written to exercise the language on something real:
+-- an enum, an interface, a class holding state, pattern matching for
+-- rendering, optional parameters and a tuple return.
+
+enum Priority
+    Low = 1
+    Medium = 2
+    High = 3
+end
+
+interface Task
+    id: number
+    title: string
+    done: boolean
+    priority: Priority
+end
+
+class TodoList
+    private tasks: Task[]
+    private nextId: number
+
+    constructor()
+        self.tasks = {}
+        self.nextId = 1
+    end
+
+    -- priority is optional; omitting it means Medium
+    add(title: string, priority: Priority?): number
+        local level: Priority = Priority.Medium
+        if priority ~= nil then
+            level = priority
+        end
+
+        local task: Task = {
+            id = self.nextId,
+            title = title,
+            done = false,
+            priority = level
+        }
+
+        table.insert(self.tasks, task)
+        self.nextId = self.nextId + 1
+
+        return task.id
+    end
+
+    find(id: number): Task?
+        for _, task in ipairs(self.tasks) do
+            if task.id == id then
+                return task
+            end
+        end
+        return nil
+    end
+
+    complete(id: number): boolean
+        local task = self.find(id)
+        if task == nil then
+            return false
+        end
+
+        task.done = true
+        return true
+    end
+
+    remove(id: number): boolean
+        for index, task in ipairs(self.tasks) do
+            if task.id == id then
+                table.remove(self.tasks, index)
+                return true
+            end
+        end
+        return false
+    end
+
+    pending(): Task[]
+        local out: Task[] = {}
+        for _, task in ipairs(self.tasks) do
+            if not task.done then
+                table.insert(out, task)
+            end
+        end
+        return out
+    end
+
+    -- returns done and total, so the caller can report progress
+    progress(): (number, number)
+        local done: number = 0
+        for _, task in ipairs(self.tasks) do
+            if task.done then
+                done = done + 1
+            end
+        end
+        return done, #self.tasks
+    end
+
+    render(): string
+        if #self.tasks == 0 then
+            return "  (nothing to do)"
+        end
+
+        local lines: string[] = {}
+        local ordered: Task[] = self.sortedByPriority()
+
+        for _, task in ipairs(ordered) do
+            local box: string = "[ ]"
+            if task.done then
+                box = "[x]"
+            end
+
+            table.insert(lines, string.format("  %s #%d %-24s %s",
+                box, task.id, task.title, labelFor(task.priority)))
+        end
+
+        return table.concat(lines, "\n")
+    end
+
+    private sortedByPriority(): Task[]
+        local copy: Task[] = {}
+        for _, task in ipairs(self.tasks) do
+            table.insert(copy, task)
+        end
+
+        table.sort(copy, function(a: Task, b: Task): boolean
+            if a.priority == b.priority then
+                return a.id < b.id
+            end
+            return a.priority > b.priority
+        end)
+
+        return copy
+    end
+end
+
+function labelFor(priority: Priority): string
+    return match priority with
+        | 3 -> "!high"
+        | 2 -> "~medium"
+        | 1 -> ".low"
+        | _ -> "?"
+    end
+end
+
+function banner(title: string): void
+    print("")
+    print(title)
+    print(string.rep("-", #title))
+end
+
+-- Demo ------------------------------------------------------------------
+
+local list: TodoList = TodoList()
+
+local groceries: number = list.add("Buy groceries")
+local deploy: number = list.add("Ship the release", Priority.High)
+list.add("Water the plants", Priority.Low)
+local review: number = list.add("Review the pull request", Priority.High)
+
+banner("All tasks")
+print(list.render())
+
+list.complete(deploy)
+list.complete(groceries)
+
+banner("After completing two")
+print(list.render())
+
+local done: number, total: number = list.progress()
+print("")
+print(string.format("  %d of %d done, %d still pending", done, total, #list.pending()))
+
+list.remove(review)
+
+banner("After dropping the review")
+print(list.render())
+
+local missing = list.find(99)
+if missing == nil then
+    print("")
+    print("  task 99: not found")
+end

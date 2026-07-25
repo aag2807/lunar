@@ -72,25 +72,41 @@ end
 	}
 }
 
-func TestRestParameterMustBeArray(t *testing.T) {
-	input := `
-function bad(...args: number): void
-end
-`
+// A rest parameter may be annotated with the element type it collects or with
+// the array itself. Both spellings mean the same thing, and the stdlib
+// declarations are written in the element form (`...: any`).
+func TestRestParameterAcceptsElementOrArrayType(t *testing.T) {
+	for _, input := range []string{
+		"function f(...args: number): void\nend",
+		"function f(...args: number[]): void\nend",
+	} {
+		l := lexer.New(input)
+		p := parser.New(l)
+		statements := p.Parse()
 
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
+		if len(p.Errors()) > 0 {
+			t.Fatalf("Parser errors: %v", p.Errors())
+		}
 
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
+		checker := NewChecker()
+		for _, err := range checker.Check(statements) {
+			t.Errorf("unexpected type error for %q: %s", input, err.Message)
+		}
 
-	checker := NewChecker()
-	errors := checker.Check(statements)
+		typ, ok := checker.GetEnv().Get("f")
+		if !ok {
+			t.Fatalf("f not registered for %q", input)
+		}
 
-	if len(errors) == 0 {
-		t.Error("Expected error for rest parameter not being array type")
+		fnType := typ.(*FunctionType)
+		if !fnType.HasRestParameter {
+			t.Errorf("expected a rest parameter for %q", input)
+		}
+
+		if _, isArray := fnType.Parameters[0].(*ArrayType); !isArray {
+			t.Errorf("expected the rest parameter to collect an array for %q, got %s",
+				input, fnType.Parameters[0].String())
+		}
 	}
 }
 

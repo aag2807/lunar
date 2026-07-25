@@ -1,0 +1,9 @@
+export function double(n: number): number
+    return n * 2
+end
+
+export function triple(n: number): number
+    return n * 3
+end
+
+export const VERSION: string = "1.0"

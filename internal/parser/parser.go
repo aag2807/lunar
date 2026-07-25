@@ -33,7 +33,8 @@ var precedences = map[lexer.TokenType]int{
 	lexer.NULLISH_COALESCE: OR_PREC,   // ?? has same precedence as ||
 	lexer.OR:               OR_PREC,
 	lexer.PIPE:             BITWISE_OR,
-	lexer.CARET:            BITWISE_XOR,
+	lexer.CARET:            PRODUCT, // exponentiation, as in Lua
+	lexer.TILDE:            BITWISE_XOR,
 	lexer.AMPERSAND:        BITWISE_AND,
 	lexer.AND:              AND_PREC,
 	lexer.EQ:               EQUALS,
@@ -136,12 +137,15 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.PIPE, p.parseInfixExpression)
 	p.registerInfix(lexer.PIPE_OP, p.parsePipeExpression)
 	p.registerInfix(lexer.CARET, p.parseInfixExpression)
+	p.registerInfix(lexer.TILDE, p.parseInfixExpression)
 	p.registerInfix(lexer.AND, p.parseInfixExpression)
 	p.registerInfix(lexer.OR, p.parseInfixExpression)
 	p.registerInfix(lexer.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(lexer.LPAREN, p.parseCallExpression)
 	p.registerInfix(lexer.DOT, p.parseDotExpression)
 	p.registerInfix(lexer.OPTIONAL_CHAIN, p.parseDotExpression)
+	p.registerInfix(lexer.COLON, p.parseMethodCallExpression)
+	p.registerInfix(lexer.QUESTION, p.parseOptionalIndexExpression)
 	p.registerInfix(lexer.CONCAT, p.parseInfixExpression)
 	p.registerInfix(lexer.NULLISH_COALESCE, p.parseInfixExpression)
 	p.registerInfix(lexer.AS, p.parseTypeAssertion)
@@ -515,6 +519,17 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 }
 
 func (p *Parser) parseDotExpression(left ast.Expression) ast.Expression {
+	// '?.' followed by '(' is an optional call: fn?.(args)
+	if p.curTokenIs(lexer.OPTIONAL_CHAIN) && p.peekTokenIs(lexer.LPAREN) {
+		p.nextToken() // move onto '('
+		call, ok := p.parseCallExpression(left).(*ast.CallExpression)
+		if !ok {
+			return nil
+		}
+		call.IsOptional = true
+		return call
+	}
+
 	exp := &ast.DotExpression{
 		Token:      p.curToken,
 		Left:       left,
@@ -522,11 +537,79 @@ func (p *Parser) parseDotExpression(left ast.Expression) ast.Expression {
 	}
 
 	// Right side of dot expression must be an identifier - allows context-aware keywords
-	if !p.expectPeekIdentOrContextual() {
+	if !p.expectPeekFieldName() {
 		return nil
 	}
 
-	exp.Right = p.parseIdentifierOrContextual()
+	exp.Right = p.parseFieldName()
+
+	return exp
+}
+
+// parseMethodCallExpression handles Lua's method call syntax (obj:method(...)).
+// It is only reached when isColonMethodCall has confirmed the ':' starts a method
+// call, so the receiver is kept as-is and the call itself is parsed by the caller.
+func (p *Parser) parseMethodCallExpression(left ast.Expression) ast.Expression {
+	exp := &ast.DotExpression{
+		Token:        p.curToken,
+		Left:         left,
+		IsMethodCall: true,
+	}
+
+	if !p.expectPeekFieldName() {
+		return nil
+	}
+
+	exp.Right = p.parseFieldName()
+
+	return exp
+}
+
+// isColonMethodCall reports whether a ':' in peek position starts a Lua method
+// call (obj:method(...)) rather than a type annotation, a match arm's type
+// pattern, or the ':' of a conditional type. It only says yes for the exact
+// shape ': name (', so every other use of ':' keeps its current meaning.
+func (p *Parser) isColonMethodCall() bool {
+	if !p.peekTokenIs(lexer.COLON) {
+		return false
+	}
+
+	state := p.SaveState()
+	defer p.RestoreState(state)
+
+	p.nextToken() // curToken = ':'
+	if !lexer.CanBeFieldName(p.peekToken) {
+		return false
+	}
+
+	p.nextToken() // curToken = method name
+	return p.peekTokenIs(lexer.LPAREN)
+}
+
+// isOptionalIndex reports whether a '?' in peek position starts an optional
+// index access (items?[1]).
+func (p *Parser) isOptionalIndex() bool {
+	if !p.peekTokenIs(lexer.QUESTION) {
+		return false
+	}
+
+	state := p.SaveState()
+	defer p.RestoreState(state)
+
+	p.nextToken() // curToken = '?'
+	return p.peekTokenIs(lexer.LBRACKET)
+}
+
+// parseOptionalIndexExpression parses optional index access: items?[1].
+func (p *Parser) parseOptionalIndexExpression(left ast.Expression) ast.Expression {
+	if !p.expectPeek(lexer.LBRACKET) {
+		return nil
+	}
+
+	exp := p.parseIndexExpression(left)
+	if indexExpr, ok := exp.(*ast.IndexExpression); ok {
+		indexExpr.IsOptional = true
+	}
 
 	return exp
 }
@@ -568,6 +651,24 @@ func (p *Parser) peekError(t lexer.TokenType) {
 }
 
 func (p *Parser) peekPrecedence() int {
+	// ':' only binds as an operator when it starts a method call; everywhere else
+	// (type annotations, conditional types, match patterns) it must stay inert.
+	if p.peekToken.Type == lexer.COLON {
+		if p.isColonMethodCall() {
+			return DOT
+		}
+		return LOWEST
+	}
+
+	// '?' binds only in '?[', the optional index operator. Optional types and
+	// conditional types use '?' too, and must not be treated as operators.
+	if p.peekToken.Type == lexer.QUESTION {
+		if p.isOptionalIndex() {
+			return CALL
+		}
+		return LOWEST
+	}
+
 	if p, ok := precedences[p.peekToken.Type]; ok {
 		return p
 	}
@@ -654,9 +755,11 @@ func (p *Parser) parseGenericOrLessThan(left ast.Expression) ast.Expression {
 // tryParseGenericType attempts to parse generic type arguments
 // Returns nil if this isn't a generic type instantiation
 func (p *Parser) tryParseGenericType(baseExpr ast.Expression) ast.Expression {
-	// Save current position in case we need to backtrack
+	// Save the full parser state, lexer included: backtracking by restoring the
+	// two lookahead tokens alone would silently drop every token the attempt
+	// pulled from the lexer, turning `x < 10 then` into `x < 10` + lost `then`.
+	startState := p.SaveState()
 	startToken := p.curToken
-	startPeek := p.peekToken
 
 	// Current token is '<', move past it
 	p.nextToken()
@@ -667,15 +770,13 @@ func (p *Parser) tryParseGenericType(baseExpr ast.Expression) ast.Expression {
 	// Parse first type argument
 	if !p.isTypeToken(p.curToken.Type) {
 		// Not a type token, this is a less-than operator
-		p.curToken = startToken
-		p.peekToken = startPeek
+		p.RestoreState(startState)
 		return nil
 	}
 
 	firstArg := p.parseType()
 	if firstArg == nil {
-		p.curToken = startToken
-		p.peekToken = startPeek
+		p.RestoreState(startState)
 		return nil
 	}
 	typeArgs = append(typeArgs, firstArg)
@@ -686,8 +787,7 @@ func (p *Parser) tryParseGenericType(baseExpr ast.Expression) ast.Expression {
 		p.nextToken() // move to next type
 		arg := p.parseType()
 		if arg == nil {
-			p.curToken = startToken
-			p.peekToken = startPeek
+			p.RestoreState(startState)
 			return nil
 		}
 		typeArgs = append(typeArgs, arg)
@@ -695,8 +795,7 @@ func (p *Parser) tryParseGenericType(baseExpr ast.Expression) ast.Expression {
 
 	// Must end with '>' (or >> which we split for nested generics)
 	if !p.peekTokenIs(lexer.GT) && !p.peekTokenIs(lexer.RIGHT_SHIFT) {
-		p.curToken = startToken
-		p.peekToken = startPeek
+		p.RestoreState(startState)
 		return nil
 	}
 
@@ -747,6 +846,12 @@ func (p *Parser) parsePrefixExpression() ast.Expression {
 }
 
 func (p *Parser) parseSpreadExpression() ast.Expression {
+	// A bare '...' is Lua's vararg expression; only '...' followed by an operand
+	// is a spread, as in {...items}.
+	if !p.peekStartsExpression() {
+		return &ast.VarargExpression{Token: p.curToken}
+	}
+
 	expression := &ast.SpreadExpression{
 		Token: p.curToken,
 	}
@@ -755,6 +860,12 @@ func (p *Parser) parseSpreadExpression() ast.Expression {
 	expression.Value = p.parseExpression(LOWEST)
 
 	return expression
+}
+
+// peekStartsExpression reports whether the next token could begin an operand.
+func (p *Parser) peekStartsExpression() bool {
+	_, ok := p.prefixParseFns[p.peekToken.Type]
+	return ok
 }
 
 func (p *Parser) parseAwaitExpression() ast.Expression {
@@ -909,6 +1020,9 @@ func (p *Parser) parseType() ast.Expression {
 	case lexer.LPAREN:
 		// Could be tuple type or function type
 		return p.parseTupleOrFunctionType()
+	case lexer.FUNCTION:
+		// function(params): Return
+		return p.parseKeywordFunctionType()
 	case lexer.LBRACE:
 		// Mapped type: { [K in T]: U }
 		return p.parseMappedType()
@@ -1093,6 +1207,8 @@ func (p *Parser) parseSimpleType() ast.Expression {
 	switch p.curToken.Type {
 	case lexer.LPAREN:
 		return p.parseTupleOrFunctionType()
+	case lexer.FUNCTION:
+		return p.parseKeywordFunctionType()
 	case lexer.TABLE:
 		return p.parseTableType()
 	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
@@ -1100,6 +1216,39 @@ func (p *Parser) parseSimpleType() ast.Expression {
 	default:
 		return nil
 	}
+}
+
+// parseKeywordFunctionType parses the `function(params): Return` type form used
+// by declaration files, as in `insert: function(t: any, pos: number?): void`.
+// Without it the whole annotation was skipped and the member silently became
+// 'any' -- and the parameter names leaked out as extra interface properties.
+func (p *Parser) parseKeywordFunctionType() ast.Expression {
+	funcType := &ast.FunctionType{
+		Token: p.curToken, // 'function'
+	}
+
+	// A bare `function` means any callable; leaving Parameters nil marks it as
+	// unconstrained, which an empty (but non-nil) list would not.
+	if !p.peekTokenIs(lexer.LPAREN) {
+		return funcType
+	}
+
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+
+	funcType.Parameters = p.parseFunctionParameters()
+	if funcType.Parameters == nil {
+		return nil
+	}
+
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // consume ':'
+		p.nextToken() // move to return type
+		funcType.ReturnType = p.parseType()
+	}
+
+	return funcType
 }
 
 func (p *Parser) parseTypeSuffix(baseType ast.Expression) ast.Expression {
@@ -1298,6 +1447,8 @@ func (p *Parser) parseSimpleTypeWithSuffixes(skipOptional bool) ast.Expression {
 	switch p.curToken.Type {
 	case lexer.LPAREN:
 		return p.parseTupleOrFunctionType()
+	case lexer.FUNCTION:
+		return p.parseKeywordFunctionType()
 	case lexer.TABLE:
 		typeExpr = p.parseTableType()
 	case lexer.KEYOF:
@@ -1451,6 +1602,9 @@ func (p *Parser) parseNonUnionIntersectionType(skipOptional bool) ast.Expression
 	case lexer.LPAREN:
 		// Could be tuple type or function type
 		return p.parseTupleOrFunctionType()
+	case lexer.FUNCTION:
+		// function(params): Return, e.g. `string | function(s: string): string`
+		return p.parseKeywordFunctionType()
 	case lexer.TABLE:
 		// table<K, V>
 		typeExpr = p.parseTableType()
@@ -1734,6 +1888,31 @@ func (p *Parser) expectPeekIdentOrContextual() bool {
 	return false
 }
 
+// expectPeekFieldName advances when the next token can serve as a field name.
+// Used where a name follows '.' or ':', which is unambiguous enough to accept
+// any Lunar keyword Lua does not reserve (s:match(...), event.type, ...).
+func (p *Parser) expectPeekFieldName() bool {
+	if lexer.CanBeFieldName(p.peekToken) {
+		p.nextToken()
+		return true
+	}
+
+	p.peekError(lexer.IDENT)
+	return false
+}
+
+// parseFieldName builds an identifier from a field-name token.
+func (p *Parser) parseFieldName() *ast.Identifier {
+	if !lexer.CanBeFieldName(p.curToken) {
+		return nil
+	}
+
+	return &ast.Identifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
+}
+
 func (p *Parser) parseIdentifierOrContextual() *ast.Identifier {
 	if p.curTokenIsIdentOrContextual() {
 		return &ast.Identifier{
@@ -1770,12 +1949,28 @@ func (p *Parser) parseParameter() *ast.Parameter {
 		}
 	}
 
-	// Check for rest parameter (...name)
+	// Check for rest parameter (...name) or Lua's bare vararg (... / ...: T)
 	if p.curTokenIs(lexer.ELLIPSIS) {
 		param.IsRest = true
-		if !p.expectPeek(lexer.IDENT) {
-			return nil
+
+		if !p.peekTokenIsIdentOrContextual() {
+			// Bare vararg: the name stays "..." so it passes straight through to Lua.
+			param.Name = &ast.Identifier{Token: p.curToken, Value: "..."}
+
+			if p.peekTokenIs(lexer.COLON) {
+				p.nextToken() // consume :
+				p.nextToken() // move onto type
+				param.Type = p.parseType()
+			} else if p.isTypeToken(p.peekToken.Type) {
+				// Unnamed typed vararg written without a colon, as in `...any`.
+				p.nextToken()
+				param.Type = p.parseType()
+			}
+
+			return param
 		}
+
+		p.nextToken()
 	}
 
 	param.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
@@ -1934,6 +2129,12 @@ func (p *Parser) parseFunctionExpression() ast.Expression {
 }
 
 func (p *Parser) parseBlockStatement() *ast.BlockStatement {
+	return p.parseBlockStatementUntil(lexer.END)
+}
+
+// parseBlockStatementUntil parses statements up to a terminator, which is 'end'
+// for most blocks and 'until' for a repeat loop.
+func (p *Parser) parseBlockStatementUntil(terminator lexer.TokenType) *ast.BlockStatement {
 	block := &ast.BlockStatement{
 		Token:      p.curToken,
 		Statements: []ast.Statement{},
@@ -1941,7 +2142,7 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 
 	p.nextToken()
 
-	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+	for !p.curTokenIs(terminator) && !p.curTokenIs(lexer.EOF) {
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
@@ -1982,16 +2183,44 @@ func (p *Parser) parseExpressionStatement() ast.Statement {
 	// Try to parse as expression first
 	expr := p.parseExpression(LOWEST)
 
+	// Lua allows several assignment targets: a, b = b, a
+	targets := []ast.Expression{expr}
+	if p.peekTokenIs(lexer.COMMA) {
+		state := p.SaveState()
+
+		for p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // consume ','
+			p.nextToken() // move to next target
+			targets = append(targets, p.parseExpression(LOWEST))
+		}
+
+		if !p.peekTokenIs(lexer.ASSIGN) {
+			// Not an assignment after all; leave the comma to the caller.
+			p.RestoreState(state)
+			return &ast.ExpressionStatement{
+				Token:      p.curToken,
+				Expression: expr,
+			}
+		}
+	}
+
 	// Check if this is an assignment
 	if p.peekTokenIs(lexer.ASSIGN) {
 		assignToken := p.peekToken
 		p.nextToken() // consume '='
-		p.nextToken() // move to value expression
+		p.nextToken() // move to first value expression
+
+		values := []ast.Expression{p.parseExpression(LOWEST)}
+		for p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // consume ','
+			p.nextToken() // move to next value
+			values = append(values, p.parseExpression(LOWEST))
+		}
 
 		return &ast.AssignmentStatement{
-			Token: assignToken,
-			Name:  expr,
-			Value: p.parseExpression(LOWEST),
+			Token:   assignToken,
+			Targets: targets,
+			Values:  values,
 		}
 	}
 
@@ -2011,11 +2240,22 @@ func (p *Parser) parseStatement() ast.Statement {
 	case lexer.RETURN:
 		return p.parseReturnStatement()
 	case lexer.LOCAL, lexer.CONST:
+		// `local function f() ... end` is a function declaration, not a variable.
+		if p.curTokenIs(lexer.LOCAL) && p.peekTokenIs(lexer.FUNCTION) {
+			p.nextToken() // move onto 'function'
+			fn := p.parseFunctionDeclaration()
+			if fn != nil {
+				fn.IsLocal = true
+			}
+			return fn
+		}
 		return p.parseVariableDeclaration()
 	case lexer.IF:
 		return p.parseIfStatement()
 	case lexer.WHILE:
 		return p.parseWhileStatement()
+	case lexer.REPEAT:
+		return p.parseRepeatStatement()
 	case lexer.FOR:
 		return p.parseForStatement()
 	case lexer.DO:
@@ -2114,6 +2354,23 @@ func (p *Parser) parseWhileStatement() *ast.WhileStatement {
 
 	// Parse body
 	stmt.Body = p.parseBlockStatement()
+
+	return stmt
+}
+
+func (p *Parser) parseRepeatStatement() *ast.RepeatStatement {
+	stmt := &ast.RepeatStatement{Token: p.curToken}
+
+	// The body runs up to 'until' rather than 'end'.
+	stmt.Body = p.parseBlockStatementUntil(lexer.UNTIL)
+
+	if !p.curTokenIs(lexer.UNTIL) {
+		p.addError(fmt.Sprintf("expected 'until' to close repeat, got %s", p.curToken.Type), p.curToken)
+		return nil
+	}
+
+	p.nextToken() // move onto the condition
+	stmt.Condition = p.parseExpression(LOWEST)
 
 	return stmt
 }
@@ -2392,7 +2649,10 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 				method.IsAbstract = isAbstract
 				method.Visibility = visibility
 				class.Methods = append(class.Methods, method)
-				if method.Body != nil && len(method.Body.Statements) > 0 {
+				// Advance past the method's own 'end'. An empty body still has
+				// one, so testing for statements left the parser sitting on it
+				// and ended the class early.
+				if method.Body != nil {
 					p.nextToken()
 				}
 			} else {
@@ -2414,7 +2674,10 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 				method.IsAbstract = isAbstract
 				method.Visibility = visibility
 				class.Methods = append(class.Methods, method)
-				if method.Body != nil && len(method.Body.Statements) > 0 {
+				// Advance past the method's own 'end'. An empty body still has
+				// one, so testing for statements left the parser sitting on it
+				// and ended the class early.
+				if method.Body != nil {
 					p.nextToken()
 				}
 			} else {
@@ -2443,9 +2706,11 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 				method.IsAbstract = isAbstract
 				method.Visibility = visibility
 				class.Methods = append(class.Methods, method)
-				// Only advance past 'end' if method has statements (i.e., has a body)
-				if method.Body != nil && len(method.Body.Statements) > 0 {
-					p.nextToken() // Advance past method's end
+				// Advance past the method's own 'end'. An empty body still has
+				// one, so testing for statements left the parser sitting on it
+				// and ended the class early.
+				if method.Body != nil {
+					p.nextToken()
 				}
 			} else {
 				p.nextToken()
@@ -2502,10 +2767,42 @@ func (p *Parser) parseMethodDeclaration(isAbstract bool) *ast.FunctionDeclaratio
 		method.ReturnType = p.parseType()
 	}
 
-	// Parse body - parseBlockStatement will handle both cases
+	method.IsAbstract = isAbstract
+
+	// An abstract method declares a signature and stops there; parsing a body
+	// would swallow the members that follow it, up to the class's own 'end'.
+	// A body written anyway is still consumed, so the checker can report it
+	// rather than the parser choking on the leftovers.
+	if isAbstract && !p.abstractMethodHasBody() {
+		return method
+	}
+
 	method.Body = p.parseBlockStatement()
 
 	return method
+}
+
+// abstractMethodHasBody reports whether an abstract method signature is
+// followed by statements rather than by the next member or the class's end.
+func (p *Parser) abstractMethodHasBody() bool {
+	switch p.peekToken.Type {
+	case lexer.END, lexer.EOF, lexer.CONSTRUCTOR, lexer.PUBLIC, lexer.PRIVATE,
+		lexer.PROTECTED, lexer.STATIC, lexer.ABSTRACT, lexer.READONLY, lexer.GET, lexer.SET:
+		return false
+	}
+
+	if !lexer.CanBeFieldName(p.peekToken) {
+		// A keyword Lua reserves starts a statement, so this is a body.
+		return true
+	}
+
+	// A name followed by '(' or ':' is the next method or property.
+	state := p.SaveState()
+	defer p.RestoreState(state)
+
+	p.nextToken()
+
+	return !p.peekTokenIs(lexer.LPAREN) && !p.peekTokenIs(lexer.COLON)
 }
 
 func (p *Parser) parseConstructorDeclaration() *ast.ConstructorDeclaration {
@@ -3278,8 +3575,9 @@ func (p *Parser) parseStructPattern() ast.Pattern {
 
 	// Parse fields
 	for {
-		// Expect field name
-		if !p.curTokenIs(lexer.IDENT) {
+		// Expect field name. Lunar keywords that Lua does not reserve are valid
+		// field names, so discriminated unions can match on { type: "click" }.
+		if !lexer.CanBeFieldName(p.curToken) {
 			p.addError(fmt.Sprintf("expected field name in struct pattern, got %s", p.curToken.Type), p.curToken)
 			return nil
 		}

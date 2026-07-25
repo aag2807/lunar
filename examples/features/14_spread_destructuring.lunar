@@ -1,0 +1,19 @@
+-- Spread and rest
+function sum(...numbers: number): number
+    local total: number = 0
+    for _, n in ipairs(numbers) do
+        total = total + n
+    end
+    return total
+end
+
+local base: number[] = {1, 2, 3}
+local extended: number[] = {0, ...base, 4}
+
+local defaults = {retries = 3, timeout = 30}
+local overrides = {timeout = 60}
+local settings = {...defaults, ...overrides}
+
+print(sum(1, 2, 3, 4))
+print(#extended, extended[1], extended[5])
+print(settings.retries, settings.timeout)

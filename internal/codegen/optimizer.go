@@ -61,7 +61,9 @@ func (o *Optimizer) optimizeStatement(stmt ast.Statement) ast.Statement {
 		return node
 
 	case *ast.AssignmentStatement:
-		node.Value = o.optimizeExpression(node.Value)
+		for i, value := range node.Values {
+			node.Values[i] = o.optimizeExpression(value)
+		}
 		return node
 
 	case *ast.IfStatement:

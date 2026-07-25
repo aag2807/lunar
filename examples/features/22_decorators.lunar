@@ -1,0 +1,14 @@
+-- Decorators
+function logged(fn: any): any
+    return function(...: any): any
+        print("calling")
+        return fn(...)
+    end
+end
+
+@logged
+function work(n: number): number
+    return n + 1
+end
+
+print(work(1))

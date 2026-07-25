@@ -1,0 +1,25 @@
+-- Pattern matching with literals, guards, structs, wildcards
+type Shape = any
+
+function area(s: Shape): number
+    return match s with
+        | { kind: "circle", radius: r } -> 3.14159 * r * r
+        | { kind: "rect", w: w, h: h } -> w * h
+        | _ -> 0
+    end
+end
+
+function grade(score: number): string
+    return match score with
+        | 100 -> "perfect"
+        | s when s >= 90 -> "A"
+        | s when s >= 80 -> "B"
+        | s when s >= 70 -> "C"
+        | _ -> "F"
+    end
+end
+
+print(area({kind = "circle", radius = 2}))
+print(area({kind = "rect", w = 3, h = 4}))
+print(area({kind = "unknown"}))
+print(grade(100), grade(95), grade(85), grade(50))

@@ -217,7 +217,7 @@ func (p *ExampleLinterPlugin) checkMagicNumbers(stmt ast.Statement, context *Lin
 func (p *ExampleLinterPlugin) checkConstUsage(stmt ast.Statement, context *LintContext, issues *[]LintIssue) {
 	// Check if variable should be const
 	if assign, ok := stmt.(*ast.AssignmentStatement); ok {
-		if ident, ok := assign.Name.(*ast.Identifier); ok {
+		if ident, ok := assign.Name().(*ast.Identifier); ok {
 			// If variable is never reassigned, suggest const
 			*issues = append(*issues, LintIssue{
 				Rule:        "prefer-const",

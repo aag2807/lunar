@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -8,6 +9,42 @@ import (
 	"strings"
 	"testing"
 )
+
+// compilerBin is the compiler built once for the whole package by TestMain, so
+// the tests do not depend on a binary having been left in the project root.
+var compilerBin string
+
+func TestMain(m *testing.M) {
+	code, err := runIntegrationTests(m)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Exit(code)
+}
+
+func runIntegrationTests(m *testing.M) (int, error) {
+	tmpDir, err := ioutil.TempDir("", "lunar-compiler")
+	if err != nil {
+		return 0, fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get working directory: %w", err)
+	}
+	projectRoot := filepath.Join(wd, "../..")
+
+	compilerBin = filepath.Join(tmpDir, "lunar")
+	build := exec.Command("go", "build", "-o", compilerBin, "./cmd/lunar")
+	build.Dir = projectRoot
+	if output, err := build.CombinedOutput(); err != nil {
+		return 0, fmt.Errorf("failed to build compiler: %w\n%s", err, output)
+	}
+
+	return m.Run(), nil
+}
 
 // TestCompileBasicTypes tests compilation of basic type annotations
 func TestCompileBasicTypes(t *testing.T) {
@@ -39,7 +76,6 @@ func testCompile(t *testing.T, filename string, withSourceMap bool) {
 	projectRoot := filepath.Join(wd, "../..")
 	inputFile := filepath.Join(projectRoot, "test/integration/testdata", filename)
 	outputFile := strings.TrimSuffix(inputFile, ".lunar") + ".lua"
-	compilerPath := filepath.Join(projectRoot, "lunar")
 
 	// Clean up output files before test
 	defer func() {
@@ -54,7 +90,7 @@ func testCompile(t *testing.T, filename string, withSourceMap bool) {
 	}
 
 	// Run compiler
-	cmd := exec.Command(compilerPath, args...)
+	cmd := exec.Command(compilerBin, args...)
 	output, err := cmd.CombinedOutput()
 
 	if err != nil {
@@ -104,14 +140,6 @@ func testCompile(t *testing.T, filename string, withSourceMap bool) {
 
 // TestErrorMessages tests that type errors produce helpful messages
 func TestErrorMessages(t *testing.T) {
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get working directory: %v", err)
-	}
-
-	projectRoot := filepath.Join(wd, "../..")
-	compilerPath := filepath.Join(projectRoot, "lunar")
-
 	// Create a temporary file with a type error
 	tmpDir, err := ioutil.TempDir("", "lunar-test")
 	if err != nil {
@@ -129,7 +157,7 @@ local result: number = myVariabl + 1
 	}
 
 	// Run compiler (should fail)
-	cmd := exec.Command(compilerPath, errorFile)
+	cmd := exec.Command(compilerBin, errorFile)
 	output, err := cmd.CombinedOutput()
 
 	if err == nil {

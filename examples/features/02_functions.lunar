@@ -1,0 +1,39 @@
+-- Functions: params, optional, defaults, multiple returns, varargs
+function greet(name: string): string
+    return "Hello, " .. name
+end
+
+function withOptional(a: number, b: number?): number
+    if b == nil then
+        return a
+    end
+    return a + b
+end
+
+function divide(a: number, b: number): (number, string)
+    if b == 0 then
+        return 0, "division by zero"
+    end
+    return a / b, "ok"
+end
+
+function collect(...: any): number
+    local n: number = 0
+    for _, _v in ipairs({...}) do
+        n = n + 1
+    end
+    return n
+end
+
+local anon = function(x: number): number
+    return x * x
+end
+
+local arrow = (x: number) => x + 1
+
+print(greet("world"))
+print(withOptional(1), withOptional(1, 2))
+local q: number, msg: string = divide(10, 2)
+print(q, msg)
+print(collect(1, 2, 3))
+print(anon(4), arrow(4))

@@ -1,0 +1,15 @@
+-- String handling and template literals
+local name: string = "lunar"
+local greeting: string = `Hello, ${name}!`
+local upper: string = name:upper()
+local part: string = name:sub(1, 3)
+local joined: string = table.concat({"a", "b", "c"}, "-")
+
+print(greeting)
+print(upper, part, joined)
+print(#name, name:len())
+print(string.format("%s has %d chars", name, #name))
+
+for word in ("one two three"):gmatch("%a+") do
+    print(word)
+end

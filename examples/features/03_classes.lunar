@@ -1,0 +1,40 @@
+-- Classes: fields, visibility, methods, statics, inheritance, super
+class Animal
+    protected name: string
+    private legs: number
+
+    constructor(name: string, legs: number)
+        self.name = name
+        self.legs = legs
+    end
+
+    describe(): string
+        return self.name .. " has " .. tostring(self.legs) .. " legs"
+    end
+
+    speak(): string
+        return "..."
+    end
+
+    static kingdom(): string
+        return "Animalia"
+    end
+end
+
+class Dog extends Animal
+    constructor(name: string)
+        super(name, 4)
+    end
+
+    speak(): string
+        return "Woof"
+    end
+end
+
+local a: Animal = Animal("generic", 2)
+local d: Dog = Dog("Rex")
+
+print(a.describe())
+print(d.describe())
+print(a.speak(), d.speak())
+print(Animal.kingdom())

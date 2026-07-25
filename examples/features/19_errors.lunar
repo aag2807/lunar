@@ -1,0 +1,13 @@
+-- Error handling with pcall/error
+function risky(n: number): number
+    if n < 0 then
+        error("negative input")
+    end
+    return n * 2
+end
+
+local ok: boolean, result: any = pcall(risky, 5)
+print(ok, result)
+
+local failed: boolean, err: any = pcall(risky, -1)
+print(failed, err)

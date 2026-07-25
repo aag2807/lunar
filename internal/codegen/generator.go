@@ -5,6 +5,7 @@ import (
 	"lunar/internal/ast"
 	"lunar/internal/lexer"
 	"lunar/internal/sourcemap"
+	"sort"
 	"strings"
 )
 
@@ -15,23 +16,27 @@ type Generator struct {
 	currentLine      int
 	currentColumn    int
 	sourceFile       string
-	classes          map[string]bool              // Track defined classes for constructor calls
-	classParents     map[string]string            // Track parent class names for super
-	staticMethods    map[string]map[string]bool   // Track static methods: class -> method -> isStatic
-	currentClassName string                       // Current class being generated
-	exports          []string                     // Track exported names for module generation
-	target           string                       // Target Lua version: lua51, lua52, lua53, lua54, luajit
+	classes          map[string]bool            // Track defined classes for constructor calls
+	classParents     map[string]string          // Track parent class names for super
+	staticMethods    map[string]map[string]bool // Track static methods: class -> method -> isStatic
+	currentClassName string                     // Current class being generated
+	exports          []string                   // Track exported names for module generation
+	target           string                     // Target Lua version: lua51, lua52, lua53, lua54, luajit
+	selfReceivers    []map[string]bool          // Scoped set of locals whose methods take an implicit self
+	instanceArrays   map[string]bool            // Locals holding a collection of class instances
 }
 
 // New creates a new code generator
 func New() *Generator {
 	return &Generator{
-		indent:        0,
-		classes:       make(map[string]bool),
-		classParents:  make(map[string]string),
-		staticMethods: make(map[string]map[string]bool),
-		exports:       make([]string, 0),
-		target:        "lua53",
+		indent:         0,
+		classes:        make(map[string]bool),
+		classParents:   make(map[string]string),
+		staticMethods:  make(map[string]map[string]bool),
+		exports:        make([]string, 0),
+		target:         "lua53",
+		selfReceivers:  []map[string]bool{make(map[string]bool)},
+		instanceArrays: make(map[string]bool),
 	}
 }
 
@@ -41,12 +46,14 @@ func NewWithTarget(target string) *Generator {
 		target = "lua53"
 	}
 	return &Generator{
-		indent:        0,
-		classes:       make(map[string]bool),
-		classParents:  make(map[string]string),
-		staticMethods: make(map[string]map[string]bool),
-		exports:       make([]string, 0),
-		target:        target,
+		indent:         0,
+		classes:        make(map[string]bool),
+		classParents:   make(map[string]string),
+		staticMethods:  make(map[string]map[string]bool),
+		exports:        make([]string, 0),
+		target:         target,
+		selfReceivers:  []map[string]bool{make(map[string]bool)},
+		instanceArrays: make(map[string]bool),
 	}
 }
 
@@ -197,6 +204,8 @@ func (g *Generator) trackStatementMapping(stmt ast.Statement) {
 		token = node.Token
 	case *ast.WhileStatement:
 		token = node.Token
+	case *ast.RepeatStatement:
+		token = node.Token
 	case *ast.ForStatement:
 		token = node.Token
 	case *ast.DoStatement:
@@ -204,8 +213,8 @@ func (g *Generator) trackStatementMapping(stmt ast.Statement) {
 	case *ast.BreakStatement:
 		token = node.Token
 	case *ast.AssignmentStatement:
-		if node.Name != nil {
-			token = g.getExpressionToken(node.Name)
+		if first := node.Name(); first != nil {
+			token = g.getExpressionToken(first)
 		}
 	case *ast.ClassDeclaration:
 		token = node.Token
@@ -269,6 +278,8 @@ func (g *Generator) generateStatement(stmt ast.Statement) string {
 		return g.generateIfStatement(node)
 	case *ast.WhileStatement:
 		return g.generateWhileStatement(node)
+	case *ast.RepeatStatement:
+		return g.generateRepeatStatement(node)
 	case *ast.ForStatement:
 		return g.generateForStatement(node)
 	case *ast.DoStatement:
@@ -303,6 +314,7 @@ func (g *Generator) generateStatement(stmt ast.Statement) string {
 // generateVariableDeclaration generates code for a variable declaration
 func (g *Generator) generateVariableDeclaration(node *ast.VariableDeclaration) string {
 	var output strings.Builder
+	g.trackDeclaredReceivers(node.Names, node.Types, node.Values)
 	output.WriteString(g.generateIndent())
 	output.WriteString("local ")
 
@@ -330,33 +342,49 @@ func (g *Generator) generateVariableDeclaration(node *ast.VariableDeclaration) s
 }
 
 // generateFunctionDeclaration generates code for a function declaration
+// renderParameters returns the Lua parameter list for a signature along with
+// the rest parameter that needs unpacking, if any. Lua's bare vararg ("...")
+// is passed straight through and never packed into a local.
+func (g *Generator) renderParameters(parameters []*ast.Parameter) (string, *ast.Parameter) {
+	params := make([]string, 0, len(parameters))
+	var restParam *ast.Parameter
+
+	for _, param := range parameters {
+		if param.IsRest {
+			params = append(params, "...")
+			if param.Name != nil && param.Name.Value != "..." {
+				restParam = param
+			}
+			// Lua allows nothing after the vararg.
+			break
+		}
+
+		if param.Name != nil {
+			params = append(params, param.Name.Value)
+		}
+	}
+
+	return strings.Join(params, ", "), restParam
+}
+
 func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) string {
 	var output strings.Builder
 
+	g.pushReceiverScope()
+	defer g.popReceiverScope()
+	g.trackParameterReceivers(node.Parameters)
+
 	output.WriteString(g.generateIndent())
+	if node.IsLocal {
+		output.WriteString("local ")
+	}
 	output.WriteString("function ")
 	output.WriteString(node.Name.Value)
 	output.WriteString("(")
 
 	// Parameters (without type annotations)
-	params := make([]string, 0, len(node.Parameters))
-	var restParam *ast.Parameter
-	for i, param := range node.Parameters {
-		if param.IsRest {
-			restParam = param
-			// Add ... to parameter list
-			params = append(params, "...")
-			break
-		}
-		params = append(params, param.Name.Value)
-		// Check if next param is rest, if so don't include regular params after
-		if i+1 < len(node.Parameters) && node.Parameters[i+1].IsRest {
-			restParam = node.Parameters[i+1]
-			params = append(params, "...")
-			break
-		}
-	}
-	output.WriteString(strings.Join(params, ", "))
+	paramList, restParam := g.renderParameters(node.Parameters)
+	output.WriteString(paramList)
 	output.WriteString(")\n")
 
 	// Body
@@ -491,6 +519,27 @@ func (g *Generator) generateWhileStatement(node *ast.WhileStatement) string {
 	return output.String()
 }
 
+// generateRepeatStatement generates code for a repeat ... until loop
+func (g *Generator) generateRepeatStatement(node *ast.RepeatStatement) string {
+	var output strings.Builder
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("repeat\n")
+
+	g.indent++
+	for _, stmt := range node.Body.Statements {
+		output.WriteString(g.generateStatement(stmt))
+	}
+	g.indent--
+
+	output.WriteString(g.generateIndent())
+	output.WriteString("until ")
+	output.WriteString(g.generateExpression(node.Condition))
+	output.WriteString("\n")
+
+	return output.String()
+}
+
 // generateForStatement generates code for a for statement
 func (g *Generator) generateForStatement(node *ast.ForStatement) string {
 	var output strings.Builder
@@ -525,16 +574,40 @@ func (g *Generator) generateForStatement(node *ast.ForStatement) string {
 
 	output.WriteString(" do\n")
 
+	g.pushReceiverScope()
+	if node.IsGeneric && g.iteratesInstances(node.Iterator) && len(node.Variables) > 1 {
+		// The value variable holds an instance, so its methods take self.
+		g.markSelfReceiver(node.Variables[1].Value)
+	}
+
 	g.indent++
 	for _, stmt := range node.Body.Statements {
 		output.WriteString(g.generateStatement(stmt))
 	}
 	g.indent--
+	g.popReceiverScope()
 
 	output.WriteString(g.generateIndent())
 	output.WriteString("end\n")
 
 	return output.String()
+}
+
+// iteratesInstances reports whether a generic for iterates a collection known
+// to hold class instances, as in `for _, ball in ipairs(balls)`.
+func (g *Generator) iteratesInstances(iterator ast.Expression) bool {
+	collection := iterator
+
+	if call, ok := iterator.(*ast.CallExpression); ok && len(call.Arguments) == 1 {
+		if ident, ok := call.Function.(*ast.Identifier); ok &&
+			(ident.Value == "ipairs" || ident.Value == "pairs") {
+			collection = call.Arguments[0]
+		}
+	}
+
+	ident, ok := collection.(*ast.Identifier)
+
+	return ok && g.instanceArrays[ident.Value]
 }
 
 // generateDoStatement generates code for a do statement
@@ -572,9 +645,23 @@ func (g *Generator) generateAssignmentStatement(node *ast.AssignmentStatement) s
 	var output strings.Builder
 
 	output.WriteString(g.generateIndent())
-	output.WriteString(g.generateExpression(node.Name))
+
+	for i, target := range node.Targets {
+		if i > 0 {
+			output.WriteString(", ")
+		}
+		output.WriteString(g.generateExpression(target))
+	}
+
 	output.WriteString(" = ")
-	output.WriteString(g.generateExpression(node.Value))
+
+	for i, value := range node.Values {
+		if i > 0 {
+			output.WriteString(", ")
+		}
+		output.WriteString(g.generateExpression(value))
+	}
+
 	output.WriteString("\n")
 
 	return output.String()
@@ -629,8 +716,10 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 	output.WriteString(fmt.Sprintf("%s.__index = %s\n", className, className))
 	output.WriteString("\n")
 
-	// Generate constructor as new() function
-	if node.Constructor != nil || len(node.Properties) > 0 {
+	// Generate constructor as new() function. Every class needs one: the
+	// generator turns `Calculator()` into `Calculator.new()`, so a class with
+	// only methods was impossible to instantiate without it.
+	{
 		output.WriteString(g.generateIndent())
 		output.WriteString(fmt.Sprintf("function %s.new(", className))
 
@@ -722,6 +811,9 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 			continue
 		}
 
+		g.pushReceiverScope()
+		g.trackParameterReceivers(method.Parameters)
+
 		output.WriteString(g.generateIndent())
 		if method.IsStatic {
 			// Static methods use dot notation (no self parameter)
@@ -731,20 +823,22 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 			output.WriteString(fmt.Sprintf("function %s:%s(", className, method.Name.Value))
 		}
 
-		params := make([]string, len(method.Parameters))
-		for i, param := range method.Parameters {
-			params[i] = param.Name.Value
-		}
-		output.WriteString(strings.Join(params, ", "))
+		methodParams, methodRest := g.renderParameters(method.Parameters)
+		output.WriteString(methodParams)
 		output.WriteString(")\n")
 
 		g.indent++
+		if methodRest != nil {
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("local %s = {...}\n", methodRest.Name.Value))
+		}
 		if method.Body != nil {
 			for _, stmt := range method.Body.Statements {
 				output.WriteString(g.generateStatement(stmt))
 			}
 		}
 		g.indent--
+		g.popReceiverScope()
 
 		output.WriteString(g.generateIndent())
 		output.WriteString("end\n")
@@ -921,6 +1015,12 @@ func (g *Generator) generateNamespaceDeclaration(node *ast.NamespaceDeclaration)
 
 	// Generate all statements in the namespace
 	for _, stmt := range node.Statements {
+		// `export` inside a namespace marks a member of that namespace; the
+		// declaration it wraps is what gets attached to the table.
+		if exported, ok := stmt.(*ast.ExportStatement); ok && exported.Statement != nil {
+			stmt = exported.Statement
+		}
+
 		switch s := stmt.(type) {
 		case *ast.ClassDeclaration:
 			// Generate class and assign to namespace
@@ -997,6 +1097,11 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 		return "false"
 	case *ast.NilLiteral:
 		return "nil"
+	case *ast.VarargExpression:
+		return "..."
+	case *ast.GenericType:
+		// Type arguments are erased: Stack<number>() is just Stack() in Lua.
+		return g.generateExpression(node.BaseType)
 	case *ast.TableLiteral:
 		return g.generateTableLiteral(node)
 	case *ast.PrefixExpression:
@@ -1041,11 +1146,10 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 		var output strings.Builder
 		output.WriteString("(function() local __temp = {}; ")
 
-		// First, merge all spread expressions (they spread key-value pairs)
+		// First, merge all spread expressions
 		for _, val := range node.Values {
 			if spread, ok := val.(*ast.SpreadExpression); ok {
-				spreadValue := g.generateExpression(spread.Value)
-				output.WriteString(fmt.Sprintf("for __k, __v in pairs(%s) do __temp[__k] = __v end; ", spreadValue))
+				output.WriteString(spreadMerge(g.generateExpression(spread.Value)))
 			} else {
 				// Non-spread values in mixed context are added as array elements
 				output.WriteString(fmt.Sprintf("table.insert(__temp, %s); ", g.generateExpression(val)))
@@ -1053,15 +1157,12 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 		}
 
 		// Then add explicit key-value pairs (they can override spread values)
-		for key, val := range node.Pairs {
-			valStr := g.generateExpression(val)
-
-			// For identifier keys, use string literal; for others, use the expression
-			if ident, ok := key.(*ast.Identifier); ok {
-				output.WriteString(fmt.Sprintf("__temp[\"%s\"] = %s; ", ident.Value, valStr))
+		for _, pair := range g.sortedPairs(node.Pairs) {
+			key, val := pair[0], pair[1]
+			if isLuaIdentifier(key) {
+				output.WriteString(fmt.Sprintf("__temp[\"%s\"] = %s; ", key, val))
 			} else {
-				keyStr := g.generateExpression(key)
-				output.WriteString(fmt.Sprintf("__temp[%s] = %s; ", keyStr, valStr))
+				output.WriteString(fmt.Sprintf("__temp[%s] = %s; ", key, val))
 			}
 		}
 
@@ -1076,9 +1177,8 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 
 		for _, val := range node.Values {
 			if spread, ok := val.(*ast.SpreadExpression); ok {
-				// Insert all elements from the spread array
-				spreadValue := g.generateExpression(spread.Value)
-				output.WriteString(fmt.Sprintf("for _, __v in ipairs(%s) do table.insert(__temp, __v) end; ", spreadValue))
+				// Merge the spread source, whatever shape it has
+				output.WriteString(spreadMerge(g.generateExpression(spread.Value)))
 			} else {
 				// Insert single element
 				output.WriteString(fmt.Sprintf("table.insert(__temp, %s); ", g.generateExpression(val)))
@@ -1109,16 +1209,14 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 		}
 
 		pairs := []string{}
-		for key, val := range node.Pairs {
-			valStr := g.generateExpression(val)
+		for _, pair := range g.sortedPairs(node.Pairs) {
+			key, val := pair[0], pair[1]
 
-			// Check if key is a simple identifier - if so, use it directly without brackets
-			if ident, ok := key.(*ast.Identifier); ok {
-				pairs = append(pairs, fmt.Sprintf("%s = %s", ident.Value, valStr))
+			// A plain identifier key needs no brackets
+			if isLuaIdentifier(key) {
+				pairs = append(pairs, fmt.Sprintf("%s = %s", key, val))
 			} else {
-				// For complex keys (expressions, string literals, etc.), use brackets
-				keyStr := g.generateExpression(key)
-				pairs = append(pairs, fmt.Sprintf("[%s] = %s", keyStr, valStr))
+				pairs = append(pairs, fmt.Sprintf("[%s] = %s", key, val))
 			}
 		}
 		output.WriteString(strings.Join(pairs, ", "))
@@ -1126,6 +1224,85 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 
 	output.WriteString("}")
 	return output.String()
+}
+
+// isLuaIdentifier reports whether a rendered table key is a bare name that Lua
+// accepts without brackets. Anything else -- a quoted string, an expression, a
+// word Lua reserves -- has to be written as [key].
+func isLuaIdentifier(key string) bool {
+	if key == "" || lexer.IsLuaReserved(key) {
+		return false
+	}
+
+	for i, r := range key {
+		isLetter := r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		isDigit := r >= '0' && r <= '9'
+
+		if !isLetter && !(isDigit && i > 0) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// receiverNeedsParens reports whether a method call's receiver has to be
+// wrapped in parentheses. Lua only allows a name, an index, a call or a
+// parenthesized expression before ':' or '.', so `"a,b":gmatch(...)` is a
+// syntax error while `("a,b"):gmatch(...)` is fine.
+func receiverNeedsParens(expr ast.Expression) bool {
+	switch expr.(type) {
+	case *ast.StringLiteral, *ast.NumberLiteral, *ast.BooleanLiteral, *ast.NilLiteral,
+		*ast.TemplateLiteral, *ast.TableLiteral, *ast.InfixExpression, *ast.PrefixExpression,
+		*ast.FunctionExpression, *ast.VarargExpression, *ast.TypeAssertion:
+		return true
+	}
+
+	return false
+}
+
+// asReceiver renders an expression for use before ':' or '.'.
+func (g *Generator) asReceiver(expr ast.Expression) string {
+	rendered := g.generateExpression(expr)
+	if receiverNeedsParens(expr) {
+		return "(" + rendered + ")"
+	}
+
+	return rendered
+}
+
+// spreadMerge emits the Lua that merges one spread source into __temp. It works
+// for arrays, records and mixed tables: the sequence part is appended in order
+// and every other key is copied. The source is bound to a local first so an
+// expression with side effects is evaluated once.
+func spreadMerge(source string) string {
+	return fmt.Sprintf(
+		"do local __src = %s; local __len = #__src; "+
+			"for __i = 1, __len do table.insert(__temp, __src[__i]) end; "+
+			"for __k, __v in pairs(__src) do if type(__k) ~= 'number' or __k > __len then __temp[__k] = __v end end "+
+			"end; ",
+		source)
+}
+
+// sortedPairs renders a table literal's key/value pairs in a stable order.
+// Ranging over the map directly makes the same source compile to different
+// output from run to run.
+func (g *Generator) sortedPairs(pairs map[ast.Expression]ast.Expression) [][2]string {
+	rendered := make([][2]string, 0, len(pairs))
+
+	for key, val := range pairs {
+		keyStr := ""
+		if ident, ok := key.(*ast.Identifier); ok {
+			keyStr = ident.Value
+		} else {
+			keyStr = g.generateExpression(key)
+		}
+		rendered = append(rendered, [2]string{keyStr, g.generateExpression(val)})
+	}
+
+	sort.Slice(rendered, func(i, j int) bool { return rendered[i][0] < rendered[j][0] })
+
+	return rendered
 }
 
 // generatePrefixExpression generates code for a prefix expression
@@ -1188,7 +1365,8 @@ func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
 		bitwiseOp = "band"
 	case "|":
 		bitwiseOp = "bor"
-	case "^":
+	case "~":
+		// Binary '~' is XOR in Lua; '^' stays exponentiation on every target.
 		bitwiseOp = "bxor"
 	case "<<":
 		bitwiseOp = "lshift"
@@ -1233,8 +1411,180 @@ func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
 	return fmt.Sprintf("%s %s %s", left, operator, right)
 }
 
+// pushReceiverScope starts a new lexical scope for implicit-self tracking.
+func (g *Generator) pushReceiverScope() {
+	g.selfReceivers = append(g.selfReceivers, make(map[string]bool))
+}
+
+// popReceiverScope discards the innermost implicit-self scope.
+func (g *Generator) popReceiverScope() {
+	if len(g.selfReceivers) > 1 {
+		g.selfReceivers = g.selfReceivers[:len(g.selfReceivers)-1]
+	}
+}
+
+// markSelfReceiver records that calls on this name need Lua's ':' syntax.
+func (g *Generator) markSelfReceiver(name string) {
+	if len(g.selfReceivers) == 0 {
+		g.selfReceivers = []map[string]bool{make(map[string]bool)}
+	}
+	g.selfReceivers[len(g.selfReceivers)-1][name] = true
+}
+
+// isSelfReceiver reports whether a name is known to hold a class instance or a
+// string, both of which dispatch their methods through ':' in Lua.
+func (g *Generator) isSelfReceiver(name string) bool {
+	for i := len(g.selfReceivers) - 1; i >= 0; i-- {
+		if g.selfReceivers[i][name] {
+			return true
+		}
+	}
+	return false
+}
+
+// typeNeedsSelfDispatch reports whether a declared type annotation describes a
+// receiver whose methods are called with ':' (a class instance or a string).
+func (g *Generator) typeNeedsSelfDispatch(typeExpr ast.Expression) bool {
+	if generic, ok := typeExpr.(*ast.GenericType); ok {
+		typeExpr = generic.BaseType
+	}
+
+	ident, ok := typeExpr.(*ast.Identifier)
+	if !ok {
+		return false
+	}
+
+	return g.classes[ident.Value] || ident.Value == "string"
+}
+
+// valueNeedsSelfDispatch reports whether an initializer obviously produces a
+// class instance or a string, e.g. `local p = Person()` or `local s = "hi"`.
+func (g *Generator) valueNeedsSelfDispatch(value ast.Expression) bool {
+	switch v := value.(type) {
+	case *ast.StringLiteral, *ast.TemplateLiteral:
+		return true
+	case *ast.CallExpression:
+		callee := v.Function
+		if generic, ok := callee.(*ast.GenericType); ok {
+			callee = generic.BaseType
+		}
+		if ident, ok := callee.(*ast.Identifier); ok {
+			return g.classes[ident.Value]
+		}
+	}
+	return false
+}
+
+// trackDeclaredReceivers records any names in a declaration whose methods will
+// need ':' dispatch, so later calls on them generate the right syntax.
+func (g *Generator) trackDeclaredReceivers(names []*ast.Identifier, typeExprs []ast.Expression, values []ast.Expression) {
+	for i, name := range names {
+		if name == nil {
+			continue
+		}
+		if i < len(typeExprs) && typeExprs[i] != nil {
+			if g.typeNeedsSelfDispatch(typeExprs[i]) {
+				g.markSelfReceiver(name.Value)
+				continue
+			}
+
+			// `local balls: Ball[]` means iterating it yields instances.
+			if arrayType, ok := typeExprs[i].(*ast.ArrayType); ok && g.typeNeedsSelfDispatch(arrayType.ElementType) {
+				g.instanceArrays[name.Value] = true
+				continue
+			}
+		}
+		if i < len(values) && values[i] != nil && g.valueNeedsSelfDispatch(values[i]) {
+			g.markSelfReceiver(name.Value)
+		}
+	}
+}
+
+// trackParameterReceivers records parameters that are class instances or strings.
+func (g *Generator) trackParameterReceivers(params []*ast.Parameter) {
+	for _, param := range params {
+		if param == nil || param.Name == nil || param.Type == nil {
+			continue
+		}
+		if g.typeNeedsSelfDispatch(param.Type) {
+			g.markSelfReceiver(param.Name.Value)
+		}
+	}
+}
+
+// usesImplicitSelf decides between Lua's ':' and '.' call syntax for a member
+// call. The type checker's resolution wins when available; otherwise the
+// receiver is inferred from what the generator has seen so far, defaulting to
+// '.' so that library calls like table.insert(t, v) stay correct.
+func (g *Generator) usesImplicitSelf(dotExpr *ast.DotExpression, property string) bool {
+	// obj:method() in the source says exactly what it wants.
+	if dotExpr.IsMethodCall {
+		return true
+	}
+
+	switch dotExpr.MethodDispatch {
+	case ast.DispatchSelf:
+		return true
+	case ast.DispatchPlain:
+		return false
+	}
+
+	// Untyped fallback (--no-typecheck, or a receiver the checker left as 'any').
+	switch left := dotExpr.Left.(type) {
+	case *ast.Identifier:
+		// A static method reached through its class name takes no self.
+		if g.classes[left.Value] {
+			return !(g.staticMethods[left.Value] != nil && g.staticMethods[left.Value][property])
+		}
+		if left.Value == "self" || left.Value == "super" {
+			return true
+		}
+		return g.isSelfReceiver(left.Value)
+	case *ast.StringLiteral, *ast.TemplateLiteral:
+		return true
+	case *ast.DotExpression:
+		// self.field.method(): the field's type is unknown here, but a method
+		// call on an instance field is far more common than a module lookup
+		// through a class instance.
+		if inner, ok := left.Left.(*ast.Identifier); ok && (inner.Value == "self" || inner.Value == "super") {
+			return true
+		}
+	}
+
+	return false
+}
+
 // generateCallExpression generates code for a function call
 func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
+	// super(...) inside a constructor runs the parent's constructor and copies
+	// the fields it set onto the instance being built. Without this it compiled
+	// to a bare `Parent(args)` call, which is not even a function in the
+	// generated Lua, so any subclass crashed on construction.
+	if _, isSuper := node.Function.(*ast.SuperExpression); isSuper {
+		parent := g.generateExpression(node.Function)
+		args := make([]string, len(node.Arguments))
+		for i, arg := range node.Arguments {
+			args[i] = g.generateExpression(arg)
+		}
+		// A do block, not a call expression: a statement starting with '(' would
+		// be read as a continuation of the preceding line.
+		return fmt.Sprintf(
+			"do local __parent = %s.new(%s); for __k, __v in pairs(__parent) do self[__k] = __v end end",
+			parent, strings.Join(args, ", "))
+	}
+
+	// Optional call (fn?.()) evaluates the callee once and yields nil when it
+	// is absent, instead of erroring on a nil call.
+	if node.IsOptional {
+		function := g.generateExpression(node.Function)
+		args := make([]string, len(node.Arguments))
+		for i, arg := range node.Arguments {
+			args[i] = g.generateExpression(arg)
+		}
+		return fmt.Sprintf("(function() local __fn = %s; if __fn ~= nil then return __fn(%s) else return nil end end)()",
+			function, strings.Join(args, ", "))
+	}
+
 	// Check if this is a method call on an object (DotExpression)
 	// In Lunar: object.method() should compile to Lua: object:method() or object.method()
 	// depending on whether it's an instance method or static method
@@ -1253,19 +1603,9 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 			return fmt.Sprintf("%s(%s)", function, strings.Join(args, ", "))
 		}
 
-		// Check if calling a static method on a class name
-		useColonSyntax := true // Default to : for instance methods
-		if ident, ok := dotExpr.Left.(*ast.Identifier); ok {
-			className := ident.Value
-			// If calling on a class name and the method is static, use dot syntax
-			if g.classes[className] {
-				if g.staticMethods[className] != nil && g.staticMethods[className][property] {
-					useColonSyntax = false
-				}
-			}
-		}
+		useColonSyntax := g.usesImplicitSelf(dotExpr, property)
 
-		object := g.generateExpression(dotExpr.Left)
+		object := g.asReceiver(dotExpr.Left)
 
 		// Check if any argument is a spread expression
 		hasSpread := false
@@ -1321,8 +1661,13 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 	// Not a method call - generate normally
 	function := g.generateExpression(node.Function)
 
-	// Check if calling a class constructor (simple identifier that's a known class)
-	if ident, ok := node.Function.(*ast.Identifier); ok {
+	// Check if calling a class constructor. The callee is an identifier, or a
+	// generic instantiation of one as in Stack<number>().
+	callee := node.Function
+	if generic, ok := callee.(*ast.GenericType); ok {
+		callee = generic.BaseType
+	}
+	if ident, ok := callee.(*ast.Identifier); ok {
 		if g.classes[ident.Value] {
 			function = function + ".new"
 		}
@@ -1422,7 +1767,7 @@ func (g *Generator) generateTemplateLiteral(node *ast.TemplateLiteral) string {
 
 // generateDotExpression generates code for a dot expression
 func (g *Generator) generateDotExpression(node *ast.DotExpression) string {
-	left := g.generateExpression(node.Left)
+	left := g.asReceiver(node.Left)
 	right := g.generateExpression(node.Right)
 
 	// Handle optional chaining (?.)
@@ -1430,6 +1775,12 @@ func (g *Generator) generateDotExpression(node *ast.DotExpression) string {
 		// Generate safe navigation: (function() if left ~= nil then return left.right else return nil end end)()
 		// For efficiency, use a simpler pattern when left is a simple identifier
 		return fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp.%s else return nil end end)()", left, right)
+	}
+
+	// Method call syntax (obj:method) is preserved verbatim; the parser only
+	// produces it when a call follows, which generateCallExpression handles.
+	if node.IsMethodCall {
+		return fmt.Sprintf("%s:%s", left, right)
 	}
 
 	return fmt.Sprintf("%s.%s", left, right)
@@ -1440,6 +1791,12 @@ func (g *Generator) generateIndexExpression(node *ast.IndexExpression) string {
 	left := g.generateExpression(node.Left)
 	index := g.generateExpression(node.Index)
 
+	// Optional index access (?[]) evaluates the receiver once and yields nil
+	// instead of erroring when it is nil.
+	if node.IsOptional {
+		return fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp[%s] else return nil end end)()", left, index)
+	}
+
 	return fmt.Sprintf("%s[%s]", left, index)
 }
 
@@ -1447,18 +1804,23 @@ func (g *Generator) generateIndexExpression(node *ast.IndexExpression) string {
 func (g *Generator) generateFunctionExpression(node *ast.FunctionExpression) string {
 	var output strings.Builder
 
+	g.pushReceiverScope()
+	defer g.popReceiverScope()
+	g.trackParameterReceivers(node.Parameters)
+
 	output.WriteString("function(")
 
 	// Parameters (without type annotations)
-	params := make([]string, len(node.Parameters))
-	for i, param := range node.Parameters {
-		params[i] = param.Name.Value
-	}
-	output.WriteString(strings.Join(params, ", "))
+	paramList, restParam := g.renderParameters(node.Parameters)
+	output.WriteString(paramList)
 	output.WriteString(")\n")
 
 	// Body
 	g.indent++
+	if restParam != nil {
+		output.WriteString(g.generateIndent())
+		output.WriteString(fmt.Sprintf("local %s = {...}\n", restParam.Name.Value))
+	}
 	for _, stmt := range node.Body.Statements {
 		output.WriteString(g.generateStatement(stmt))
 	}
@@ -1507,17 +1869,33 @@ func (g *Generator) generateExportStatement(node *ast.ExportStatement) string {
 }
 
 // generateImportStatement generates code for an import statement
+// luaModuleName turns an import path into the dotted name Lua's require expects:
+// "./mod/math_utils" becomes "mod.math_utils". Passing the path through
+// verbatim produced a require that could never resolve.
+func luaModuleName(path string) string {
+	name := strings.TrimSuffix(path, ".lunar")
+	name = strings.TrimPrefix(name, "./")
+
+	// A parent-directory hop has no dotted equivalent; leave those alone rather
+	// than inventing a name that resolves to the wrong module.
+	if strings.HasPrefix(name, "../") {
+		return name
+	}
+
+	return strings.ReplaceAll(name, "/", ".")
+}
+
 func (g *Generator) generateImportStatement(node *ast.ImportStatement) string {
 	var output strings.Builder
 	output.WriteString(g.generateIndent())
 
+	moduleName := luaModuleName(node.Module)
+
 	if node.IsWildcard {
 		// import * from "module" -> local module = require("module")
-		// Extract module name from path (last part before extension)
-		moduleName := node.Module
 		// Simple heuristic: use the last part of the path as variable name
-		parts := strings.Split(moduleName, "/")
-		varName := strings.TrimSuffix(parts[len(parts)-1], ".lunar")
+		parts := strings.Split(strings.TrimSuffix(node.Module, ".lunar"), "/")
+		varName := parts[len(parts)-1]
 		output.WriteString(fmt.Sprintf("local %s = require(\"%s\")\n", varName, moduleName))
 	} else {
 		// import { name1, name2 } from "module"
@@ -1527,7 +1905,7 @@ func (g *Generator) generateImportStatement(node *ast.ImportStatement) string {
 		tempVar := "_" + strings.ReplaceAll(node.Module, "/", "_")
 		tempVar = strings.ReplaceAll(tempVar, ".", "_")
 
-		output.WriteString(fmt.Sprintf("local %s = require(\"%s\")\n", tempVar, node.Module))
+		output.WriteString(fmt.Sprintf("local %s = require(\"%s\")\n", tempVar, moduleName))
 
 		for _, name := range node.Names {
 			output.WriteString(g.generateIndent())
@@ -1734,15 +2112,15 @@ func (g *Generator) generateMatchExpression(node *ast.MatchExpression) string {
 			}
 
 			output.WriteString(" then\n")
+		}
 
-			// Add pattern bindings (if no guard, or bindings already added)
-			if matchCase.Guard == nil {
-				for _, binding := range bindings {
-					output.WriteString("    ")
-					output.WriteString(binding)
-					output.WriteString("\n")
-				}
-			}
+		// Bind the pattern variables for the body. When a guard is present the
+		// bindings above live inside the guard's own closure, so the body still
+		// needs its own copies to see them.
+		for _, binding := range bindings {
+			output.WriteString("    ")
+			output.WriteString(binding)
+			output.WriteString("\n")
 		}
 
 		// Return the body expression
@@ -1818,9 +2196,26 @@ func (g *Generator) generatePatternCondition(pattern ast.Pattern, valueName stri
 		var conditions []string
 		conditions = append(conditions, fmt.Sprintf("type(%s) == 'table'", valueName))
 
+		// Field order in the generated condition must not depend on map
+		// iteration order, or the same source compiles to different output.
+		fieldNames := make([]string, 0, len(p.Fields))
+		for fieldName := range p.Fields {
+			fieldNames = append(fieldNames, fieldName)
+		}
+		sort.Strings(fieldNames)
+
 		// Generate conditions and bindings for each field
-		for fieldName, fieldPattern := range p.Fields {
+		for _, fieldName := range fieldNames {
+			fieldPattern := p.Fields[fieldName]
 			fieldValue := fmt.Sprintf("%s.%s", valueName, fieldName)
+
+			// A named field has to be present for the pattern to match, so
+			// { name: n, age: a } does not match a table that has no age.
+			// Matching a field against nil explicitly is the one exception.
+			if !patternMatchesNil(fieldPattern) {
+				conditions = append(conditions, fmt.Sprintf("%s ~= nil", fieldValue))
+			}
+
 			fieldCond, fieldBindings := g.generatePatternCondition(fieldPattern, fieldValue)
 
 			// Only add non-trivial conditions (not "true")
@@ -1838,4 +2233,16 @@ func (g *Generator) generatePatternCondition(pattern ast.Pattern, valueName stri
 		// Unknown pattern type
 		return "false", bindings
 	}
+}
+
+// patternMatchesNil reports whether a pattern is written to match a nil value,
+// in which case a struct field carrying it must not be required to be present.
+func patternMatchesNil(pattern ast.Pattern) bool {
+	literal, ok := pattern.(*ast.LiteralPattern)
+	if !ok {
+		return false
+	}
+
+	_, isNil := literal.Value.(*ast.NilLiteral)
+	return isNil
 }

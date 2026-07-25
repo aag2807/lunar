@@ -263,28 +263,30 @@ print("Example 9:", math_result)  -- -10000
 -- ============================================
 -- Best Practices
 -- ============================================
+-- The snippets below are illustrations, not runnable code: they name
+-- functions and values this file never defines, so they stay commented out.
 
 -- ✅ DO: Use pipes for linear data transformations
-const good_example = data
-    |> validate
-    |> transform
-    |> format
-    |> send
+-- const good_example = data
+--     |> validate
+--     |> transform
+--     |> format
+--     |> send
 
 -- ✅ DO: Use pipes to avoid deep nesting
-const also_good = value
-    |> step1
-    |> step2
-    |> step3
+-- const also_good = value
+--     |> step1
+--     |> step2
+--     |> step3
 
 -- ✅ DO: Break long pipelines across multiple lines for readability
-const readable = input
-    |> sanitize
-    |> parse
-    |> validate
-    |> process
-    |> serialize
-    |> save
+-- const readable = input
+--     |> sanitize
+--     |> parse
+--     |> validate
+--     |> process
+--     |> serialize
+--     |> save
 
 -- ❌ DON'T: Overuse pipes for simple operations
 -- Bad: const x = 5 |> double  (just do: const x = double(5))
@@ -294,10 +296,10 @@ const readable = input
 -- If you need intermediate results, use variables instead
 
 -- ✅ DO: Combine with other operators
-const combined = user?.profile?.email
-    ?? "no-email"
-    |> trim
-    |> lowercase
+-- const combined = user?.profile?.email
+--     ?? "no-email"
+--     |> trim
+--     |> lowercase
 
-print("=== Pipe Operator Examples Complete ===")
-print("The pipe operator makes functional pipelines readable and maintainable!")
+-- print("=== Pipe Operator Examples Complete ===")
+-- print("The pipe operator makes functional pipelines readable and maintainable!")

@@ -3,12 +3,13 @@
 
 declare interface TableLib
 	-- Table Modification
-	insert: function(t: any, pos: number, value: any): void
-	remove: function(t: any, pos: number): any
-	concat: function(t: any, sep: string, i: number, j: number): string
+	-- insert(t, value) or insert(t, pos, value)
+	insert: function(t: any, pos: any, value?: any): void
+	remove: function(t: any, pos?: number): any
+	concat: function(t: any, sep?: string, i?: number, j?: number): string
 
 	-- Table Sorting
-	sort: function(t: any, comp: function(a: any, b: any): boolean): void
+	sort: function(t: any, comp?: function(a: any, b: any): boolean): void
 
 	-- Table Size (Lua 5.2+, but commonly available)
 	maxn: function(t: any): number

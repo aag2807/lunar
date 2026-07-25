@@ -125,9 +125,10 @@ func (pe *PrefixExpression) String() string {
 }
 
 type CallExpression struct {
-	Token     lexer.Token
-	Function  Expression
-	Arguments []Expression
+	Token      lexer.Token
+	Function   Expression
+	Arguments  []Expression
+	IsOptional bool // true for optional call syntax (fn?.())
 }
 
 func (ce *CallExpression) expressionNode()      {}
@@ -148,11 +149,27 @@ func (ce *CallExpression) String() string {
 	return out.String()
 }
 
+// Dispatch kinds recorded on a DotExpression by the type checker so the code
+// generator can pick between Lua's '.' and ':' call syntax.
+const (
+	// DispatchUnknown means the expression was never type checked (or the
+	// receiver's type was not resolvable); codegen falls back to inference.
+	DispatchUnknown = ""
+	// DispatchSelf means the callee takes an implicit self: obj:method().
+	DispatchSelf = "self"
+	// DispatchPlain means the callee is an ordinary field holding a function,
+	// or a static member: module.func().
+	DispatchPlain = "plain"
+)
+
 type DotExpression struct {
-	Token      lexer.Token
-	Left       Expression
-	Right      Expression
-	IsOptional bool // true for optional chaining (?.)
+	Token        lexer.Token
+	Left         Expression
+	Right        Expression
+	IsOptional   bool // true for optional chaining (?.)
+	IsMethodCall bool // true for Lua method call syntax (obj:method())
+	// MethodDispatch is filled in by the type checker; see the Dispatch* consts.
+	MethodDispatch string
 }
 
 func (de *DotExpression) expressionNode()      {}
@@ -161,19 +178,25 @@ func (de *DotExpression) String() string {
 	operator := "."
 	if de.IsOptional {
 		operator = "?."
+	} else if de.IsMethodCall {
+		operator = ":"
 	}
 	return fmt.Sprintf("%s%s%s", de.Left.String(), operator, de.Right.String())
 }
 
 type IndexExpression struct {
-	Token lexer.Token // '[' token
-	Left  Expression  // the object being indexed
-	Index Expression  // the index expression
+	Token      lexer.Token // '[' token
+	Left       Expression  // the object being indexed
+	Index      Expression  // the index expression
+	IsOptional bool        // true for optional index access (?[])
 }
 
 func (ie *IndexExpression) expressionNode()      {}
 func (ie *IndexExpression) TokenLiteral() string { return ie.Token.Literal }
 func (ie *IndexExpression) String() string {
+	if ie.IsOptional {
+		return fmt.Sprintf("%s?[%s]", ie.Left.String(), ie.Index.String())
+	}
 	return fmt.Sprintf("%s[%s]", ie.Left.String(), ie.Index.String())
 }
 
@@ -188,6 +211,16 @@ func (se *SpreadExpression) TokenLiteral() string { return se.Token.Literal }
 func (se *SpreadExpression) String() string {
 	return fmt.Sprintf("...%s", se.Value.String())
 }
+
+// VarargExpression represents Lua's bare vararg expression, as in {...} or
+// select("#", ...). Unlike SpreadExpression it has no operand.
+type VarargExpression struct {
+	Token lexer.Token // '...' token
+}
+
+func (ve *VarargExpression) expressionNode()      {}
+func (ve *VarargExpression) TokenLiteral() string { return ve.Token.Literal }
+func (ve *VarargExpression) String() string       { return "..." }
 
 // TypeAssertion represents type assertion syntax value as Type
 type TypeAssertion struct {
@@ -577,6 +610,7 @@ type FunctionDeclaration struct {
 	IsStatic      bool         // static method (when used in class)
 	IsAbstract    bool         // abstract method (when used in class)
 	IsAsync       bool         // async function (returns Promise/coroutine)
+	IsLocal       bool         // declared as `local function f()`
 	Visibility    string       // visibility modifier: public, private, protected (when used in class)
 	Decorators    []*Decorator // decorators applied to the function
 }
@@ -763,6 +797,27 @@ func (ws *WhileStatement) String() string {
 	return out.String()
 }
 
+// RepeatStatement is Lua's repeat ... until loop: the body runs at least once
+// and the condition is evaluated after each pass.
+type RepeatStatement struct {
+	Token     lexer.Token // 'repeat' token
+	Body      *BlockStatement
+	Condition Expression
+}
+
+func (rs *RepeatStatement) statementNode()       {}
+func (rs *RepeatStatement) TokenLiteral() string { return rs.Token.Literal }
+func (rs *RepeatStatement) String() string {
+	var out strings.Builder
+
+	out.WriteString("repeat\n")
+	out.WriteString(rs.Body.String())
+	out.WriteString("\nuntil ")
+	out.WriteString(rs.Condition.String())
+
+	return out.String()
+}
+
 type ForStatement struct {
 	Token     lexer.Token // 'for' token
 	Variables []*Identifier // loop variables (can be multiple for generic for loops)
@@ -837,18 +892,50 @@ func (bs *BreakStatement) String() string       { return "break" }
 
 type AssignmentStatement struct {
 	Token lexer.Token // '=' token
-	Name  Expression  // left side (can be identifier, dot expression, index expression)
-	Value Expression  // right side
+	// Targets are the left-hand sides; Lua allows several (a, b = b, a). Each
+	// may be an identifier, a dot expression or an index expression.
+	Targets []Expression
+	Values  []Expression // right side, one or more
 }
 
 func (as *AssignmentStatement) statementNode()       {}
 func (as *AssignmentStatement) TokenLiteral() string { return as.Token.Literal }
 func (as *AssignmentStatement) String() string {
 	var out strings.Builder
-	out.WriteString(as.Name.String())
+
+	for i, target := range as.Targets {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(target.String())
+	}
+
 	out.WriteString(" = ")
-	out.WriteString(as.Value.String())
+
+	for i, value := range as.Values {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(value.String())
+	}
+
 	return out.String()
+}
+
+// Name returns the first assignment target, for the common single-target case.
+func (as *AssignmentStatement) Name() Expression {
+	if len(as.Targets) == 0 {
+		return nil
+	}
+	return as.Targets[0]
+}
+
+// Value returns the first assigned value, for the common single-value case.
+func (as *AssignmentStatement) Value() Expression {
+	if len(as.Values) == 0 {
+		return nil
+	}
+	return as.Values[0]
 }
 
 type ClassDeclaration struct {

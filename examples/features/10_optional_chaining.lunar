@@ -1,0 +1,21 @@
+-- Optional chaining, nullish coalescing, optional index and call
+type Config = any
+
+function readPort(cfg: Config): number
+    return cfg?.server?.port ?? 8080
+end
+
+function firstTag(cfg: Config): string
+    return cfg?.tags?[1] ?? "none"
+end
+
+function invoke(fn: any): any
+    return fn?.(21) ?? "no fn"
+end
+
+local full: Config = {server = {port = 3000}, tags = {"web"}}
+local empty: Config = nil
+
+print(readPort(full), readPort(empty))
+print(firstTag(full), firstTag(empty))
+print(invoke(function(n: number): number return n * 2 end), invoke(nil))

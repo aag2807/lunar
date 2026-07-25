@@ -2,28 +2,28 @@
 -- Type declarations for file and I/O operations
 
 declare interface File
-	read: function(format: string): string | nil
+	read: function(format?: string): string | nil
 	write: function(...: string): boolean
 	close: function(): void
 	flush: function(): void
-	seek: function(whence: string, offset: number): number
-	setvbuf: function(mode: string, size: number): void
+	seek: function(whence?: string, offset?: number): number
+	setvbuf: function(mode: string, size?: number): void
 	lines: function(): function(): string
 end
 
 declare interface IOLib
 	-- File Operations
-	open: function(filename: string, mode: string): File | nil
-	close: function(file: File): void
+	open: function(filename: string, mode?: string): File | nil
+	close: function(file?: File): void
 	flush: function(): void
-	lines: function(filename: string): function(): string
+	lines: function(filename?: string): function(): string
 	read: function(...: string): string
 	write: function(...: string): void
 
 	-- File Handles
-	input: function(file: File | string): File
-	output: function(file: File | string): File
-	popen: function(prog: string, mode: string): File | nil
+	input: function(file?: File | string): File
+	output: function(file?: File | string): File
+	popen: function(prog: string, mode?: string): File | nil
 	tmpfile: function(): File
 
 	-- Standard Streams

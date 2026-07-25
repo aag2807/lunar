@@ -1,0 +1,11 @@
+-- Async/await
+async function fetchValue(n: number): number
+    return n * 2
+end
+
+async function main(): void
+    local value: number = await fetchValue(21)
+    print("got", value)
+end
+
+main()

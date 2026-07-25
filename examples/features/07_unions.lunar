@@ -1,0 +1,20 @@
+-- Union types, literal types, type assertions
+type Id = string | number
+type Direction = "north" | "south" | "east" | "west"
+
+function describeId(id: Id): string
+    return "id=" .. tostring(id)
+end
+
+function move(d: Direction): string
+    return "moving " .. d
+end
+
+local a: Id = 42
+local b: Id = "abc"
+print(describeId(a), describeId(b))
+print(move("north"))
+
+local raw: any = "text"
+local asString: string = raw as string
+print(asString)

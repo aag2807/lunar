@@ -1,0 +1,48 @@
+-- Interfaces: methods, properties, extends, implements
+interface Shape
+    area(): number
+    name(): string
+end
+
+interface Named
+    label: string
+end
+
+class Circle implements Shape
+    private radius: number
+
+    constructor(radius: number)
+        self.radius = radius
+    end
+
+    area(): number
+        return 3.14159 * self.radius * self.radius
+    end
+
+    name(): string
+        return "circle"
+    end
+end
+
+class Square implements Shape
+    private side: number
+
+    constructor(side: number)
+        self.side = side
+    end
+
+    area(): number
+        return self.side * self.side
+    end
+
+    name(): string
+        return "square"
+    end
+end
+
+function report(s: Shape): string
+    return s.name() .. ": " .. tostring(s.area())
+end
+
+print(report(Circle(1)))
+print(report(Square(3)))

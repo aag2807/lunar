@@ -212,6 +212,14 @@ func (t *GenericParamType) IsAssignableTo(other Type) bool {
 	if _, isUnknown := other.(*UnknownType); isUnknown {
 		return true
 	}
+	// T fits a union that lists it, which is what a `T?` return type is.
+	if union, ok := other.(*UnionType); ok {
+		for _, member := range union.Types {
+			if t.IsAssignableTo(member) {
+				return true
+			}
+		}
+	}
 	return false
 }
 
@@ -1011,17 +1019,28 @@ func (t *InterfaceType) IsAssignableTo(other Type) bool {
 	// Check if this interface (table literal) is assignable to a table type
 	// e.g., { john = 95, jane = 87 } should be assignable to table<string, number>
 	if otherTable, ok := other.(*TableType); ok {
-		// For table literals (which have identifier keys), all keys are strings
+		// A table literal's keys are identifiers, so the target has to accept
+		// string keys.
+		if !String.IsAssignableTo(otherTable.KeyType) {
+			return false
+		}
+
 		// Check that all property types are assignable to the table's value type
 		for _, propType := range t.Properties {
 			if !propType.IsAssignableTo(otherTable.ValueType) {
 				return false
 			}
 		}
-		// If we have no methods and all property values match, we're compatible
-		if len(t.Methods) == 0 {
-			return true
+
+		// Methods are function-valued fields; they have to fit the value type
+		// too, rather than disqualifying the table outright.
+		for _, methodType := range t.Methods {
+			if !methodType.IsAssignableTo(otherTable.ValueType) {
+				return false
+			}
 		}
+
+		return true
 	}
 
 	// Check if this interface is assignable to a union type
@@ -1149,6 +1168,15 @@ func (t *EnumType) IsAssignableTo(other Type) bool {
 	}
 	if _, isUnknown := other.(*UnknownType); isUnknown {
 		return true
+	}
+	// An enum fits a union that lists it, which is what an optional enum
+	// parameter (Priority?) resolves to.
+	if union, ok := other.(*UnionType); ok {
+		for _, member := range union.Types {
+			if t.IsAssignableTo(member) {
+				return true
+			}
+		}
 	}
 	return false
 }

@@ -1,0 +1,22 @@
+-- Type guards and typeof narrowing
+function isString(value: any): value is string
+    return type(value) == "string"
+end
+
+function stringify(value: any): string
+    if isString(value) then
+        return value
+    end
+    return tostring(value)
+end
+
+function describe(value: any): string
+    if type(value) == "number" then
+        return "number: " .. tostring(value)
+    end
+    return "other"
+end
+
+print(stringify("already"))
+print(stringify(42))
+print(describe(7))

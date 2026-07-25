@@ -3581,6 +3581,16 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		return resultType
 	}
 
+	// Record how the member resolved so codegen knows whether a call through
+	// this expression needs Lua's implicit-self ':' or a plain '.'.
+	resolved := func(dispatch string, resultType Type) Type {
+		// An explicit obj:method() in the source already states its intent.
+		if !node.IsMethodCall {
+			node.MethodDispatch = dispatch
+		}
+		return wrapIfOptional(resultType)
+	}
+
 	// Check if left type has the property
 	switch typ := actualLeftType.(type) {
 	case *ClassType:
@@ -3597,7 +3607,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return wrapIfOptional(propType)
+			return resolved(ast.DispatchPlain, propType)
 		}
 		// Check static methods
 		if methodType, ok := typ.GetStaticMethod(propertyName); ok {
@@ -3612,7 +3622,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return wrapIfOptional(methodType)
+			return resolved(ast.DispatchPlain, methodType)
 		}
 		// Check instance properties
 		if propType, ok := typ.GetProperty(propertyName); ok {
@@ -3624,7 +3634,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return wrapIfOptional(propType)
+			return resolved(ast.DispatchPlain, propType)
 		}
 		// Check instance methods
 		if methodType, ok := typ.GetMethod(propertyName); ok {
@@ -3636,7 +3646,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return wrapIfOptional(methodType)
+			return resolved(ast.DispatchSelf, methodType)
 		}
 		// In Lua, accessing a non-existent property returns nil at runtime
 		// Allow this for type guards and dynamic property access
@@ -3644,13 +3654,15 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		return wrapIfOptional(Any)
 
 	case *InterfaceType:
-		// Check properties
+		// Check properties. A function-typed property is a plain field holding a
+		// function (this is how the stdlib declares table.insert, math.floor, ...),
+		// so it is called with '.' and never takes an implicit self.
 		if propType, ok := typ.GetProperty(propertyName); ok {
-			return wrapIfOptional(propType)
+			return resolved(ast.DispatchPlain, propType)
 		}
 		// Check methods
 		if methodType, ok := typ.GetMethod(propertyName); ok {
-			return wrapIfOptional(methodType)
+			return resolved(ast.DispatchSelf, methodType)
 		}
 		c.addError(
 			fmt.Sprintf("Type '%s' has no property or method '%s'", typ.String(), propertyName),
@@ -3667,6 +3679,22 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 			fmt.Sprintf("Enum '%s' has no member '%s'", typ.String(), propertyName),
 			node.Token,
 		)
+		return wrapIfOptional(Any)
+
+	case *StringType:
+		// Lua exposes the string library through every string value's metatable,
+		// so s.upper() is really string.upper(s) and needs implicit-self syntax.
+		// The member type stays 'any': the declared StringLib signatures include
+		// the receiver and mark every parameter as required, so checking calls
+		// against them would reject correct code like s:match(pattern).
+		if lib, ok := c.interfaces["StringLib"]; ok {
+			if _, ok := lib.GetProperty(propertyName); ok {
+				return resolved(ast.DispatchSelf, Any)
+			}
+			if _, ok := lib.GetMethod(propertyName); ok {
+				return resolved(ast.DispatchSelf, Any)
+			}
+		}
 		return wrapIfOptional(Any)
 
 	default:

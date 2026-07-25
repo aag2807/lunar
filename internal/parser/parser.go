@@ -142,6 +142,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.LPAREN, p.parseCallExpression)
 	p.registerInfix(lexer.DOT, p.parseDotExpression)
 	p.registerInfix(lexer.OPTIONAL_CHAIN, p.parseDotExpression)
+	p.registerInfix(lexer.COLON, p.parseMethodCallExpression)
 	p.registerInfix(lexer.CONCAT, p.parseInfixExpression)
 	p.registerInfix(lexer.NULLISH_COALESCE, p.parseInfixExpression)
 	p.registerInfix(lexer.AS, p.parseTypeAssertion)
@@ -531,6 +532,46 @@ func (p *Parser) parseDotExpression(left ast.Expression) ast.Expression {
 	return exp
 }
 
+// parseMethodCallExpression handles Lua's method call syntax (obj:method(...)).
+// It is only reached when isColonMethodCall has confirmed the ':' starts a method
+// call, so the receiver is kept as-is and the call itself is parsed by the caller.
+func (p *Parser) parseMethodCallExpression(left ast.Expression) ast.Expression {
+	exp := &ast.DotExpression{
+		Token:        p.curToken,
+		Left:         left,
+		IsMethodCall: true,
+	}
+
+	if !p.expectPeekIdentOrContextual() {
+		return nil
+	}
+
+	exp.Right = p.parseIdentifierOrContextual()
+
+	return exp
+}
+
+// isColonMethodCall reports whether a ':' in peek position starts a Lua method
+// call (obj:method(...)) rather than a type annotation, a match arm's type
+// pattern, or the ':' of a conditional type. It only says yes for the exact
+// shape ': name (', so every other use of ':' keeps its current meaning.
+func (p *Parser) isColonMethodCall() bool {
+	if !p.peekTokenIs(lexer.COLON) {
+		return false
+	}
+
+	state := p.SaveState()
+	defer p.RestoreState(state)
+
+	p.nextToken() // curToken = ':'
+	if !p.peekTokenIsIdentOrContextual() {
+		return false
+	}
+
+	p.nextToken() // curToken = method name
+	return p.peekTokenIs(lexer.LPAREN)
+}
+
 // parsePipeExpression handles the pipeline operator (|>)
 // Transforms: value |> func(args) into func(value, args)
 func (p *Parser) parsePipeExpression(left ast.Expression) ast.Expression {
@@ -568,6 +609,15 @@ func (p *Parser) peekError(t lexer.TokenType) {
 }
 
 func (p *Parser) peekPrecedence() int {
+	// ':' only binds as an operator when it starts a method call; everywhere else
+	// (type annotations, conditional types, match patterns) it must stay inert.
+	if p.peekToken.Type == lexer.COLON {
+		if p.isColonMethodCall() {
+			return DOT
+		}
+		return LOWEST
+	}
+
 	if p, ok := precedences[p.peekToken.Type]; ok {
 		return p
 	}

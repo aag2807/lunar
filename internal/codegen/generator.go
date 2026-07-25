@@ -21,6 +21,7 @@ type Generator struct {
 	currentClassName string                       // Current class being generated
 	exports          []string                     // Track exported names for module generation
 	target           string                       // Target Lua version: lua51, lua52, lua53, lua54, luajit
+	selfReceivers    []map[string]bool            // Scoped set of locals whose methods take an implicit self
 }
 
 // New creates a new code generator
@@ -32,6 +33,7 @@ func New() *Generator {
 		staticMethods: make(map[string]map[string]bool),
 		exports:       make([]string, 0),
 		target:        "lua53",
+		selfReceivers: []map[string]bool{make(map[string]bool)},
 	}
 }
 
@@ -47,6 +49,7 @@ func NewWithTarget(target string) *Generator {
 		staticMethods: make(map[string]map[string]bool),
 		exports:       make([]string, 0),
 		target:        target,
+		selfReceivers: []map[string]bool{make(map[string]bool)},
 	}
 }
 
@@ -303,6 +306,7 @@ func (g *Generator) generateStatement(stmt ast.Statement) string {
 // generateVariableDeclaration generates code for a variable declaration
 func (g *Generator) generateVariableDeclaration(node *ast.VariableDeclaration) string {
 	var output strings.Builder
+	g.trackDeclaredReceivers(node.Names, node.Types, node.Values)
 	output.WriteString(g.generateIndent())
 	output.WriteString("local ")
 
@@ -332,6 +336,10 @@ func (g *Generator) generateVariableDeclaration(node *ast.VariableDeclaration) s
 // generateFunctionDeclaration generates code for a function declaration
 func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) string {
 	var output strings.Builder
+
+	g.pushReceiverScope()
+	defer g.popReceiverScope()
+	g.trackParameterReceivers(node.Parameters)
 
 	output.WriteString(g.generateIndent())
 	output.WriteString("function ")
@@ -722,6 +730,9 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 			continue
 		}
 
+		g.pushReceiverScope()
+		g.trackParameterReceivers(method.Parameters)
+
 		output.WriteString(g.generateIndent())
 		if method.IsStatic {
 			// Static methods use dot notation (no self parameter)
@@ -745,6 +756,7 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 			}
 		}
 		g.indent--
+		g.popReceiverScope()
 
 		output.WriteString(g.generateIndent())
 		output.WriteString("end\n")
@@ -1233,6 +1245,132 @@ func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
 	return fmt.Sprintf("%s %s %s", left, operator, right)
 }
 
+// pushReceiverScope starts a new lexical scope for implicit-self tracking.
+func (g *Generator) pushReceiverScope() {
+	g.selfReceivers = append(g.selfReceivers, make(map[string]bool))
+}
+
+// popReceiverScope discards the innermost implicit-self scope.
+func (g *Generator) popReceiverScope() {
+	if len(g.selfReceivers) > 1 {
+		g.selfReceivers = g.selfReceivers[:len(g.selfReceivers)-1]
+	}
+}
+
+// markSelfReceiver records that calls on this name need Lua's ':' syntax.
+func (g *Generator) markSelfReceiver(name string) {
+	if len(g.selfReceivers) == 0 {
+		g.selfReceivers = []map[string]bool{make(map[string]bool)}
+	}
+	g.selfReceivers[len(g.selfReceivers)-1][name] = true
+}
+
+// isSelfReceiver reports whether a name is known to hold a class instance or a
+// string, both of which dispatch their methods through ':' in Lua.
+func (g *Generator) isSelfReceiver(name string) bool {
+	for i := len(g.selfReceivers) - 1; i >= 0; i-- {
+		if g.selfReceivers[i][name] {
+			return true
+		}
+	}
+	return false
+}
+
+// typeNeedsSelfDispatch reports whether a declared type annotation describes a
+// receiver whose methods are called with ':' (a class instance or a string).
+func (g *Generator) typeNeedsSelfDispatch(typeExpr ast.Expression) bool {
+	ident, ok := typeExpr.(*ast.Identifier)
+	if !ok {
+		return false
+	}
+	return g.classes[ident.Value] || ident.Value == "string"
+}
+
+// valueNeedsSelfDispatch reports whether an initializer obviously produces a
+// class instance or a string, e.g. `local p = Person()` or `local s = "hi"`.
+func (g *Generator) valueNeedsSelfDispatch(value ast.Expression) bool {
+	switch v := value.(type) {
+	case *ast.StringLiteral, *ast.TemplateLiteral:
+		return true
+	case *ast.CallExpression:
+		if ident, ok := v.Function.(*ast.Identifier); ok {
+			return g.classes[ident.Value]
+		}
+	}
+	return false
+}
+
+// trackDeclaredReceivers records any names in a declaration whose methods will
+// need ':' dispatch, so later calls on them generate the right syntax.
+func (g *Generator) trackDeclaredReceivers(names []*ast.Identifier, typeExprs []ast.Expression, values []ast.Expression) {
+	for i, name := range names {
+		if name == nil {
+			continue
+		}
+		if i < len(typeExprs) && typeExprs[i] != nil && g.typeNeedsSelfDispatch(typeExprs[i]) {
+			g.markSelfReceiver(name.Value)
+			continue
+		}
+		if i < len(values) && values[i] != nil && g.valueNeedsSelfDispatch(values[i]) {
+			g.markSelfReceiver(name.Value)
+		}
+	}
+}
+
+// trackParameterReceivers records parameters that are class instances or strings.
+func (g *Generator) trackParameterReceivers(params []*ast.Parameter) {
+	for _, param := range params {
+		if param == nil || param.Name == nil || param.Type == nil {
+			continue
+		}
+		if g.typeNeedsSelfDispatch(param.Type) {
+			g.markSelfReceiver(param.Name.Value)
+		}
+	}
+}
+
+// usesImplicitSelf decides between Lua's ':' and '.' call syntax for a member
+// call. The type checker's resolution wins when available; otherwise the
+// receiver is inferred from what the generator has seen so far, defaulting to
+// '.' so that library calls like table.insert(t, v) stay correct.
+func (g *Generator) usesImplicitSelf(dotExpr *ast.DotExpression, property string) bool {
+	// obj:method() in the source says exactly what it wants.
+	if dotExpr.IsMethodCall {
+		return true
+	}
+
+	switch dotExpr.MethodDispatch {
+	case ast.DispatchSelf:
+		return true
+	case ast.DispatchPlain:
+		return false
+	}
+
+	// Untyped fallback (--no-typecheck, or a receiver the checker left as 'any').
+	switch left := dotExpr.Left.(type) {
+	case *ast.Identifier:
+		// A static method reached through its class name takes no self.
+		if g.classes[left.Value] {
+			return !(g.staticMethods[left.Value] != nil && g.staticMethods[left.Value][property])
+		}
+		if left.Value == "self" || left.Value == "super" {
+			return true
+		}
+		return g.isSelfReceiver(left.Value)
+	case *ast.StringLiteral, *ast.TemplateLiteral:
+		return true
+	case *ast.DotExpression:
+		// self.field.method(): the field's type is unknown here, but a method
+		// call on an instance field is far more common than a module lookup
+		// through a class instance.
+		if inner, ok := left.Left.(*ast.Identifier); ok && (inner.Value == "self" || inner.Value == "super") {
+			return true
+		}
+	}
+
+	return false
+}
+
 // generateCallExpression generates code for a function call
 func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 	// Check if this is a method call on an object (DotExpression)
@@ -1253,17 +1391,7 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 			return fmt.Sprintf("%s(%s)", function, strings.Join(args, ", "))
 		}
 
-		// Check if calling a static method on a class name
-		useColonSyntax := true // Default to : for instance methods
-		if ident, ok := dotExpr.Left.(*ast.Identifier); ok {
-			className := ident.Value
-			// If calling on a class name and the method is static, use dot syntax
-			if g.classes[className] {
-				if g.staticMethods[className] != nil && g.staticMethods[className][property] {
-					useColonSyntax = false
-				}
-			}
-		}
+		useColonSyntax := g.usesImplicitSelf(dotExpr, property)
 
 		object := g.generateExpression(dotExpr.Left)
 
@@ -1432,6 +1560,12 @@ func (g *Generator) generateDotExpression(node *ast.DotExpression) string {
 		return fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp.%s else return nil end end)()", left, right)
 	}
 
+	// Method call syntax (obj:method) is preserved verbatim; the parser only
+	// produces it when a call follows, which generateCallExpression handles.
+	if node.IsMethodCall {
+		return fmt.Sprintf("%s:%s", left, right)
+	}
+
 	return fmt.Sprintf("%s.%s", left, right)
 }
 
@@ -1446,6 +1580,10 @@ func (g *Generator) generateIndexExpression(node *ast.IndexExpression) string {
 // generateFunctionExpression generates code for an anonymous function expression
 func (g *Generator) generateFunctionExpression(node *ast.FunctionExpression) string {
 	var output strings.Builder
+
+	g.pushReceiverScope()
+	defer g.popReceiverScope()
+	g.trackParameterReceivers(node.Parameters)
 
 	output.WriteString("function(")
 

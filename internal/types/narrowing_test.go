@@ -122,3 +122,75 @@ end
 		t.Errorf("unexpected type error: %s", err.Message)
 	}
 }
+
+// Class methods never recorded which parameters are optional, so an argument
+// that may be omitted was still demanded at the call site.
+func TestClassMethodOptionalParameter(t *testing.T) {
+	input := `
+class Greeter
+	greet(name: string, punctuation: string?): string
+		if punctuation == nil then
+			return name
+		end
+		return name .. punctuation
+	end
+end
+
+local g: Greeter = Greeter()
+local a: string = g.greet("ada")
+local b: string = g.greet("ada", "!")
+`
+
+	for _, err := range checkSource(t, input) {
+		t.Errorf("unexpected type error: %s", err.Message)
+	}
+}
+
+// The same for constructors.
+func TestConstructorOptionalParameter(t *testing.T) {
+	input := `
+class Box
+	private label: string
+
+	constructor(label: string?)
+		if label == nil then
+			self.label = "empty"
+		else
+			self.label = label
+		end
+	end
+end
+
+local a: Box = Box()
+local b: Box = Box("full")
+`
+
+	for _, err := range checkSource(t, input) {
+		t.Errorf("unexpected type error: %s", err.Message)
+	}
+}
+
+// An optional enum parameter resolves to `Enum | nil`, so the enum has to be
+// assignable to a union that lists it.
+func TestEnumIsAssignableToUnionContainingIt(t *testing.T) {
+	input := `
+enum Priority
+	Low = 1
+	High = 2
+end
+
+function schedule(title: string, priority: Priority?): string
+	if priority == nil then
+		return title
+	end
+	return title
+end
+
+local a: string = schedule("task")
+local b: string = schedule("task", Priority.High)
+`
+
+	for _, err := range checkSource(t, input) {
+		t.Errorf("unexpected type error: %s", err.Message)
+	}
+}

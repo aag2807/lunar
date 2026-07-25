@@ -1161,6 +1161,15 @@ func (t *EnumType) IsAssignableTo(other Type) bool {
 	if _, isUnknown := other.(*UnknownType); isUnknown {
 		return true
 	}
+	// An enum fits a union that lists it, which is what an optional enum
+	// parameter (Priority?) resolves to.
+	if union, ok := other.(*UnionType); ok {
+		for _, member := range union.Types {
+			if t.IsAssignableTo(member) {
+				return true
+			}
+		}
+	}
 	return false
 }
 

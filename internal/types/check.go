@@ -615,12 +615,22 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 	// Register constructor
 	if node.Constructor != nil {
 		params := make([]Type, len(node.Constructor.Parameters))
+		ctorOptional := make([]bool, len(node.Constructor.Parameters))
+		ctorHasRest := false
 		for i, param := range node.Constructor.Parameters {
 			if param.Type != nil {
 				params[i] = c.resolveTypeExpression(param.Type)
 			} else {
 				params[i] = Any
 			}
+
+			if param.IsRest {
+				ctorHasRest = true
+				if _, ok := params[i].(*ArrayType); !ok {
+					params[i] = &ArrayType{ElementType: params[i]}
+				}
+			}
+			ctorOptional[i] = paramIsOptional(param, params[i])
 
 			// Handle constructor parameter properties
 			if param.Visibility != "" {
@@ -640,26 +650,39 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 			}
 		}
 		classType.Constructor = &FunctionType{
-			Parameters:    params,
-			ReturnType:    classType, // Constructor returns an instance of the class
-			GenericParams: []string{}, // Constructors are not separately generic
+			Parameters:       params,
+			ReturnType:       classType,  // Constructor returns an instance of the class
+			GenericParams:    []string{}, // Constructors are not separately generic
+			OptionalParams:   ctorOptional,
+			HasRestParameter: ctorHasRest,
 		}
 	}
 
 	// Register methods
 	for _, method := range node.Methods {
 		params := make([]Type, len(method.Parameters))
+		optionalParams := make([]bool, len(method.Parameters))
+		hasRestParam := false
 		for i, param := range method.Parameters {
 			params[i] = c.resolveTypeExpression(param.Type)
+			if param.IsRest {
+				hasRestParam = true
+				if _, ok := params[i].(*ArrayType); !ok {
+					params[i] = &ArrayType{ElementType: params[i]}
+				}
+			}
+			optionalParams[i] = paramIsOptional(param, params[i])
 		}
 		var returnType Type = Void
 		if method.ReturnType != nil {
 			returnType = c.resolveTypeExpression(method.ReturnType)
 		}
 		funcType := &FunctionType{
-			Parameters:    params,
-			ReturnType:    returnType,
-			GenericParams: []string{}, // Methods are not separately generic
+			Parameters:       params,
+			ReturnType:       returnType,
+			GenericParams:    []string{}, // Methods are not separately generic
+			OptionalParams:   optionalParams,
+			HasRestParameter: hasRestParam,
 		}
 		methodName := method.Name.Value
 
@@ -2103,6 +2126,18 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 			c.env.Set(name.Value, finalType)
 		}
 	}
+}
+
+// requiredParamCount returns how many arguments a signature demands, which is
+// the number of parameters before the first optional one.
+func requiredParamCount(fnType *FunctionType) int {
+	for i, isOptional := range fnType.OptionalParams {
+		if isOptional {
+			return i
+		}
+	}
+
+	return len(fnType.Parameters)
 }
 
 // yieldsMultipleValues reports whether an expression can produce more than one
@@ -3859,8 +3894,9 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 			}
 		}
 
-		// Check argument count (skip if there are spread arguments)
-		if !hasSpread && len(node.Arguments) != len(fnType.Parameters) {
+		// Check argument count (skip if there are spread arguments). Trailing
+		// optional parameters may be omitted, as with any other call.
+		if !hasSpread && (len(node.Arguments) < requiredParamCount(fnType) || len(node.Arguments) > len(fnType.Parameters)) {
 			c.addError(
 				fmt.Sprintf("Constructor expects %d arguments, got %d",
 					len(fnType.Parameters), len(node.Arguments)),

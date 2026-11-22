@@ -1,0 +1,16 @@
+class K
+    static count: number = 0
+    g(): number
+        return 1
+    end
+    get only(): number
+        return 1
+    end
+end
+local k = K()
+local a = k.count
+local b = K.g()
+k.only = 5
+-- error: static
+-- error: 'g' is an instance method
+-- error: 'only' has a getter but no setter

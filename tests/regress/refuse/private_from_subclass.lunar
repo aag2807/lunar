@@ -1,0 +1,9 @@
+class Base
+    private secret: number = 1
+end
+class Sub extends Base
+    peek(): number
+        return self.secret
+    end
+end
+-- error: private property 'secret'

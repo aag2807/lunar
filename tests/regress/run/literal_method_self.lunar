@@ -1,0 +1,17 @@
+-- A table literal implementing an interface method gets self typed as the
+-- interface, so calls through self take ':'.
+interface Fighter
+    name: string
+    bonus(): number
+    attack(target: string): number
+end
+local orc: Fighter = {
+    name = "orc",
+    bonus = function(self): number
+        return #self.name - 1
+    end,
+    attack = function(self, target: string): number
+        return #target + self.bonus()
+    end,
+}
+assert(orc.attack("imp") == 5)

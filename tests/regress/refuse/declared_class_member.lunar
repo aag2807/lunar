@@ -1,0 +1,8 @@
+declare class Sprite
+    x: number
+    constructor(path: string)
+    draw(): void
+end
+local s = Sprite("hero.png")
+s.pause()
+-- error: Class 'Sprite' has no member 'pause'

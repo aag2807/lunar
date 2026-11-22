@@ -260,6 +260,12 @@ type Checker struct {
 	classes           map[string]*ClassType
 	interfaces        map[string]*InterfaceType
 	genericInterfaces map[string]*GenericInterfaceType
+	// accessedDeclarer is the class declaring the member being accessed,
+	// for the private check.
+	accessedDeclarer *ClassType
+	// laterLocals are local functions further down a block than their
+	// first use, for saying why such a use is undefined.
+	laterLocals map[string]lexer.Token
 	// namespaces are the types of the namespace declarations seen.
 	namespaces map[*ast.NamespaceDeclaration]*NamespaceType
 	// sharedMemberSyms are the member symbols of the generic interface an
@@ -700,6 +706,13 @@ func (c *Checker) checkModuleShape(statements []ast.Statement) {
 // normal; without this, forward references and mutual recursion both fail with
 // "Undefined variable".
 func (c *Checker) hoistFunctionSignatures(statements []ast.Statement) {
+	c.hoistFunctions(statements, false)
+}
+
+// hoistFunctions makes the functions of a block callable before their
+// declarations. A local function is in scope only after it, as in Lua,
+// unless withLocals (a namespace, whose block declares its locals first).
+func (c *Checker) hoistFunctions(statements []ast.Statement, withLocals bool) {
 	// A name the file declares is published by its declaration, which an
 	// implementation is then checked against; a placeholder would get in
 	// the way.
@@ -718,6 +731,15 @@ func (c *Checker) hoistFunctionSignatures(statements []ast.Statement) {
 		}
 		fn, ok := stmt.(*ast.FunctionDeclaration)
 		if !ok || fn.Name == nil || fn.Receiver != nil || declared[fn.Name.Value] {
+			continue
+		}
+		if fn.IsLocal && !withLocals {
+			if c.laterLocals == nil {
+				c.laterLocals = map[string]lexer.Token{}
+			}
+			if _, seen := c.laterLocals[fn.Name.Value]; !seen {
+				c.laterLocals[fn.Name.Value] = fn.Name.Token
+			}
 			continue
 		}
 
@@ -2673,6 +2695,19 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 		}
 	}
 
+	// A table literal written for an interface: an untyped self in the
+	// functions it gives for the interface's methods is that interface, so
+	// calls through self get their ':'.
+	for i, value := range node.Values {
+		if i < len(node.Types) && node.Types[i] != nil {
+			if iface, ok := declaredTypes[i].(*InterfaceType); ok {
+				if lit, ok := value.(*ast.TableLiteral); ok {
+					typeMethodSelf(lit, iface, node.Types[i])
+				}
+			}
+		}
+	}
+
 	// Handle no value assignment
 	if len(node.Values) == 0 {
 		// Register variables with their declared types (or nil)
@@ -4129,6 +4164,27 @@ func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target as
 		}
 	}
 
+	// Enum members are constants, and a property with only a getter cannot
+	// be set (the assignment would hide the getter for good).
+	if dot, ok := target.(*ast.DotExpression); ok {
+		if field, ok := dot.Right.(*ast.Identifier); ok {
+			switch owner := c.checkExpression(dot.Left).(type) {
+			case *EnumType:
+				c.addError(fmt.Sprintf("Cannot assign to enum member '%s'", field.Value), field.Token)
+				return
+			case *ClassType:
+				if _, isProp := owner.GetProperty(field.Value); !isProp {
+					_, hasGetter := owner.GetGetter(field.Value)
+					_, hasSetter := owner.GetSetter(field.Value)
+					if hasGetter && !hasSetter {
+						c.addError(fmt.Sprintf("'%s' has a getter but no setter, so it cannot be assigned", field.Value), field.Token)
+						return
+					}
+				}
+			}
+		}
+	}
+
 	// Assigning a field an unannotated table literal lacks adds it, as in
 	// Lua: local t = { a = 1 }; t.b = 2.
 	if dot, ok := target.(*ast.DotExpression); ok && !dot.IsOptional {
@@ -4773,6 +4829,28 @@ func inferTypeArgs(param, arg Type, names []string, args []Type, inferred []bool
 	}
 }
 
+// typeMethodSelf annotates an untyped first parameter named self, in each
+// function a literal gives for one of iface's methods, with the type the
+// literal is written for (annotation).
+func typeMethodSelf(lit *ast.TableLiteral, iface *InterfaceType, annotation ast.Expression) {
+	for key, value := range lit.Pairs {
+		name, ok := key.(*ast.Identifier)
+		if !ok {
+			continue
+		}
+		if _, isMethod := iface.methodType(name.Value); !isMethod {
+			continue
+		}
+		fn, ok := value.(*ast.FunctionExpression)
+		if !ok || len(fn.Parameters) == 0 {
+			continue
+		}
+		if self := fn.Parameters[0]; self.Name != nil && self.Name.Value == "self" && self.Type == nil {
+			self.Type = annotation
+		}
+	}
+}
+
 // withoutFirstParameter is fn as called with ':', which supplies the first
 // argument itself.
 func withoutFirstParameter(fn *FunctionType) *FunctionType {
@@ -4873,6 +4951,11 @@ func (c *Checker) checkIdentifier(node *ast.Identifier) Type {
 	if !ok {
 		// Build error message with suggestions
 		errorMsg := fmt.Sprintf("Undefined variable '%s'", node.Value)
+		if later, ok := c.laterLocals[node.Value]; ok && later.File == node.Token.File && later.Offset > node.Token.Offset {
+			c.addError(fmt.Sprintf("'%s' is declared further down (line %d) as a local, so it is not in scope here: declare it before this use, or write `local %s` first",
+				node.Value, later.Line, node.Value), node.Token)
+			return Any
+		}
 
 		// Collect all available names from environment, classes, interfaces, etc.
 		candidates := c.env.GetAllNames()
@@ -5897,6 +5980,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		}
 		return wrapIfOptional(Any)
 	case *ClassType:
+		c.accessedDeclarer = declaringClass(typ, propertyName)
 		// The class's own name on the left means the class itself rather than
 		// an instance; one type stands for both.
 		// So does a namespace or module member of that name: Game.Enemy,
@@ -5925,6 +6009,24 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 				ctor = &FunctionType{Parameters: []Type{}, ReturnType: typ}
 			}
 			return resolved(ast.DispatchPlain, ctor)
+		}
+
+		// A static member belongs to the class, an instance member to its
+		// instances; reaching one through the other finds nothing at run time.
+		if !viaClassName && !typ.Ambient {
+			if _, isStatic := typ.GetStaticProperty(propertyName); isStatic {
+				c.addError(fmt.Sprintf("'%s' is static: write %s.%s", propertyName, typ.Name, propertyName), rightIdent.Token)
+			} else if _, isStatic := typ.GetStaticMethod(propertyName); isStatic {
+				c.addError(fmt.Sprintf("'%s' is static: write %s.%s(...)", propertyName, typ.Name, propertyName), rightIdent.Token)
+			}
+		}
+		if viaClassName && !typ.Ambient {
+			if _, isMethod := typ.GetMethod(propertyName); isMethod {
+				if _, isStatic := typ.GetStaticMethod(propertyName); !isStatic {
+					c.addError(fmt.Sprintf("'%s' is an instance method: call it on a %s, not on the class", propertyName, typ.Name), rightIdent.Token)
+					return wrapIfOptional(Any)
+				}
+			}
 		}
 
 		// Check static properties first (when accessing class directly like Math.PI)
@@ -5988,8 +6090,10 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		if setter, ok := typ.GetSetter(propertyName); ok && len(setter.Parameters) == 1 {
 			return resolved(ast.DispatchPlain, setter.Parameters[0])
 		}
-		// A declared class may describe only part of a foreign table.
+		// A declared class lists what the engine's table has; anything else
+		// is a mistake, as for a declared interface.
 		if typ.Ambient {
+			c.addErrorCode("unknown-member", fmt.Sprintf("Class '%s' has no member '%s'.%s", typ.Name, propertyName, didYouMean(propertyName, typ.MemberNames())), rightIdent.Token)
 			return wrapIfOptional(Any)
 		}
 		// Probing for a subclass's member is how a type guard tells them
@@ -6486,6 +6590,25 @@ func (c *Checker) checkTemplateLiteral(node *ast.TemplateLiteral) Type {
 }
 
 // canAccessMember checks if the current context can access a member with the given visibility
+// declaringClass is the class in typ's chain that declares member name.
+func declaringClass(typ *ClassType, name string) *ClassType {
+	for cl := typ; cl != nil; cl = cl.Parent {
+		if _, ok := cl.Properties[name]; ok {
+			return cl
+		}
+		if _, ok := cl.Methods[name]; ok {
+			return cl
+		}
+		if _, ok := cl.StaticProperties[name]; ok {
+			return cl
+		}
+		if _, ok := cl.StaticMethods[name]; ok {
+			return cl
+		}
+	}
+	return typ
+}
+
 func (c *Checker) canAccessMember(targetClass *ClassType, visibility string) bool {
 	// Public members are always accessible
 	if visibility == "public" || visibility == "" {
@@ -6497,9 +6620,10 @@ func (c *Checker) canAccessMember(targetClass *ClassType, visibility string) boo
 		return false
 	}
 
-	// Private members can only be accessed from the same class
+	// Private members can only be accessed from the class that declares
+	// them, not from a subclass
 	if visibility == "private" {
-		return c.currentClass.Equals(targetClass)
+		return c.currentClass.Equals(targetClass) && c.currentClass == c.accessedDeclarer
 	}
 
 	// Protected members can be accessed from the same class or child classes
@@ -6670,7 +6794,7 @@ func (c *Checker) checkNamespaceDeclaration(node *ast.NamespaceDeclaration) {
 			c.env.Set(name, t)
 		}
 	}
-	c.hoistFunctionSignatures(node.Statements)
+	c.hoistFunctions(node.Statements, true)
 
 	for _, stmt := range node.Statements {
 		exported := false

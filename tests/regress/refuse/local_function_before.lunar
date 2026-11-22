@@ -1,0 +1,7 @@
+local function a(): number
+    return b()
+end
+local function b(): number
+    return 1
+end
+-- error: 'b' is declared further down

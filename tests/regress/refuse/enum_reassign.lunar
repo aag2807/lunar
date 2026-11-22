@@ -1,0 +1,6 @@
+enum Color
+    Red
+    Green
+end
+Color.Red = Color.Green
+-- error: Cannot assign to enum member 'Red'

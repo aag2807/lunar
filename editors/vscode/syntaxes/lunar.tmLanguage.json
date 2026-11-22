@@ -13,7 +13,19 @@
       "include": "#numbers"
     },
     {
+      "include": "#labels"
+    },
+    {
+      "include": "#attributes"
+    },
+    {
       "include": "#decorators"
+    },
+    {
+      "include": "#members"
+    },
+    {
+      "include": "#locals"
     },
     {
       "include": "#declarations"
@@ -129,7 +141,7 @@
     "declarations": {
       "patterns": [
         {
-          "match": "\\b(class|interface|enum|type|namespace)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "\\b(class|interface|enum|type|namespace)\\s+([A-Za-z_][A-Za-z0-9_]*)(?=\\s*($|<|=|extends\\b|implements\\b|--))",
           "captures": {
             "1": {
               "name": "storage.type.lunar"
@@ -149,6 +161,17 @@
               "name": "entity.name.function.lunar"
             }
           }
+        },
+        {
+          "match": "\\b(extends|implements)\\s+([A-Za-z_][A-Za-z0-9_.]*)",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.lunar"
+            },
+            "2": {
+              "name": "entity.other.inherited-class.lunar"
+            }
+          }
         }
       ]
     },
@@ -156,23 +179,27 @@
       "patterns": [
         {
           "name": "keyword.control.lunar",
-          "match": "\\b(if|then|else|elseif|end|for|while|do|repeat|until|break|return|in|match|with|when)\\b"
+          "match": "\\b(if|then|else|elseif|end|for|while|do|repeat|until|break|return|in|goto)\\b"
+        },
+        {
+          "name": "keyword.control.lunar",
+          "match": "\\bmatch\\b(?=\\s+.*\\bwith\\b)|\\bwith\\s*$|\\bwhen\\b(?!\\s*[=.:(\\[])"
         },
         {
           "name": "keyword.control.import.lunar",
-          "match": "\\b(import|export|from|declare)\\b"
+          "match": "^\\s*(import|export|declare)\\b|\\bfrom\\b(?=\\s*[\"'])"
         },
         {
           "name": "storage.type.lunar",
-          "match": "\\b(local|const|function|class|interface|enum|type|namespace|constructor|get|set)\\b"
+          "match": "\\b(local|const|function)\\b|\\bconstructor\\b(?=\\s*\\()|\\b(get|set)\\b(?=\\s+[A-Za-z_][A-Za-z0-9_]*\\s*\\()"
         },
         {
           "name": "storage.modifier.lunar",
-          "match": "\\b(public|private|protected|readonly|static|abstract|extends|implements|async)\\b"
+          "match": "\\b(public|private|protected|readonly|static|abstract|async)\\b(?=\\s+[A-Za-z_])|\\b(extends|implements)\\b(?=\\s+[A-Za-z_])"
         },
         {
           "name": "keyword.operator.word.lunar",
-          "match": "\\b(and|or|not|as|is|keyof|typeof|await)\\b"
+          "match": "\\b(and|or|not)\\b|\\b(as|is|keyof|typeof)\\b(?=\\s+[A-Za-z_({\"'])|\\bawait\\b"
         }
       ]
     },
@@ -183,7 +210,7 @@
           "match": "\\b(number|string|boolean|any|void|never|unknown|table)\\b"
         },
         {
-          "match": ":\\s*([A-Z][A-Za-z0-9_]*)",
+          "match": ":\\s*([A-Z][A-Za-z0-9_]*)(?!\\s*[({\"'])",
           "captures": {
             "1": {
               "name": "entity.name.type.lunar"
@@ -223,6 +250,86 @@
           "match": "\\bself\\b"
         }
       ]
+    },
+    "labels": {
+      "patterns": [
+        {
+          "match": "(::)([A-Za-z_][A-Za-z0-9_]*)(::)",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.label.lunar"
+            },
+            "2": {
+              "name": "entity.name.label.lunar"
+            },
+            "3": {
+              "name": "punctuation.definition.label.lunar"
+            }
+          }
+        },
+        {
+          "match": "\\b(goto)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.goto.lunar"
+            },
+            "2": {
+              "name": "entity.name.label.lunar"
+            }
+          }
+        }
+      ]
+    },
+    "attributes": {
+      "match": "(<)\\s*(const|close)\\s*(>)",
+      "captures": {
+        "1": {
+          "name": "punctuation.definition.attribute.lunar"
+        },
+        "2": {
+          "name": "storage.modifier.attribute.lunar"
+        },
+        "3": {
+          "name": "punctuation.definition.attribute.lunar"
+        }
+      }
+    },
+    "members": {
+      "patterns": [
+        {
+          "match": "(?<![.:])([.:])([A-Za-z_][A-Za-z0-9_]*)(?=\\s*[({\"'`])",
+          "captures": {
+            "1": {
+              "name": "punctuation.accessor.lunar"
+            },
+            "2": {
+              "name": "entity.name.function.member.lunar"
+            }
+          }
+        },
+        {
+          "match": "(?<!\\.)(\\.)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "punctuation.accessor.lunar"
+            },
+            "2": {
+              "name": "variable.other.property.lunar"
+            }
+          }
+        }
+      ]
+    },
+    "locals": {
+      "match": "\\b(local)\\s+(?!function\\b)([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": {
+          "name": "storage.type.lunar"
+        },
+        "2": {
+          "name": "variable.other.local.lunar"
+        }
+      }
     }
   }
 }

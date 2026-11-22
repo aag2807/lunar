@@ -1,27 +1,72 @@
 {
   "comments": {
     "lineComment": "--",
-    "blockComment": ["--[[", "]]"]
+    "blockComment": [
+      "--[[",
+      "]]"
+    ]
   },
   "brackets": [
-    ["{", "}"],
-    ["[", "]"],
-    ["(", ")"]
+    [
+      "{",
+      "}"
+    ],
+    [
+      "[",
+      "]"
+    ],
+    [
+      "(",
+      ")"
+    ]
   ],
   "autoClosingPairs": [
-    { "open": "{", "close": "}" },
-    { "open": "[", "close": "]" },
-    { "open": "(", "close": ")" },
-    { "open": "\"", "close": "\"" },
-    { "open": "'", "close": "'" },
-    { "open": "--[[", "close": "]]" }
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    },
+    {
+      "open": "--[[",
+      "close": "]]"
+    }
   ],
   "surroundingPairs": [
-    { "open": "{", "close": "}" },
-    { "open": "[", "close": "]" },
-    { "open": "(", "close": ")" },
-    { "open": "\"", "close": "\"" },
-    { "open": "'", "close": "'" }
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
   ],
   "folding": {
     "markers": {
@@ -31,7 +76,7 @@
   },
   "wordPattern": "[a-zA-Z_][a-zA-Z0-9_]*",
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*(else|elseif|for|function|if|repeat|while|class|interface|enum)\\b.*$|\\{\\s*$",
-    "decreaseIndentPattern": "^\\s*(end|else|elseif|until|\\})\\s*$"
+    "increaseIndentPattern": "^\\s*((local|export)\\s+)?(async\\s+)?function\\b(?!.*\\bend\\b)|^\\s*(if|for|while|elseif)\\b(?!.*\\bend\\b\\s*$)|^\\s*(else|repeat|do)\\s*$|^\\s*((export|declare)\\s+)?(abstract\\s+)?(class|interface|enum|namespace)\\b(?!.*\\bend\\b)|^\\s*(constructor|(get|set)\\s+[A-Za-z_][A-Za-z0-9_]*)\\s*\\(|^\\s*((public|private|protected|static|abstract)\\s+)*[A-Za-z_][A-Za-z0-9_]*\\s*(<[^>]*>)?\\([^)]*\\)\\s*:\\s*[^=]*$|\\bfunction\\s*\\([^)]*\\)[^)]*$|\\bmatch\\b.*\\bwith\\s*$|\\{\\s*$|\\(\\s*$",
+    "decreaseIndentPattern": "^\\s*(end|until)\\b|^\\s*(else|elseif)\\b|^\\s*[})]"
   }
 }

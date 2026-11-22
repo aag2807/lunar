@@ -43,3 +43,8 @@ lists build errors in the Problems panel:
   "problemMatcher": "$lunar"
 }
 ```
+
+The matcher reads the JSON lines with a pattern, so a message keeps the
+JSON escapes of any `"` in it, and columns count bytes (as `--json`
+documents): on a line with non-ASCII text the underline may sit a little to
+the right. The language server's own diagnostics have neither problem.

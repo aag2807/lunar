@@ -82,7 +82,7 @@ refused with an error: Lua's coroutines do that job. Targets other than Lua
 Requires Go 1.23 or newer.
 
 ```sh
-make build                       # builds dist/lunar and dist/lunar-lsp
+make build                       # builds dist/lunar (and dist/lunar-lsp, an alias for `lunar lsp`)
 make install PREFIX=$HOME/.local # copies them to $HOME/.local/bin
 ```
 
@@ -176,16 +176,37 @@ end
 
 ## Editor support
 
-`lunar-lsp` is a language server (diagnostics, hover, completion). Editor
-plugins live in [`editors/`](editors/); they are being reworked, along with the
-server, for Neovim, VS Code and Zed.
+`lunar lsp` is the language server. It reads the same configuration and
+declarations as `lunar build`, so the editor and the build agree:
+diagnostics for every file as you type, go to definition (into the standard
+library too), references and rename across files, hover with types,
+completion of members and names in scope, signature help, and document and
+workspace symbols.
+
+| Editor | | |
+|---|---|---|
+| Neovim 0.11+ | [`editors/nvim`](editors/nvim) | `vim.lsp`, tree-sitter highlighting, folding and indentation |
+| Zed | [`editors/zed`](editors/zed) | the language server and tree-sitter highlighting |
+| VS Code | [`editors/vscode`](editors/vscode) | the language server and TextMate highlighting; runs in WSL |
+
+The tree-sitter grammar is [`editors/tree-sitter-lunar`](editors/tree-sitter-lunar).
+
+## Documentation
+
+- [`docs/LANGUAGE.md`](docs/LANGUAGE.md): the language, with examples the tests compile
+- [`docs/ENGINE_INTEGRATION.md`](docs/ENGINE_INTEGRATION.md): running Lunar from a
+  game engine or build tool: configuration, `lunar build`, JSON output, exit
+  codes, `require` names, data files, declaring the engine's API
+- [`CHANGELOG.md`](CHANGELOG.md)
 
 ## Development
 
 ```sh
-go test ./...                                   # unit, golden and integration tests
-LUNAR_REQUIRE_LUA=1 go test ./tests/...         # fail (not skip) when Lua is missing
+go test ./...                                   # unit, golden, runtime and integration tests
+LUNAR_REQUIRE_LUA=1 go test ./...               # fail (not skip) when Lua is missing
 go test ./tests/examples -run TestGoldenOutput -update   # accept new codegen output
+editors/tree-sitter-lunar/check.sh              # the grammar: needs the tree-sitter CLI
+editors/nvim/test/run.sh                        # headless Neovim smoke test
 ```
 
 The runtime tests need `lua5.3` and `lua5.4`; the no-libraries host test needs

@@ -1,19 +1,14 @@
 # Feature examples
 
-One program per documented feature area, written to be run rather than read.
-Each file compiles with the checker enabled and executes under Lua 5.4; between
-them they cover the language surface listed in the root README.
+One program per language feature, written to be run rather than read. Each
+ends with asserts on the values it computes, so a wrong answer fails as well as
+a crash. `tests/examples` compiles every one for `lua53` and `lua54` and runs it
+under Lua 5.3 and 5.4; `go test ./tests/examples` does the same locally.
 
 ```sh
-make build
 for f in examples/features/*.lunar; do
-    ./dist/lunar --no-cache "$f" && lua5.4 "${f%.lunar}.lua"
+    lunar "$f" && (cd examples/features && lua5.4 "$(basename "${f%.lunar}").lua")
 done
 ```
 
-`mod/math_utils.lunar` is imported by `17_modules.lunar`; compile it first so
-`require` can find the generated module.
-
-These doubled as an audit: writing them surfaced eleven defects, from `local
-function` not parsing to `super()` never running the parent constructor. Keeping
-them in the repository means the same ground is covered every time they are run.
+`mod/math_utils.lunar` is imported by `17_modules.lunar`; compile it too.

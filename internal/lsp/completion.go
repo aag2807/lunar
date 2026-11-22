@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 
+	"lunar/internal/lexer"
+	"lunar/internal/project"
 	"lunar/internal/types"
 )
 
@@ -41,6 +43,10 @@ func chainBefore(text string, end int) []string {
 		chain = append([]string{name}, chain...)
 		if start > 0 && (text[start-1] == '.' || text[start-1] == ':') {
 			end = start - 1
+			// a?.b reads as a.b
+			if text[start-1] == '.' && end > 0 && text[end-1] == '?' {
+				end--
+			}
 			continue
 		}
 		return chain
@@ -54,9 +60,17 @@ func (s *Server) lookupName(path, name string, offset int) *types.Symbol {
 	if m == nil {
 		return nil
 	}
+	return lookupIn(m.Index, path, name, offset)
+}
+
+// lookupIn is lookupName in a given index.
+func lookupIn(ix *types.Index, path, name string, offset int) *types.Symbol {
+	if ix == nil {
+		return nil
+	}
 	var best *types.Occurrence
-	for i := range m.Index.Occurrences {
-		o := &m.Index.Occurrences[i]
+	for i := range ix.Occurrences {
+		o := &ix.Occurrences[i]
 		if o.Tok.File == path && o.Tok.Literal == name && o.Tok.Offset < offset && o.Sym.Container == "" {
 			if best == nil || o.Tok.Offset > best.Tok.Offset {
 				best = o
@@ -66,7 +80,7 @@ func (s *Server) lookupName(path, name string, offset int) *types.Symbol {
 	if best != nil {
 		return best.Sym
 	}
-	for _, sym := range m.Index.Symbols {
+	for _, sym := range ix.Symbols {
 		if sym.Name == name && sym.Container == "" && sym.ScopeEnd == -1 {
 			return sym
 		}
@@ -76,20 +90,30 @@ func (s *Server) lookupName(path, name string, offset int) *types.Symbol {
 
 // typeOfChain finds the type of a dotted expression such as self.pos.
 func (s *Server) typeOfChain(path string, chain []string, offset int) types.Type {
-	if len(chain) == 0 {
-		return nil
+	if m := s.modules[path]; m != nil {
+		t, _ := typeOfChainIn(m.Index, path, chain, offset)
+		return t
 	}
-	sym := s.lookupName(path, chain[0], offset)
+	return nil
+}
+
+// typeOfChainIn is typeOfChain in a given index; it also returns the
+// symbol the chain starts with.
+func typeOfChainIn(ix *types.Index, path string, chain []string, offset int) (types.Type, *types.Symbol) {
+	if len(chain) == 0 {
+		return nil, nil
+	}
+	sym := lookupIn(ix, path, chain[0], offset)
 	if sym == nil {
-		return nil
+		return nil, nil
 	}
 	t := sym.Type
 	for _, member := range chain[1:] {
 		if t = memberType(t, member); t == nil {
-			return nil
+			return nil, sym
 		}
 	}
-	return t
+	return t, sym
 }
 
 // unwrap strips nil from an optional, so `enemy?.` completes like `enemy.`.
@@ -189,9 +213,139 @@ func members(t types.Type, methodsOnly bool) []member {
 		for name, m := range typ.Members {
 			add(name, m, EnumMemberKind)
 		}
+	case *types.ArrayType:
+		// `local M = {}` and the fields given to it since.
+		for name, sym := range typ.MemberSyms {
+			kind := FieldCompletion
+			if _, isFn := sym.Type.(*types.FunctionType); isFn {
+				kind = FunctionCompletion
+			}
+			if !methodsOnly || kind == FunctionCompletion {
+				seen[name] = true
+				out = append(out, member{name, sym.Type, kind})
+			}
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
 	return out
+}
+
+// staticMembers lists what follows `Class.`: new, and the statics.
+func staticMembers(cl *types.ClassType) []member {
+	out := []member{{"new", cl.Constructor, FunctionCompletion}}
+	seen := map[string]bool{"new": true}
+	for c := cl; c != nil; c = c.Parent {
+		for name, m := range c.StaticMethods {
+			if !seen[name] {
+				seen[name] = true
+				out = append(out, member{name, m, FunctionCompletion})
+			}
+		}
+		for name, p := range c.StaticProperties {
+			if !seen[name] {
+				seen[name] = true
+				out = append(out, member{name, p, FieldCompletion})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
+	return out
+}
+
+// inCommentOrString says whether offset is inside a comment or a string,
+// where completion offers nothing.
+func inCommentOrString(text string, offset int) bool {
+	if offset > len(text) {
+		offset = len(text)
+	}
+	l := lexer.New(text)
+	prevEnd := 0
+	for i := 0; i < 1_000_000; i++ {
+		tok := l.NextToken()
+		if tok.Type == lexer.EOF || tok.Offset >= offset {
+			// Only whitespace and comments lie between the last token and
+			// offset: offset is in a comment if one is open there.
+			gap := text[prevEnd:offset]
+			at := strings.LastIndex(gap, "--")
+			if at < 0 {
+				return false
+			}
+			rest := gap[at:]
+			if strings.HasPrefix(rest, "--[") {
+				return !strings.Contains(rest, "]")
+			}
+			return !strings.Contains(rest, "\n")
+		}
+		unterminated := tok.Type == lexer.ILLEGAL && strings.HasPrefix(tok.Literal, "unterminated string")
+		if (tok.Type == lexer.STRING || unterminated) && tok.Offset < offset && (offset < tok.End || unterminated && offset <= tok.End) {
+			return true
+		}
+		prevEnd = tok.End
+	}
+	return false
+}
+
+// typePosition says whether a name starting at start is where a type is
+// written: after `name: ` or `): `, after `<`, extends, implements or as.
+func typePosition(text string, start int) bool {
+	i := start
+	for i > 0 && (text[i-1] == ' ' || text[i-1] == '\t') {
+		i--
+	}
+	if i == 0 {
+		return false
+	}
+	switch text[i-1] {
+	case ':':
+		return i < start // `x: T`; `obj:m` is a method call
+	case '<', '|', '&':
+		return true
+	}
+	word, _ := identBefore(text, i)
+	return word == "extends" || word == "implements" || word == "as"
+}
+
+// builtinTypes are the type names that are not symbols.
+var builtinTypes = []string{"any", "boolean", "never", "nil", "number", "string", "table", "unknown", "void"}
+
+// completionIndex is the index completion reads at offset in path: the
+// last analysis, or, while the file does not parse as typed (the usual
+// case: "h2." is not a statement), the same text with the line being typed
+// blanked, and an `end` added for each block still open, checked again.
+func (s *Server) completionIndex(path string, offset int) *types.Index {
+	m := s.modules[path]
+	if m != nil && !s.broken[path] {
+		return m.Index
+	}
+	var prog *project.Program
+	for _, p := range s.progs {
+		if p != nil && p.Has(path) {
+			prog = p
+			break
+		}
+	}
+	if prog != nil {
+		text := s.file(path).Text
+		if offset > len(text) {
+			offset = len(text)
+		}
+		lineStart := strings.LastIndexByte(text[:offset], '\n') + 1
+		lineEnd := len(text)
+		if nl := strings.IndexByte(text[offset:], '\n'); nl >= 0 {
+			lineEnd = offset + nl
+		}
+		repaired := text[:lineStart] + strings.Repeat(" ", lineEnd-lineStart) + text[lineEnd:]
+		for i := 0; i < 6; i++ {
+			if fixed, ok := prog.WithText(path, repaired); ok {
+				return fixed.Index
+			}
+			repaired += "\nend"
+		}
+	}
+	if m != nil {
+		return m.Index
+	}
+	return nil
 }
 
 func completionKind(k types.SymbolKind) CompletionItemKind {
@@ -217,11 +371,36 @@ func (s *Server) completion(uri string, pos Position) (interface{}, error) {
 	prefix, start := identBefore(text, offset)
 	lowered := strings.ToLower(prefix)
 	items := []CompletionItem{}
+	if inCommentOrString(text, offset) {
+		return CompletionList{Items: items}, nil
+	}
+	ix := s.completionIndex(path, offset)
 
 	// After '.' or ':': the members of what is on the left.
 	if start > 0 && (text[start-1] == '.' || text[start-1] == ':') {
-		t := s.typeOfChain(path, chainBefore(text, start-1), start-1)
-		for _, m := range members(t, text[start-1] == ':') {
+		end := start - 1
+		if text[end] == '.' && end > 0 && text[end-1] == '?' {
+			end-- // e?.
+		}
+		chain := chainBefore(text, end)
+		t, sym := typeOfChainIn(ix, path, chain, end)
+		var list []member
+		switch typ := t.(type) {
+		case *types.ClassType:
+			if sym != nil && sym.Kind == types.SymClass && len(chain) == 1 {
+				list = staticMembers(typ) // Enemy.new, Enemy.count
+			} else {
+				list = members(t, text[start-1] == ':')
+			}
+		case *types.StringType, *types.StringLiteralType:
+			// A string's methods are the string library's functions.
+			if lib := lookupIn(ix, path, "string", end); lib != nil {
+				list = members(lib.Type, false)
+			}
+		default:
+			list = members(t, text[start-1] == ':')
+		}
+		for _, m := range list {
 			if strings.HasPrefix(strings.ToLower(m.name), lowered) {
 				items = append(items, CompletionItem{Label: m.name, Kind: m.kind, Detail: typeString(m.typ)})
 			}
@@ -229,21 +408,49 @@ func (s *Server) completion(uri string, pos Position) (interface{}, error) {
 		return CompletionList{Items: items}, nil
 	}
 
-	// Otherwise every name in scope here, innermost first, and keywords.
+	// Otherwise every name in scope here, innermost first, then what the
+	// file uses from elsewhere (imports, globals), and keywords. Where a
+	// type goes, only types.
+	wantType := typePosition(text, start)
+	isType := func(k types.SymbolKind) bool {
+		return k == types.SymInterface || k == types.SymTypeAlias || k == types.SymClass || k == types.SymEnum
+	}
 	seen := map[string]bool{}
-	if m := s.modules[path]; m != nil {
-		syms := append([]*types.Symbol{}, m.Index.Symbols...)
+	offer := func(sym *types.Symbol) {
+		if seen[sym.Name] || !strings.HasPrefix(strings.ToLower(sym.Name), lowered) {
+			return
+		}
+		if wantType && !isType(sym.Kind) || !wantType && (sym.Kind == types.SymInterface || sym.Kind == types.SymTypeAlias) {
+			return
+		}
+		seen[sym.Name] = true
+		items = append(items, CompletionItem{Label: sym.Name, Kind: completionKind(sym.Kind), Detail: describe(sym)})
+	}
+	if ix != nil {
+		syms := append([]*types.Symbol{}, ix.Symbols...)
 		sort.SliceStable(syms, func(i, j int) bool { return syms[i].ScopeEnd != -1 && syms[j].ScopeEnd == -1 })
 		for _, sym := range syms {
-			if sym.Container != "" || seen[sym.Name] || !strings.HasPrefix(strings.ToLower(sym.Name), lowered) {
+			if sym.Container != "" {
 				continue
 			}
 			if sym.ScopeEnd != -1 && !(sym.Decl.File == path && sym.Decl.Offset < offset && offset <= sym.ScopeEnd) {
 				continue // a local of another function, or not declared yet
 			}
-			seen[sym.Name] = true
-			items = append(items, CompletionItem{Label: sym.Name, Kind: completionKind(sym.Kind), Detail: describe(sym)})
+			offer(sym)
 		}
+		for _, o := range ix.Occurrences {
+			if o.Tok.File == path && o.Sym.Container == "" && o.Sym.Decl.File != path && o.Sym.ScopeEnd == -1 {
+				offer(o.Sym)
+			}
+		}
+	}
+	if wantType {
+		for _, name := range builtinTypes {
+			if !seen[name] && strings.HasPrefix(name, lowered) {
+				items = append(items, CompletionItem{Label: name, Kind: InterfaceKind})
+			}
+		}
+		return CompletionList{Items: items}, nil
 	}
 	for _, kw := range keywords {
 		if !seen[kw] && strings.HasPrefix(kw, lowered) {

@@ -239,6 +239,25 @@ func (p *Project) CheckReusing(prev *Program) (*Program, diag.List) {
 		contextKey: contextKey, declDiags: declDiags, byPath: byPath, declStatements: declStatements}, diags
 }
 
+// WithText checks the program again with path's text replaced, reusing
+// what does not depend on it, and returns path's module if that text
+// parses. Editors use it to complete in a file that does not parse as
+// typed (the line being typed blanked).
+func (prog *Program) WithText(path, text string) (*Module, bool) {
+	p := *prog.Project
+	p.overlay = make(map[string]string, len(prog.Project.overlay)+1)
+	for k, v := range prog.Project.overlay {
+		p.overlay[k] = v
+	}
+	p.overlay[path] = text
+	next, _ := p.CheckReusing(prog)
+	m := next.module(path)
+	return m, m != nil && !m.Broken && m.Index != nil
+}
+
+// Has says whether path is one of the program's modules.
+func (prog *Program) Has(path string) bool { return prog.module(path) != nil }
+
 // module is the earlier check's module at path, if any.
 func (prog *Program) module(path string) *Module {
 	if prog == nil {

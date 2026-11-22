@@ -1141,8 +1141,9 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 				propName := param.Name.Value
 				propType := params[i]
 
-				// Add as class property
+				// Add as class property, defined where the parameter is
 				classType.Properties[propName] = propType
+				setMemberSym(&classType.MemberSyms, propName, c.defineMember(param.Name.Token, SymProperty, propType, classType.Name))
 
 				// Track readonly
 				if param.IsReadonly {
@@ -1160,6 +1161,11 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 			OptionalParams:   ctorOptional,
 			HasRestParameter: ctorHasRest,
 			ParamNames:       parameterNames(node.Constructor.Parameters),
+		}
+		// Class.new(...) is the constructor: it goes to `constructor`.
+		if classType.MemberSyms == nil || classType.MemberSyms["new"] == nil {
+			setMemberSym(&classType.MemberSyms, "new", &Symbol{Name: "new", Kind: SymMethod, Type: classType.Constructor,
+				Decl: node.Constructor.Token, Container: classType.Name, ScopeEnd: -1})
 		}
 	}
 
@@ -2771,7 +2777,11 @@ func (c *Checker) checkStatement(stmt ast.Statement) {
 	case *ast.ClassDeclaration:
 		c.checkClassDeclaration(node)
 	case *ast.InterfaceDeclaration:
-		// Interface declarations don't need runtime checking
+		// Interface declarations don't need runtime checking; the names
+		// they extend are uses of those interfaces.
+		for _, ext := range node.Extends {
+			c.referenceTypeName(ext)
+		}
 	case *ast.EnumDeclaration:
 		// Enum declarations don't need runtime checking
 	case *ast.TypeDeclaration:
@@ -4391,7 +4401,16 @@ func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target as
 	// Lua: local t = { a = 1 }; t.b = 2.
 	if dot, ok := target.(*ast.DotExpression); ok && !dot.IsOptional {
 		if field, ok := dot.Right.(*ast.Identifier); ok {
-			if rec, ok := c.checkExpression(dot.Left).(*InterfaceType); ok && rec.Open {
+			leftType := c.checkExpression(dot.Left)
+			// `local M = {}` then function M.add: the field is defined there.
+			if arr, ok := leftType.(*ArrayType); ok && arr.EmptyLiteral && arr.MemberSyms[field.Value] == nil {
+				t := Type(Any)
+				if valueType != nil {
+					t = widenLiteralType(valueType)
+				}
+				setMemberSym(&arr.MemberSyms, field.Value, c.defineMember(field.Token, SymProperty, t, exprText(dot.Left)))
+			}
+			if rec, ok := leftType.(*InterfaceType); ok && rec.Open {
 				current, hasProp := rec.Properties[field.Value]
 				_, hasMethod := rec.Methods[field.Value]
 				// A field given a literal (n = 1) takes other values of its
@@ -4406,6 +4425,8 @@ func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target as
 						added = widenLiteralType(valueType)
 					}
 					rec.Properties[field.Value] = added
+					// Defined here: M.add later goes to `function M.add`.
+					setMemberSym(&rec.MemberSyms, field.Value, c.defineMember(field.Token, SymProperty, added, exprText(dot.Left)))
 				}
 			}
 		}
@@ -4457,6 +4478,13 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 	classType, ok := c.classes[node.Name.Value]
 	if !ok {
 		return
+	}
+	// The names after extends and implements are uses of those types.
+	if node.Extends != nil {
+		c.referenceTypeName(node.Extends)
+	}
+	for _, impl := range node.Implements {
+		c.referenceTypeName(impl)
 	}
 
 	// The parent is needed when the class is set up, so a parent declared
@@ -4935,7 +4963,10 @@ func (c *Checker) checkFieldFunction(node *ast.FunctionDeclaration) {
 	}
 	params := node.Parameters
 	if node.IsMethod {
-		self := &ast.Parameter{Token: node.Name.Token, Name: &ast.Identifier{Token: node.Name.Token, Value: "self"}}
+		// The implicit self has no place in the source: given the method
+		// name's token, hovering the name showed "(parameter) len".
+		selfTok := lexer.Token{Type: lexer.IDENT, Literal: "self", File: node.Name.Token.File, Offset: -1, End: -1}
+		self := &ast.Parameter{Token: selfTok, Name: &ast.Identifier{Token: selfTok, Value: "self"}}
 		params = append([]*ast.Parameter{self}, params...)
 	}
 	fnType := c.checkFunctionExpression(&ast.FunctionExpression{Token: node.Token, GenericParams: node.GenericParams,
@@ -4946,6 +4977,17 @@ func (c *Checker) checkFieldFunction(node *ast.FunctionDeclaration) {
 	target := &ast.DotExpression{Token: node.Name.Token, Left: node.Receiver, Right: node.Name}
 	c.checkAssignmentTarget(&ast.AssignmentStatement{Token: node.Name.Token, Targets: []ast.Expression{target}},
 		target, fnType)
+}
+
+// referenceTypeName records a use of the class or interface a name in an
+// extends or implements clause names (Base, or Base<T>).
+func (c *Checker) referenceTypeName(e ast.Expression) {
+	switch n := e.(type) {
+	case *ast.Identifier:
+		c.reference(n.Token, c.typeSyms[n.Value])
+	case *ast.GenericType:
+		c.referenceTypeName(n.BaseType)
+	}
 }
 
 // classNameOf is the name in an extends clause, or "".
@@ -5283,6 +5325,7 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 	if len(node.Values) == 0 && len(node.Pairs) > 0 {
 		properties := make(map[string]Type)
 		methods := make(map[string]*FunctionType)
+		keySyms := make(map[string]lexer.Token)
 		isRecord := true
 
 		for key, value := range node.Pairs {
@@ -5294,6 +5337,7 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 				// (Methods, called with ':', are declared by interfaces
 				// and classes.)
 				properties[ident.Value] = c.checkExpression(value)
+				keySyms[ident.Value] = ident.Token
 			} else {
 				// Not a simple identifier key, treat as regular table
 				isRecord = false
@@ -5303,13 +5347,18 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 
 		// If all keys are identifiers, create a structural interface type
 		if isRecord {
-			return &InterfaceType{
+			rec := &InterfaceType{
 				Name:       "<table literal>",
 				Properties: properties,
 				Methods:    methods,
 				Extends:    []*InterfaceType{},
 				Open:       true,
 			}
+			// Each key defines its field: cfg.from goes to `from = ...`.
+			for name, tok := range keySyms {
+				setMemberSym(&rec.MemberSyms, name, c.defineMember(tok, SymProperty, properties[name], "<table>"))
+			}
+			return rec
 		}
 	}
 
@@ -6694,6 +6743,12 @@ func (c *Checker) checkGenericInstantiation(node *ast.GenericType) Type {
 		c.addError("Generic instantiation base must be an identifier", node.Token)
 		return Any
 	}
+	// first<number>(...) and Box<number>(...) are uses of first and Box.
+	if sym := c.env.lookupSym(baseIdent.Value); sym != nil {
+		c.reference(baseIdent.Token, sym)
+	} else {
+		c.reference(baseIdent.Token, c.typeSyms[baseIdent.Value])
+	}
 
 	// Resolve type arguments
 	typeArgs := make([]Type, len(node.TypeArguments))
@@ -7047,11 +7102,27 @@ func (c *Checker) buildNamespace(node *ast.NamespaceDeclaration) *NamespaceType 
 			if s.ReturnType != nil {
 				returnType = c.resolveTypeExpression(s.ReturnType)
 			}
+			optional := make([]bool, len(s.Parameters))
+			hasRest := false
+			for i, param := range s.Parameters {
+				optional[i] = paramIsOptional(param, params[i])
+				if param.IsRest {
+					hasRest = true
+					if _, ok := params[i].(*ArrayType); !ok {
+						params[i] = &ArrayType{ElementType: params[i]}
+					}
+				}
+			}
 			funcType := &FunctionType{
-				Parameters: params,
-				ReturnType: returnType,
+				Parameters:       params,
+				ReturnType:       returnType,
+				OptionalParams:   optional,
+				HasRestParameter: hasRest,
+				ParamNames:       parameterNames(s.Parameters),
+				Untyped:          untypedSignature(s.Parameters, s.ReturnType, len(s.GenericParams)),
 			}
 			nsType.Members[s.Name.Value] = funcType
+			setMemberSym(&nsType.MemberSyms, s.Name.Value, c.defineMember(s.Name.Token, SymFunction, funcType, nsName))
 		case *ast.VariableDeclaration:
 			for i, name := range s.Names {
 				var t Type = Any
@@ -7059,6 +7130,7 @@ func (c *Checker) buildNamespace(node *ast.NamespaceDeclaration) *NamespaceType 
 					t = c.resolveTypeExpression(s.Types[i])
 				}
 				nsType.Members[name.Value] = t
+				setMemberSym(&nsType.MemberSyms, name.Value, c.defineMember(name.Token, SymVariable, t, nsName))
 			}
 		case *ast.NamespaceDeclaration:
 			inner := c.buildNamespace(s)

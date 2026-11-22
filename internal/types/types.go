@@ -378,6 +378,9 @@ type ArrayType struct {
 	// EmptyLiteral marks the type of a bare `{}`, which can still become a
 	// record, so it may be assigned to an interface with no required members.
 	EmptyLiteral bool
+	// MemberSyms are the fields given to a `{}` since (M.add = ..., or
+	// function M.add), for editors.
+	MemberSyms map[string]*Symbol
 }
 
 func (t *ArrayType) String() string {

@@ -288,7 +288,8 @@ func symbolKind(k types.SymbolKind) SymbolKind {
 func ownSymbols(path string, ix *types.Index) []*types.Symbol {
 	var out []*types.Symbol
 	for _, sym := range ix.Symbols {
-		if sym.Decl.File == path && sym.Kind != types.SymParameter {
+		// A table literal's keys are fields of a value, not names to list.
+		if sym.Decl.File == path && sym.Kind != types.SymParameter && sym.Container != "<table>" {
 			out = append(out, sym)
 		}
 	}
@@ -345,6 +346,22 @@ func (s *Server) workspaceSymbols(query string) []SymbolInformation {
 				continue
 			}
 			if !strings.Contains(strings.ToLower(sym.Name), query) {
+				continue
+			}
+			seen[sym.Key()] = true
+			out = append(out, SymbolInformation{Name: sym.Name, Kind: symbolKind(sym.Kind),
+				Location: s.location(sym.Decl), ContainerName: sym.Container})
+		}
+	}
+	// What the projects' declaration files declare (the engine's API);
+	// the standard library is not in the workspace.
+	for _, prog := range s.progs {
+		if prog == nil || prog.DeclIndex == nil {
+			continue
+		}
+		for _, sym := range prog.DeclIndex.Symbols {
+			if seen[sym.Key()] || strings.HasPrefix(sym.Decl.File, "<") || sym.Kind == types.SymParameter ||
+				(sym.Container == "" && sym.ScopeEnd != -1) || !strings.Contains(strings.ToLower(sym.Name), query) {
 				continue
 			}
 			seen[sym.Key()] = true

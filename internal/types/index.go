@@ -171,6 +171,8 @@ func memberSymbol(t Type, name string) *Symbol {
 		}
 	case *EnumType:
 		return typ.MemberSyms[name]
+	case *ArrayType:
+		return typ.MemberSyms[name]
 	case *NamespaceType:
 		return typ.MemberSyms[name]
 	case *OptionalType:

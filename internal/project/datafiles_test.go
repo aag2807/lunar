@@ -41,3 +41,26 @@ return { label = label }
 		}
 	}
 }
+
+// Strings get their methods from the string library's metatable, which a
+// state with no libraries does not have.
+func TestDataFilesMayNotCallStringMethods(t *testing.T) {
+	root := tree(t, map[string]string{
+		"lunar.config.json": `{"outDir": "../build", "dataFiles": ["data/**"]}`,
+		"data/names.lunar":  "local n = \"imp\"\nconst k = \"orc\"\nreturn { a = n:upper(), b = k.lower() }\n",
+	})
+	_, diags := open(t, Options{Dir: root}).Check()
+	var msgs []string
+	for _, d := range diags {
+		msgs = append(msgs, d.Message)
+	}
+	joined := strings.Join(msgs, "\n")
+	for _, want := range []string{
+		"Data file calls the string method 'upper', which needs the string library",
+		"Data file calls the string method 'lower', which needs the string library",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in:\n%s", want, joined)
+		}
+	}
+}

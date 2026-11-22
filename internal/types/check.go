@@ -279,6 +279,9 @@ type Checker struct {
 	// one of those bindings, which is what a data file may not do.
 	ambient    map[string]Type
 	globalUses []lexer.Token
+	// stringMethodUses are calls through a string's metatable (s:upper()),
+	// which only exists once the string library is opened.
+	stringMethodUses []lexer.Token
 
 	// exprTypes records the type computed for each expression checked.
 	exprTypes map[ast.Expression]Type
@@ -4911,10 +4914,10 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		// the receiver and mark every parameter as required, so checking calls
 		// against them would reject correct code like s:match(pattern).
 		if lib, ok := c.interfaces["StringLib"]; ok {
-			if _, ok := lib.GetProperty(propertyName); ok {
-				return resolved(ast.DispatchSelf, Any)
-			}
-			if _, ok := lib.GetMethod(propertyName); ok {
+			_, isProp := lib.GetProperty(propertyName)
+			_, isMethod := lib.GetMethod(propertyName)
+			if isProp || isMethod {
+				c.stringMethodUses = append(c.stringMethodUses, rightIdent.Token)
 				return resolved(ast.DispatchSelf, Any)
 			}
 		}
@@ -5656,6 +5659,12 @@ func (c *Checker) markAmbient(name string, typ Type) {
 // Lua state has to supply at run time.
 func (c *Checker) GlobalUses() []lexer.Token {
 	return c.globalUses
+}
+
+// StringMethodUses returns the string methods called through a string
+// value's metatable, as in s:upper().
+func (c *Checker) StringMethodUses() []lexer.Token {
+	return c.stringMethodUses
 }
 
 // declaredFunctionType builds the type of an ambient function signature.

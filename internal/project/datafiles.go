@@ -59,6 +59,11 @@ func dataFileDiagnostics(m *Module, checker *types.Checker) diag.List {
 			add(tok, fmt.Sprintf("Data file uses the global '%s'", tok.Literal))
 		}
 	}
+	for _, tok := range checker.StringMethodUses() {
+		if tok.File == m.Path {
+			add(tok, fmt.Sprintf("Data file calls the string method '%s', which needs the string library", tok.Literal))
+		}
+	}
 	for _, stmt := range m.Statements {
 		walk(reflect.ValueOf(stmt), func(n any) {
 			switch node := n.(type) {

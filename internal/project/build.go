@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"lunar/internal/codegen"
 	"lunar/internal/diag"
@@ -129,6 +130,22 @@ func Build(p *Project) (Result, diag.List) {
 	return res, diags
 }
 
+// retry runs op up to three times: on Windows a rename fails for a moment
+// while another program (an antivirus, the editor) has the file open.
+func retry(op func() error) error {
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		if err = op(); err == nil {
+			return nil
+		}
+		time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
+	}
+	return err
+}
+
+// renameFile is os.Rename; tests replace it to make one rename fail.
+var renameFile = os.Rename
+
 func writeOutputs(outDir string, outs []Output) error {
 	var staged []string
 	cleanup := func() {
@@ -149,11 +166,46 @@ func writeOutputs(outDir string, outs []Output) error {
 		}
 		staged = append(staged, tmp)
 	}
+	// Move each old file aside and the new one into its place. If any step
+	// fails, undo every step taken, so the folder keeps the last good
+	// build rather than half of each.
+	type step struct {
+		target, backup string
+		hadOld, placed bool
+	}
+	var done []step
+	undo := func() {
+		for i := len(done) - 1; i >= 0; i-- {
+			st := done[i]
+			if st.placed {
+				os.Remove(st.target)
+			}
+			if st.hadOld {
+				renameFile(st.backup, st.target)
+			}
+		}
+		cleanup()
+	}
 	for i, o := range outs {
-		target := filepath.Join(outDir, filepath.FromSlash(o.Rel))
-		if err := os.Rename(staged[i], target); err != nil {
-			cleanup()
-			return fmt.Errorf("replacing %s: %w", target, err)
+		st := step{target: filepath.Join(outDir, filepath.FromSlash(o.Rel))}
+		st.backup = st.target + ".lunar-old"
+		if info, err := os.Lstat(st.target); err == nil && !info.IsDir() {
+			if err := retry(func() error { return renameFile(st.target, st.backup) }); err != nil {
+				undo()
+				return fmt.Errorf("replacing %s: %w (nothing was changed)", st.target, err)
+			}
+			st.hadOld = true
+		}
+		done = append(done, st)
+		if err := retry(func() error { return renameFile(staged[i], st.target) }); err != nil {
+			undo()
+			return fmt.Errorf("replacing %s: %w (nothing was changed)", st.target, err)
+		}
+		done[len(done)-1].placed = true
+	}
+	for _, st := range done {
+		if st.hadOld {
+			os.Remove(st.backup)
 		}
 	}
 

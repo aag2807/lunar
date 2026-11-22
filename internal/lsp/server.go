@@ -95,6 +95,12 @@ func (s *Server) Run() error {
 			if err == io.EOF {
 				return nil
 			}
+			// A malformed header loses that message, not the session.
+			var bad *badHeader
+			if errors.As(err, &bad) {
+				s.logger.Printf("skipping a message: %v", err)
+				continue
+			}
 			return err
 		}
 		if err := s.handleMessage(msg); err != nil {
@@ -123,14 +129,16 @@ func (s *Server) readMessage() (json.RawMessage, error) {
 		if line == "" {
 			break
 		}
-		if strings.HasPrefix(line, "Content-Length:") {
-			if contentLength, err = strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "Content-Length:"))); err != nil {
-				return nil, fmt.Errorf("invalid Content-Length: %v", err)
+		// After a lost message its body runs into the next header line:
+		// the last Content-Length on the line is the next message's.
+		if at := strings.LastIndex(line, "Content-Length:"); at >= 0 {
+			if contentLength, err = strconv.Atoi(strings.TrimSpace(line[at+len("Content-Length:"):])); err != nil {
+				contentLength = -1
 			}
 		}
 	}
-	if contentLength == 0 {
-		return nil, fmt.Errorf("missing Content-Length header")
+	if contentLength <= 0 {
+		return nil, &badHeader{"missing or invalid Content-Length header"}
 	}
 	content := make([]byte, contentLength)
 	if _, err := io.ReadFull(s.reader, content); err != nil {
@@ -138,6 +146,11 @@ func (s *Server) readMessage() (json.RawMessage, error) {
 	}
 	return json.RawMessage(content), nil
 }
+
+// badHeader is a message whose header could not be read.
+type badHeader struct{ msg string }
+
+func (e *badHeader) Error() string { return e.msg }
 
 func (s *Server) sendMessage(msg interface{}) error {
 	content, err := json.Marshal(msg)

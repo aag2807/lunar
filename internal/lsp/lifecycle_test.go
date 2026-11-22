@@ -80,3 +80,18 @@ func TestShutdownThenExit(t *testing.T) {
 		t.Errorf("exit without shutdown: %v", err)
 	}
 }
+
+// A malformed header loses that message, not the server: it finds the
+// next one and carries on.
+func TestBadHeaderIsSurvived(t *testing.T) {
+	init := map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"rootUri": pathToURI(t.TempDir())}}
+	bad := "Content-Length: nonsense\r\n\r\n{\"jsonrpc\":\"2.0\",\"method\":\"initialized\"}"
+	input := frame(init) + bad + frame(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "shutdown"}, map[string]any{"jsonrpc": "2.0", "method": "exit"})
+	out, err := runServer(input)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out, `"id":2`) {
+		t.Errorf("no answer after the bad header: %s", out)
+	}
+}

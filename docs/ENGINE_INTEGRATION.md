@@ -25,7 +25,7 @@ relative to the file.
 | Option | Meaning | Default |
 |---|---|---|
 | `rootDir` | The scripts folder. Imports and `require` names are relative to it. | the config's folder |
-| `outDir` | Where the Lua goes, mirroring `rootDir`'s layout. Required for `lunar build`. | none |
+| `outDir` | Where the Lua goes, mirroring `rootDir`'s layout. Required for `lunar build`, and not the same folder as `rootDir`. | none |
 | `target` | `lua53` or `lua54`. | `lua53` |
 | `declarations` | Extra `*.d.lunar` files or folders, anywhere on disk: the engine's API. | none |
 | `copyLua` | Copy plain `.lua` scripts under `rootDir` to `outDir`. | `true` |
@@ -51,7 +51,11 @@ lunar build --json
    next to its target and renamed over it, so nothing ever reads half a file.
 
 A failed build writes nothing. The Lua from the last good build stays in
-place, so a running game keeps working on it while the script is fixed.
+place, so a running game keeps working on it while the script is fixed. That
+holds when writing itself fails, too: if one file cannot be replaced (on
+Windows, a file another program has open; renames are retried briefly
+first), every file already replaced is put back and the run exits 3 with
+"... (nothing was changed)".
 
 The output folder mirrors `rootDir`. Plain `.lua` scripts are copied through
 (a `foo.lua` next to a `foo.lunar` is an error, since both would write
@@ -165,7 +169,9 @@ The engine can load it with `luaL_newstate()` and no `luaL_openlibs`. Files
 matching `dataFiles` are checked for that: a use of any global (`tostring`,
 the engine's API) or of a construct whose Lua needs one (a class needs
 `setmetatable`, a spread `table.unpack`, a template string `tostring`, `match`
-`error`) is a `data-file` error. Interfaces cost nothing at run time.
+`error`), or a string method (`name:upper()`, which needs the string
+library's metatable), is a `data-file` error. Interfaces cost nothing at run
+time.
 
 ## Declaring the engine's API
 
@@ -204,8 +210,24 @@ The checker decides whether a call needs Lua's `:` (an instance method) or `.`
 (a function in a table). When a value's type is `any`, it cannot know, and the
 call is emitted as written: write `obj:method()` to pass `self`.
 
+- A function in a table literal is a plain field: `M.greet("bob")`.
+- A method declared in an interface or class takes `self`; a table literal
+  that implements one writes `function(self, ...)`.
+- A union calls through `:` or `.` when all its types agree, and is an error
+  when they do not.
+- A method has to be called where it is named: `local f = e.hit` is an
+  error, since `f(3)` would pass 3 as `self`. Wrap it in a function instead.
+
 ## Editors
 
 `lunar lsp` is the language server; it reads the same configuration and
-declarations as `lunar build`, so the editor and the build agree. See
-`editors/` for Neovim, VS Code and Zed.
+declarations as `lunar build`, so the editor and the build agree. Each open
+file uses the `lunar.config.json` found from its own folder, so the editor
+may open a folder above the game's. A config error is shown on the config
+file and as a message. Rename is refused while any file has a syntax error.
+See `editors/` for Neovim, VS Code and Zed.
+
+Compiling one file (`lunar file.lunar [-o out.lua]`, flags before or after
+the name) uses the config found above it; with none, it sees the
+declaration files in its own folder and any given with `--decl`. `-o` may
+name a device or pipe, such as `/dev/stdout`.

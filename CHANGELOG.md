@@ -23,7 +23,12 @@ their changelog described features that did not work.
   `utf8`, and `warn` for `lua54`. `--decl` and `declarations` add shared
   declaration folders, such as an engine's API.
 - Data files (`dataFiles`) are checked for anything a Lua state with no
-  libraries opened lacks.
+  libraries opened lacks, string methods included.
+- If an output cannot be replaced, the ones already replaced are put back:
+  the folder always holds one whole build. `outDir` may not be `rootDir`.
+- Compiling one file: flags may follow the file name, `-o` may be a device or
+  pipe, and with no config only the declarations beside the file are read. A
+  file outside its config's `rootDir` is reported as such.
 
 ### Errors
 
@@ -38,6 +43,11 @@ their changelog described features that did not work.
   by path.
 - `lunar --version` prints `lunar 2.0.0 (<revision>)`, the same version the
   language server reports.
+- Half-written code is a syntax error, never a crash or a hang: an unclosed
+  string, template, long comment, table, block or `end` is reported where it
+  starts, and a file that does not parse is not type checked.
+- `--json=VALUE` counts from the first line; `<` and `>` are written as is.
+- Messages print union types in a fixed order.
 
 ### Language
 
@@ -58,7 +68,15 @@ their changelog described features that did not work.
   implemented by an intermediate class count.
 - Exported functions are no longer globals.
 - The checker alone decides `:` versus `.`; a call on an `any` value is
-  emitted as written.
+  emitted as written. Functions in a table literal are plain fields
+  (`M.greet()`); a literal implementing an interface method takes `self`; a
+  union of classes dispatches when its types agree; a method read without a
+  call is an error.
+- `m.Enemy(3)` through `import * as m`, and classes exported from a
+  namespace, construct correctly.
+- `local xs = {1, 2, 3}` is `number[]`; arithmetic works on unions of
+  numbers; a class value fits a union that lists its class; a string index
+  signature covers every undeclared name.
 - Refused with an error instead of miscompiled: implementation overloads,
   `async`/`await`, `import * from` without a name, statements after `return`.
 - Targets are `lua53` and `lua54` only.
@@ -68,7 +86,9 @@ their changelog described features that did not work.
 - `lunar lsp`, the language server, rebuilt on the same pipeline as `lunar
   build`: diagnostics for every file, definition (into the standard library
   too), references and rename across files, hover, completion, signature help,
-  document and workspace symbols.
+  document and workspace symbols. Each file uses the config found from its own
+  folder; config errors are shown; rename is refused while a file does not
+  parse, and includes table-literal keys.
 - A tree-sitter grammar (`editors/tree-sitter-lunar`), a Neovim plugin for
   `vim.lsp` and nvim-treesitter's main branch, a Zed extension, and an updated
   VS Code extension.

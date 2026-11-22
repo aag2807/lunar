@@ -158,8 +158,9 @@ is any function in a table literal written without a type:
 `local M = { greet = function(name) ... end }` then `M.greet("bob")`.
 
 Interfaces can `extend` others, may name themselves or interfaces declared
-later, and have index signatures (`[key: string]: number`). `type Name … end`
-declares an object shape the same way.
+later, and have index signatures: with `[key: string]: number`, every name
+the interface does not declare reads and writes as a number, through `.` or
+`[]`. `type Name … end` declares an object shape the same way.
 
 ## Classes
 
@@ -219,7 +220,13 @@ print(g.describe(), g.health, s.describe())
 - Getters and setters read and write like fields, and are inherited.
 - A member the class (and its parents) does not have is an error.
 - Methods are called with `.` in Lunar source (`g.describe()`); the compiler
-  emits `:` where Lua needs it.
+  emits `:` where Lua needs it, including on a union of classes that all have
+  the method.
+- A method has to be called where it is named. `local f = g.describe` is an
+  error: Lua has no bound methods, so `f()` would run without `self`. Wrap it:
+  `local f = function() return g.describe() end`.
+- Classes exported from a `namespace` or reached through `import * as m`
+  construct the same way: `Game.Orc(5)`, `m.Enemy.new(3)`.
 
 ## Enums
 

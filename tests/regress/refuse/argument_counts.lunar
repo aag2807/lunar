@@ -1,0 +1,14 @@
+-- An annotated function is held to its parameter count; a plain Lua one
+-- (no annotations) is called as Lua calls it.
+local function add(a: number, b: number): number
+    return a + b
+end
+-- error: Function expects at least 2 arguments, got 1
+add(1)
+-- error: Function expects at most 2 arguments, got 3
+add(1, 2, 3)
+local function name(): string
+    return "x"
+end
+-- error: Function expects at most 0 arguments, got 1
+name(1)

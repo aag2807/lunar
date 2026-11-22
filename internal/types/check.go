@@ -39,8 +39,10 @@ type Environment struct {
 	// narrow holds what a check has refined a variable to in this scope
 	// (x ~= nil, not x, x and ...), over its declared type in store.
 	narrow map[string]Type
-	outer  *Environment
-	syms   map[string]*Symbol // definitions made in this scope, for the index
+	// inferred marks the locals declared without a type annotation.
+	inferred map[string]bool
+	outer    *Environment
+	syms     map[string]*Symbol // definitions made in this scope, for the index
 }
 
 // NewEnvironment creates a new environment
@@ -97,20 +99,47 @@ func (e *Environment) Set(name string, typ Type) {
 	delete(e.narrow, name)
 }
 
+// SetLocal binds a new, assignable local: one declared over a const of
+// the same scope (local table at the top of a module) is not const.
+func (e *Environment) SetLocal(name string, typ Type) {
+	e.Set(name, typ)
+	delete(e.constVars, name)
+}
+
 // SetConst sets a variable as const in the environment
 func (e *Environment) SetConst(name string, typ Type) {
 	e.store[name] = typ
 	e.constVars[name] = true
 }
 
-// IsConst checks if a variable is const
+// IsConst checks if a variable is const: the one the name refers to here,
+// so a parameter named string is not the const string library.
 func (e *Environment) IsConst(name string) bool {
-	isConst, ok := e.constVars[name]
-	if ok && isConst {
-		return true
+	if _, ok := e.store[name]; ok {
+		return e.constVars[name]
 	}
 	if e.outer != nil {
 		return e.outer.IsConst(name)
+	}
+	return false
+}
+
+// MarkInferred records that the local name was declared without a type.
+func (e *Environment) MarkInferred(name string) {
+	if e.inferred == nil {
+		e.inferred = map[string]bool{}
+	}
+	e.inferred[name] = true
+}
+
+// IsInferred says whether the variable the name refers to here was
+// declared without a type.
+func (e *Environment) IsInferred(name string) bool {
+	if _, ok := e.store[name]; ok {
+		return e.inferred[name]
+	}
+	if e.outer != nil {
+		return e.outer.IsInferred(name)
 	}
 	return false
 }
@@ -822,7 +851,23 @@ func (c *Checker) hoistedSignature(fn *ast.FunctionDeclaration) *FunctionType {
 		GenericParams:    genericParams,
 		HasRestParameter: hasRestParam,
 		OptionalParams:   optionalParams,
+		Untyped:          untypedSignature(fn.Parameters, fn.ReturnType, len(fn.GenericParams)),
 	}
+}
+
+// untypedSignature says whether a function is written with no annotation
+// at all, as plain Lua is: it is called as Lua calls it, missing arguments
+// nil and extra ones dropped.
+func untypedSignature(params []*ast.Parameter, ret ast.Expression, generics int) bool {
+	if ret != nil || generics > 0 {
+		return false
+	}
+	for _, p := range params {
+		if p.Type != nil || p.IsOptional {
+			return false
+		}
+	}
+	return true
 }
 
 // GetEnv returns the type environment for LSP integration
@@ -2762,7 +2807,7 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 			if node.IsConstant || attribOf(node, i) == "const" {
 				c.env.SetConst(name.Value, varType)
 			} else {
-				c.env.Set(name.Value, varType)
+				c.env.SetLocal(name.Value, varType)
 			}
 			c.define(name.Token, SymVariable, varType)
 		}
@@ -2845,7 +2890,10 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 		if node.IsConstant || attribOf(node, i) == "const" {
 			c.env.SetConst(name.Value, finalType)
 		} else {
-			c.env.Set(name.Value, finalType)
+			c.env.SetLocal(name.Value, finalType)
+			if declaredTypes[i] == nil {
+				c.env.MarkInferred(name.Value)
+			}
 		}
 		c.define(name.Token, SymVariable, finalType)
 	}
@@ -3048,6 +3096,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		GenericParams:    genericParams,
 		HasRestParameter: hasRestParam,
 		OptionalParams:   optionalParams,
+		Untyped:          untypedSignature(node.Parameters, node.ReturnType, len(node.GenericParams)),
 	}
 
 	// Restore environment and register function
@@ -3121,9 +3170,12 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		case isFunc && inThisScope && !node.IsLocal && c.funcDefs[existingFunc].Line > 0:
 			c.addErrorCode("duplicate-function", fmt.Sprintf("Function '%s' is already defined at line %d. Overloads can only be declared with 'declare function'",
 				node.Name.Value, c.funcDefs[existingFunc].Line), node.Name.Token)
-		case !isFunc && inThisScope:
+		case !isFunc && inThisScope && !node.IsLocal && !existingType.Equals(Any):
+			// `function f()` assigns f; a local f holding a number cannot
+			// take a function. (local f then function f() is Lua's
+			// forward declaration, and local function f() a new local.)
 			c.addError(
-				fmt.Sprintf("Cannot overload '%s' - it is not a function", node.Name.Value),
+				fmt.Sprintf("Cannot define function '%s': '%s' is a '%s' here", node.Name.Value, node.Name.Value, existingType.String()),
 				node.Token,
 			)
 			c.env.Set(node.Name.Value, funcType)
@@ -4013,35 +4065,54 @@ func (c *Checker) checkForStatement(node *ast.ForStatement) {
 
 	if node.IsGeneric {
 		// Generic for loop (for-in)
+		// The expressions are checked outside the loop's scope: the loop
+		// variables are not visible in them.
+		c.env = prevEnv
 		iterType := c.checkExpression(node.Iterator)
+		for _, e := range node.IteratorRest {
+			c.checkExpression(e)
+		}
+		c.env = NewEnclosedEnvironment(prevEnv)
+		// A call yielding (f, s, c) iterates with f.
+		if tuple, ok := iterType.(*TupleType); ok && len(tuple.Elements) > 0 {
+			iterType = tuple.Elements[0]
+		}
 
 		// Give the loop variables the key and value types of whatever is being
 		// iterated. Leaving them as 'any' means a method call on the element
 		// cannot be resolved, and codegen then picks the wrong call syntax.
 		keyType, valueType := c.iterationTypes(node.Iterator, iterType)
-		for i, variable := range node.Variables {
-			if i == 0 {
-				c.env.Set(variable.Value, keyType)
-				c.define(variable.Token, SymVariable, keyType)
-			} else if i == 1 {
-				c.env.Set(variable.Value, valueType)
-				c.define(variable.Token, SymVariable, valueType)
-			} else {
-				c.env.Set(variable.Value, Any)
-				c.define(variable.Token, SymVariable, Any)
+		vars := []Type{keyType, valueType}
+		// An iterator function's results are the loop variables; the loop
+		// ends at the first nil, so the first is never nil inside.
+		if fn, ok := iterType.(*FunctionType); ok {
+			vars = nil
+			if results, isTuple := fn.ReturnType.(*TupleType); isTuple {
+				vars = append(vars, results.Elements...)
+			} else if fn.ReturnType != nil && !fn.ReturnType.Equals(Void) {
+				vars = append(vars, fn.ReturnType)
+			}
+			if len(vars) > 0 {
+				vars[0] = WithoutNil(vars[0])
 			}
 		}
-
-		// Check if iterator is iterable (array or table)
-		if _, isArray := iterType.(*ArrayType); !isArray {
-			if _, isTable := iterType.(*TableType); !isTable {
-				if !iterType.Equals(Any) {
-					c.addError(
-						fmt.Sprintf("Cannot iterate over type '%s'", iterType.String()),
-						node.Token,
-					)
-				}
+		for i, variable := range node.Variables {
+			typ := Type(Any)
+			if i < len(vars) && vars[i] != nil {
+				typ = vars[i]
 			}
+			c.env.Set(variable.Value, typ)
+			c.define(variable.Token, SymVariable, typ)
+		}
+
+		// Lua calls what comes after 'in': a number, string or boolean
+		// cannot be iterated.
+		switch iterType.(type) {
+		case *NumberType, *StringType, *BooleanType, *NumberLiteralType, *StringLiteralType, *BooleanLiteralType:
+			c.addError(
+				fmt.Sprintf("Cannot iterate over type '%s'", iterType.String()),
+				node.Token,
+			)
 		}
 	} else {
 		for _, variable := range node.Variables {
@@ -4280,6 +4351,18 @@ func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target as
 				return
 			}
 		}
+	}
+
+	// A local declared without a type can be given up, as Lua code does
+	// to release what it held: cache = nil.
+	if ident, ok := target.(*ast.Identifier); ok && c.env.IsInferred(ident.Value) {
+		if _, isNil := valueType.(*NilType); isNil {
+			return
+		}
+	}
+	// `{}` is an empty table: it can be replaced by any other table, or nil.
+	if arr, ok := targetType.(*ArrayType); ok && arr.EmptyLiteral {
+		return
 	}
 
 	if !valueType.IsAssignableTo(targetType) {
@@ -5297,6 +5380,7 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 		GenericParams:    []string{}, // Function expressions are not generic
 		HasRestParameter: hasRestParam,
 		OptionalParams:   optionalParams,
+		Untyped:          untypedSignature(node.Parameters, node.ReturnType, 0),
 	}
 }
 
@@ -5789,8 +5873,20 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 		}
 	}
 
+	// A last argument of ... or a call can be any number of values: it
+	// may fill the parameters left.
+	lastIsMulti := false
+	if n := len(node.Arguments); n > 0 {
+		switch last := node.Arguments[n-1].(type) {
+		case *ast.VarargExpression:
+			lastIsMulti = true
+		case *ast.CallExpression:
+			lastIsMulti = !last.Parenthesized
+		}
+	}
+
 	// Check argument count (skip if there are spread arguments or function has rest parameter)
-	if !hasSpreadArgs && !fnType.HasRestParameter {
+	if !hasSpreadArgs && !fnType.HasRestParameter && !fnType.Untyped {
 		// Calculate minimum required arguments (non-optional parameters)
 		minArgs := len(fnType.Parameters)
 		if len(fnType.OptionalParams) > 0 {
@@ -5806,7 +5902,7 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 		maxArgs := len(fnType.Parameters)
 		argCount := len(node.Arguments)
 
-		if argCount < minArgs {
+		if argCount < minArgs && !lastIsMulti {
 			c.addError(
 				fmt.Sprintf("Function expects at least %d arguments, got %d",
 					minArgs, argCount),
@@ -5826,7 +5922,7 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 	}
 
 	// If function has rest parameter, check minimum argument count
-	if !hasSpreadArgs && fnType.HasRestParameter {
+	if !hasSpreadArgs && fnType.HasRestParameter && !fnType.Untyped && !lastIsMulti {
 		minArgs := len(fnType.Parameters) - 1 // All params except the rest parameter
 		if len(node.Arguments) < minArgs {
 			c.addError(
@@ -6434,6 +6530,10 @@ func (c *Checker) checkIndexExpression(node *ast.IndexExpression) Type {
 
 	switch typ := leftType.(type) {
 	case *ArrayType:
+		// `{}` is an empty table, not only an array: seen[name] = true.
+		if typ.EmptyLiteral && !IsNumericType(indexType) {
+			return result(Any)
+		}
 		// Index must be a number
 		if !IsNumericType(indexType) && !indexType.Equals(Any) {
 			c.addError(

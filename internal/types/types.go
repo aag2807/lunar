@@ -474,6 +474,9 @@ type FunctionType struct {
 	OptionalParams   []bool          // True for each parameter that is optional
 	Overloads        []*FunctionType // Additional overload signatures (for method overloading)
 	ParamNames       []string        // Parameter names where known, for signature help
+	// Untyped is set for a function written with no annotations, as plain
+	// Lua is: its calls are not held to its parameter count.
+	Untyped bool
 }
 
 func (t *FunctionType) String() string {

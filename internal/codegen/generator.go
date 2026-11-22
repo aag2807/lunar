@@ -617,6 +617,10 @@ func (g *Generator) generateForStatement(node *ast.ForStatement) string {
 		// Generic for loop: for k, v in pairs(table) do
 		output.WriteString(" in ")
 		output.WriteString(g.generateExpression(node.Iterator))
+		for _, e := range node.IteratorRest {
+			output.WriteString(", ")
+			output.WriteString(g.generateExpression(e))
+		}
 	} else {
 		// Numeric for loop: for i = start, end, step do
 		output.WriteString(" = ")

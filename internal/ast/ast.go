@@ -863,8 +863,11 @@ type ForStatement struct {
 	End       Expression    // for numeric: end value
 	Step      Expression    // for numeric: step value (optional)
 	Iterator  Expression    // for generic: iterator expression
-	Body      *BlockStatement
-	IsGeneric bool // true if generic for, false if numeric for
+	// IteratorRest are the expressions after the first in a generic for:
+	// for k, v in next, t do has the state t here.
+	IteratorRest []Expression
+	Body         *BlockStatement
+	IsGeneric    bool // true if generic for, false if numeric for
 }
 
 func (fs *ForStatement) statementNode()       {}
@@ -885,6 +888,10 @@ func (fs *ForStatement) String() string {
 	if fs.IsGeneric {
 		out.WriteString(" in ")
 		out.WriteString(fs.Iterator.String())
+		for _, e := range fs.IteratorRest {
+			out.WriteString(", ")
+			out.WriteString(e.String())
+		}
 	} else {
 		out.WriteString(" = ")
 		out.WriteString(fs.Start.String())

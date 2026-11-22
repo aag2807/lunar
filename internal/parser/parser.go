@@ -1134,8 +1134,9 @@ func (p *Parser) parsePrefixExpression() ast.Expression {
 
 func (p *Parser) parseSpreadExpression() ast.Expression {
 	// A bare '...' is Lua's vararg expression; only '...' followed by an operand
-	// is a spread, as in {...items}.
-	if !p.peekStartsExpression() {
+	// on the same line is a spread, as in {...items}. `local m = ...` then a
+	// line starting with a name is the vararg, then a new statement.
+	if !p.peekStartsExpression() || p.peekToken.Line != p.curToken.Line {
 		return &ast.VarargExpression{Token: p.curToken}
 	}
 
@@ -2855,6 +2856,13 @@ func (p *Parser) parseForStatement() *ast.ForStatement {
 		p.nextToken() // move to iterator expression
 
 		stmt.Iterator = p.parseExpression(LOWEST)
+		// for k, v in next, t do: the iterator, its state and control value
+		// (and, in Lua 5.4, a closing value) may be listed.
+		for p.peekTokenIs(lexer.COMMA) {
+			p.nextToken()
+			p.nextToken()
+			stmt.IteratorRest = append(stmt.IteratorRest, p.parseExpression(LOWEST))
+		}
 	} else if p.peekTokenIs(lexer.ASSIGN) {
 		stmt.IsGeneric = false
 		p.nextToken() // consume '='

@@ -3919,6 +3919,18 @@ func memberNames[V any](m map[string]V) []string {
 	return names
 }
 
+// literalKeyName is the field a table-literal key names: a bare name, or a
+// string in brackets (`["a"] = 1`). Other keys are computed.
+func literalKeyName(key ast.Expression) (*ast.Identifier, bool) {
+	switch k := key.(type) {
+	case *ast.Identifier:
+		return k, true
+	case *ast.StringLiteral:
+		return &ast.Identifier{Token: k.Token, Value: k.Value}, true
+	}
+	return nil, false
+}
+
 // isNilNode reports whether a node is absent, including a nil pointer of a
 // concrete node type inside the interface, as a failed parse leaves.
 func isNilNode(n any) bool {
@@ -4072,8 +4084,9 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 		isRecord := true
 
 		for key, value := range node.Pairs {
-			// Check if key is an identifier (field name)
-			if ident, ok := key.(*ast.Identifier); ok {
+			// Check if key is an identifier (field name), or a string in
+			// brackets, which names a field the same way.
+			if ident, ok := literalKeyName(key); ok {
 				// A function in a table literal is a plain field, called
 				// with '.', as in `local M = { greet = function() end }`.
 				// (Methods, called with ':', are declared by interfaces
@@ -4107,9 +4120,10 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 
 	// Check if this is an array-style table (has sequential Values, or empty with no Pairs)
 	if len(node.Pairs) == 0 {
-		// Infer element type from the values
-		// Collect all unique types
-		seenTypes := make(map[string]Type)
+		// Infer element type from the values: each distinct type once, in
+		// the order the values first show it.
+		var types []Type
+		seen := make(map[string]bool)
 		for _, value := range node.Values {
 			valueType := c.checkExpression(value)
 			// If it's a spread expression, unwrap the array type
@@ -4118,22 +4132,19 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 					valueType = arrayType.ElementType
 				}
 			}
-			seenTypes[valueType.String()] = valueType
+			if key := valueType.String(); !seen[key] {
+				seen[key] = true
+				types = append(types, valueType)
+			}
 		}
 
 		// If all elements have the same type, use that type
-		if len(seenTypes) == 1 {
-			for _, t := range seenTypes {
-				return &ArrayType{ElementType: t}
-			}
+		if len(types) == 1 {
+			return &ArrayType{ElementType: types[0]}
 		}
 
 		// If elements have different types, create a union type
-		if len(seenTypes) > 1 {
-			types := make([]Type, 0, len(seenTypes))
-			for _, t := range seenTypes {
-				types = append(types, t)
-			}
+		if len(types) > 1 {
 			return &ArrayType{ElementType: &UnionType{Types: types}}
 		}
 

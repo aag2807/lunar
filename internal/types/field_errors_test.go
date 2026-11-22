@@ -121,3 +121,27 @@ func TestNonLiteralMismatchKeepsGenericMessage(t *testing.T) {
 		t.Fatalf("got %v", messages(errs))
 	}
 }
+
+// A string key in brackets names a field like a bare name does.
+func TestBracketStringKeysAreFields(t *testing.T) {
+	for _, err := range checkSource(t, `
+interface S
+    a: number
+    b: number
+end
+local t: S = { ["a"] = 1, b = 2 }
+local u = { ["x"] = 3 }
+local n: number = u.x
+`) {
+		t.Errorf("unexpected type error: %s", err.Message)
+	}
+	errs := checkSource(t, `
+interface S
+    a: number
+end
+local t: S = { ["a"] = "one" }
+`)
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, "Field 'a' of 'S' must be 'number'") {
+		t.Errorf("got %v", messages(errs))
+	}
+}

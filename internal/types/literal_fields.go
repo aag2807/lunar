@@ -63,6 +63,8 @@ func (c *Checker) checkLiteralAgainst(lit *ast.TableLiteral, target Type, root, 
 type literalField struct {
 	key   *ast.Identifier
 	value ast.Expression
+	// quoted is set for a key written ["a"], which rename leaves alone.
+	quoted bool
 }
 
 func (c *Checker) checkRecordLiteral(lit *ast.TableLiteral, iface *InterfaceType, root, path string) (handled, reported bool) {
@@ -72,11 +74,12 @@ func (c *Checker) checkRecordLiteral(lit *ast.TableLiteral, iface *InterfaceType
 
 	fields := make([]literalField, 0, len(lit.Pairs))
 	for key, value := range lit.Pairs {
-		ident, ok := key.(*ast.Identifier)
+		ident, ok := literalKeyName(key)
 		if !ok {
 			return false, false // computed keys: leave it to the generic check
 		}
-		fields = append(fields, literalField{ident, value})
+		_, quoted := key.(*ast.StringLiteral)
+		fields = append(fields, literalField{ident, value, quoted})
 	}
 	// Pairs is a map; report in source order.
 	sort.Slice(fields, func(i, j int) bool {
@@ -110,7 +113,10 @@ func (c *Checker) checkRecordLiteral(lit *ast.TableLiteral, iface *InterfaceType
 		present[name] = true
 		label := joinPath(path, name)
 		// The key names the interface's field, for references and rename.
-		c.reference(f.key.Token, memberSymbol(iface, name))
+		// (A quoted key's span includes its quotes, so it is not renamed.)
+		if !f.quoted {
+			c.reference(f.key.Token, memberSymbol(iface, name))
+		}
 
 		expected, known := iface.propertyType(name)
 		isMethod := false

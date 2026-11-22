@@ -27,3 +27,14 @@ local v: V = {}
 		}
 	}
 }
+
+// An array of mixed values lists its element types in source order.
+func TestArrayElementUnionInSourceOrder(t *testing.T) {
+	for i := 0; i < 30; i++ {
+		errs := checkSource(t, "local xs = {1, \"a\", true}\nlocal n: number = xs\n")
+		got := strings.Join(messages(errs), "\n")
+		if !strings.Contains(got, "'(number | string | boolean)[]'") {
+			t.Fatalf("run %d: %s", i, got)
+		}
+	}
+}

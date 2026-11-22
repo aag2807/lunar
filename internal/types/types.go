@@ -381,6 +381,12 @@ type ArrayType struct {
 }
 
 func (t *ArrayType) String() string {
+	switch t.ElementType.(type) {
+	case *UnionType, *IntersectionType, *FunctionType:
+		// (number | string)[] is an array of either; number | string[]
+		// would read as a number or an array of strings.
+		return fmt.Sprintf("(%s)[]", t.ElementType.String())
+	}
 	return fmt.Sprintf("%s[]", t.ElementType.String())
 }
 func (t *ArrayType) Equals(other Type) bool {

@@ -129,21 +129,35 @@ end
 
 ## Functions
 
-Parameters are optional when typed `T?` (or written `name?: T`); a rest
-parameter collects the remaining arguments. Generic functions take type
-parameters, which are erased.
+Parameters are optional when typed `T?` (or written `name?: T`), or when
+they have a default (`times: number = 1`), the value they take when the
+argument is left out or nil; a rest parameter collects the remaining
+arguments. Generic functions, and methods, take type parameters, which are
+erased; `<T extends Named>` constrains one, so a `T` has what `Named` has.
 
 ```lunar
 function greet(name: string, punctuation: string?): string
     return "Hello, " .. name .. (punctuation or "!")
 end
 
+function repeated(s: string, times: number = 2): string
+    return string.rep(s, times)
+end
+
 function firstOf<T>(items: T[]): T?
     return items[1]
 end
 
+interface Named
+    name: string
+end
+
+function nameOf<T extends Named>(x: T): string
+    return x.name
+end
+
 local double = (x: number) => x * 2
-print(greet("ada"), firstOf<number>({ 7, 8 }), double(4))
+print(greet("ada"), repeated("ab"), firstOf<number>({ 7, 8 }), nameOf({ name = "n" }), double(4))
 ```
 
 A global function may be called before its definition in the file. One name
@@ -290,8 +304,11 @@ assert(Rank.Grunt == 0 and Rank.Boss == 11)
 ## Pattern matching
 
 `match` tests a value against patterns in order: literals, `_`, a name that
-binds the value, `name: Type`, table patterns, and `when` guards. An arm ends
-at the next `|`; parenthesize a bitwise or inside one.
+binds the value, `name: Type`, table patterns, a dotted name such as an enum
+member (`State.Idle`), alternatives (`| 1 | 2 ->`), and `when` guards. Its
+value has the type of what its arms give, and a binding has the matched
+value's type. An arm ends at the next `|`; parenthesize a bitwise or inside
+one.
 
 ```lunar
 function area(shape: any): number

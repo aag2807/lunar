@@ -103,11 +103,14 @@ line (in watch mode, every rebuild does):
 | `field-type` | A table literal's field has the wrong type. |
 | `unknown-field` | A table literal has a field its type does not. |
 | `missing-fields` | A table literal leaves out required fields. |
-| `unknown-member` | A class or declared namespace has no such member. |
+| `unknown-member` | A class, declared namespace or string has no such member. |
+| `method-value` | A method read without calling it (`local f = e.hit`): Lua has no bound methods. |
+| `union-dispatch` | A method called on a union whose types disagree about calling it with `:` or `.`. |
+| `unknown` | A value of type `unknown` used before it is narrowed. |
 | `duplicate-function` | A second definition of a function. |
 | `import` | An import names no module, or something the module does not export. |
 | `import-cycle` | Imports form a cycle, which `require` cannot load. |
-| `module-name` | A file name `require` cannot express (a `.` in a folder or file name). |
+| `module-name` | A file name `require` cannot express (a `.` in a folder or file name), or two modules with one `require` name (`a.lunar` and `a/init.lunar`). |
 | `output-conflict` | A `.lua` script and a `.lunar` one would write the same file. |
 | `data-file` | A data file uses something a state with no libraries lacks. |
 | `not-supported` | `async`/`await`. |

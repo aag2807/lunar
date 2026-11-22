@@ -97,6 +97,18 @@ their changelog described features that did not work.
   itself (which crashed the compiler).
 - A statement that is only an expression, not a call, is an error, as in
   Lua, and so is an assignment to anything but a name, a field or an index.
+- `match` is typed (its value is what its arms give, bindings have the
+  matched value's type, a literal pattern that can never match is an
+  error) and takes alternatives (`| 1 | 2 ->`), dotted names such as enum
+  members, and negative numbers.
+- Default parameter values (`times: number = 1`), constraints on type
+  parameters (`<T extends Named>`), and generic methods (`pass<U>(x: U)`).
+  `extends Container<number>` instantiates the parent, and `Box<T>` inside
+  `Box` follows the instance's arguments.
+- `unknown` has to be narrowed before use; a string has only the string
+  library's methods; `Pick`, `Omit` and `keyof` see inherited fields;
+  `type T = typeof u` works for a local `u`.
+- A subclass inherits its parent's metamethods (`__tostring`, `__eq`, ...).
 - Untyped Lua is checked as Lua: `and`/`or` have the type of the operand they
   return; empty locals, tables grown field by field, left-out untyped
   parameters, values adjusted to names, and `function M.f()` /

@@ -48,6 +48,12 @@ local duel = {name = "duel"}
 
 local chase = {name = "chase", speed = 3}
 
+local orc = {attack = function(self, target)
+    return # target + # self.name
+end, name = "orc", onHit = function(damage)
+    return damage * 2
+end}
+
 assert(report(Circle.new(1)) == "circle: 3.14159")
 
 assert(report(Square.new(3)) == "square: 9")
@@ -55,3 +61,7 @@ assert(report(Square.new(3)) == "square: 9")
 assert(duel.speed == nil and duel.delay == nil)
 
 assert(chase.speed == 3)
+
+assert(orc:attack("imp") == 6)
+
+assert(orc.onHit(4) == 8)

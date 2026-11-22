@@ -4033,13 +4033,11 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 		for key, value := range node.Pairs {
 			// Check if key is an identifier (field name)
 			if ident, ok := key.(*ast.Identifier); ok {
-				valueType := c.checkExpression(value)
-				// Distinguish between methods (functions) and properties
-				if funcType, ok := valueType.(*FunctionType); ok {
-					methods[ident.Value] = funcType
-				} else {
-					properties[ident.Value] = valueType
-				}
+				// A function in a table literal is a plain field, called
+				// with '.', as in `local M = { greet = function() end }`.
+				// (Methods, called with ':', are declared by interfaces
+				// and classes.)
+				properties[ident.Value] = c.checkExpression(value)
 			} else {
 				// Not a simple identifier key, treat as regular table
 				isRecord = false

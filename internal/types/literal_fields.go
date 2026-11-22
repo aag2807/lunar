@@ -13,17 +13,21 @@ import (
 // reportLiteralFields checks a table literal written where a known interface
 // (or an array of one) is expected, field by field, and reports which field is
 // wrong: a value of the wrong type, a field the interface does not have, or
-// required fields left out. It returns true when it reported anything, so the
-// caller can skip its generic "Cannot assign" message.
+// required fields left out. It returns true when it checked the literal this
+// way, whether or not it found anything: the literal's fit has then been
+// decided, and the caller skips its generic "Cannot assign" check.
 func (c *Checker) reportLiteralFields(expr ast.Expression, target Type) bool {
 	lit, ok := expr.(*ast.TableLiteral)
 	if !ok || target == nil {
 		return false
 	}
-	return c.checkLiteralAgainst(lit, target, target.String(), "")
+	handled, _ := c.checkLiteralAgainst(lit, target, target.String(), "")
+	return handled
 }
 
-func (c *Checker) checkLiteralAgainst(lit *ast.TableLiteral, target Type, root, path string) bool {
+// checkLiteralAgainst reports whether it could check the literal against
+// target (handled), and whether it found anything wrong (reported).
+func (c *Checker) checkLiteralAgainst(lit *ast.TableLiteral, target Type, root, path string) (handled, reported bool) {
 	if nonNil, optional := removeNil(target); optional {
 		target = nonNil
 	}
@@ -31,24 +35,29 @@ func (c *Checker) checkLiteralAgainst(lit *ast.TableLiteral, target Type, root, 
 	switch t := target.(type) {
 	case *InterfaceType:
 		if t.Name == "<table literal>" || t.Name == "" {
-			return false
+			return false, false
 		}
 		return c.checkRecordLiteral(lit, t, root, path)
 	case *ArrayType:
 		if len(lit.Pairs) > 0 {
-			return false
+			return false, false
 		}
-		reported := false
+		// Every element has to be a literal checked against the element
+		// type for the array to count as handled.
+		handled = true
 		for i, value := range lit.Values {
-			if inner, ok := value.(*ast.TableLiteral); ok {
-				if c.checkLiteralAgainst(inner, t.ElementType, root, fmt.Sprintf("%s[%d]", path, i+1)) {
-					reported = true
-				}
+			inner, ok := value.(*ast.TableLiteral)
+			if !ok {
+				handled = false
+				continue
 			}
+			h, r := c.checkLiteralAgainst(inner, t.ElementType, root, fmt.Sprintf("%s[%d]", path, i+1))
+			handled = handled && h
+			reported = reported || r
 		}
-		return reported
+		return handled || reported, reported
 	}
-	return false
+	return false, false
 }
 
 type literalField struct {
@@ -56,16 +65,16 @@ type literalField struct {
 	value ast.Expression
 }
 
-func (c *Checker) checkRecordLiteral(lit *ast.TableLiteral, iface *InterfaceType, root, path string) bool {
+func (c *Checker) checkRecordLiteral(lit *ast.TableLiteral, iface *InterfaceType, root, path string) (handled, reported bool) {
 	if len(lit.Values) > 0 {
-		return false // positional values: not a record literal
+		return false, false // positional values: not a record literal
 	}
 
 	fields := make([]literalField, 0, len(lit.Pairs))
 	for key, value := range lit.Pairs {
 		ident, ok := key.(*ast.Identifier)
 		if !ok {
-			return false // computed keys: leave it to the generic check
+			return false, false // computed keys: leave it to the generic check
 		}
 		fields = append(fields, literalField{ident, value})
 	}
@@ -95,7 +104,6 @@ func (c *Checker) checkRecordLiteral(lit *ast.TableLiteral, iface *InterfaceType
 	}
 	present := map[string]bool{}
 	explained := map[string]bool{}
-	reported := false
 
 	for _, f := range fields {
 		name := f.key.Value
@@ -103,9 +111,12 @@ func (c *Checker) checkRecordLiteral(lit *ast.TableLiteral, iface *InterfaceType
 		label := joinPath(path, name)
 
 		expected, known := iface.propertyType(name)
+		isMethod := false
 		if !known {
 			if method, ok := iface.methodType(name); ok {
-				expected, known = method, true
+				// A method is called with ':', so the function a literal
+				// gives for it receives the table first.
+				expected, known, isMethod = withSelfParameter(method), true, true
 			}
 		}
 		if !known && iface.IndexSignature != nil {
@@ -123,13 +134,27 @@ func (c *Checker) checkRecordLiteral(lit *ast.TableLiteral, iface *InterfaceType
 		}
 
 		if inner, ok := f.value.(*ast.TableLiteral); ok {
-			if c.checkLiteralAgainst(inner, expected, root, label) {
-				reported = true
+			if h, r := c.checkLiteralAgainst(inner, expected, root, label); h {
+				reported = reported || r
 				continue
 			}
 		}
 
 		actual := c.typeOf(f.value)
+		if isMethod {
+			fn, isFn := actual.(*FunctionType)
+			params := len(expected.(*FunctionType).Parameters) - 1
+			// With no parameters the receiver ':' passes is simply unused.
+			if isFn && params == 0 && len(fn.Parameters) == 0 {
+				continue
+			}
+			if isFn && len(fn.Parameters) == params {
+				c.addErrorCode("field-type", fmt.Sprintf("Field '%s' of '%s' is a method, called with ':': its function takes self first, function(self, ...)",
+					label, root), exprToken(f.value, f.key.Token))
+				reported = true
+				continue
+			}
+		}
 		if actual != nil && !actual.IsAssignableTo(expected) {
 			c.addErrorCode("field-type", fmt.Sprintf("Field '%s' of '%s' must be '%s', got '%s'",
 				label, root, expected.String(), widenLiteralType(actual).String()), exprToken(f.value, f.key.Token))
@@ -149,7 +174,21 @@ func (c *Checker) checkRecordLiteral(lit *ast.TableLiteral, iface *InterfaceType
 		reported = true
 	}
 
-	return reported
+	return true, reported
+}
+
+// withSelfParameter is a method's type as the function a table literal
+// supplies for it: with the receiver as an extra first parameter.
+func withSelfParameter(method *FunctionType) *FunctionType {
+	fn := *method
+	fn.Parameters = append([]Type{Any}, method.Parameters...)
+	if len(method.OptionalParams) > 0 {
+		fn.OptionalParams = append([]bool{false}, method.OptionalParams...)
+	}
+	if len(method.ParamNames) > 0 {
+		fn.ParamNames = append([]string{"self"}, method.ParamNames...)
+	}
+	return &fn
 }
 
 // typeOf returns the type checkExpression computed for expr, checking it

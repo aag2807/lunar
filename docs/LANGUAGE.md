@@ -142,11 +142,20 @@ local imp: Enemy = {
     name = "imp",
     hp = 4,
     stats = { atk = 2, def = 1 },
-    attack = function(target: string): number
-        return 2
+    attack = function(self, target: string): number
+        return #target
     end,
 }
+
+print(imp.attack("orc"))
 ```
+
+A method declared in an interface (`attack(target: string): number`) is
+called with `:`, so the function a table literal gives for it takes the table
+first: `function(self, target)`. A field typed as a function
+(`onHit: function(n: number): void`) is a plain field, called with `.`, and so
+is any function in a table literal written without a type:
+`local M = { greet = function(name) ... end }` then `M.greet("bob")`.
 
 Interfaces can `extend` others, may name themselves or interfaces declared
 later, and have index signatures (`[key: string]: number`). `type Name … end`

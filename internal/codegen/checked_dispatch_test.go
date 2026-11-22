@@ -81,3 +81,14 @@ c:inc()
 	assertContains(t, out, "c.inc()")
 	assertContains(t, out, "c:inc()")
 }
+
+// The plainest Lua module: functions in a table, called with '.'.
+func TestLiteralFunctionFieldCallIsPlain(t *testing.T) {
+	out := generateChecked(t, `local M = { greet = function(name: string): string
+    return "hi " .. name
+end }
+print(M.greet("bob"))
+`)
+	assertContains(t, out, `M.greet("bob")`)
+	assertNotContains(t, out, "M:greet")
+}

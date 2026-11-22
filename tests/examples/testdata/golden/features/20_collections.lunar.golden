@@ -22,6 +22,12 @@ print(# completed(tasks))
 
 print(table.concat(titles(tasks), ", "))
 
+local M = {greet = function(name)
+    return "hi " .. name
+end}
+
 assert(# completed(tasks) == 2)
 
 assert(table.concat(titles(tasks), ", ") == "write, review, ship")
+
+assert(M.greet("bob") == "hi bob")

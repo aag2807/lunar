@@ -38,9 +38,12 @@ type Server struct {
 	shutdown    bool
 	root        string
 	docs        map[string]string // open buffers by absolute path
-	debounce    time.Duration
-	timer       *time.Timer
-	dirty       bool
+	// clientURIs is the URI the editor opened each file with, which is
+	// how it is named back to the editor.
+	clientURIs map[string]string
+	debounce   time.Duration
+	timer      *time.Timer
+	dirty      bool
 
 	progs   []*project.Program         // from the last analysis, one per project
 	modules map[string]*project.Module // last module without syntax errors, by path
@@ -61,6 +64,7 @@ func NewServer() *Server {
 		writer:       os.Stdout,
 		logger:       log.New(os.Stderr, "[lunar-lsp] ", log.LstdFlags),
 		docs:         map[string]string{},
+		clientURIs:   map[string]string{},
 		debounce:     150 * time.Millisecond,
 		modules:      map[string]*project.Module{},
 		configErrors: map[string]string{},
@@ -183,7 +187,9 @@ func (s *Server) handleMessage(content json.RawMessage) error {
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return err
 		}
-		s.docs[uriToPath(p.TextDocument.URI)] = p.TextDocument.Text
+		path := uriToPath(p.TextDocument.URI)
+		s.docs[path] = p.TextDocument.Text
+		s.clientURIs[path] = p.TextDocument.URI
 		s.changed()
 		return nil
 	case "textDocument/didChange":
@@ -497,12 +503,12 @@ func (s *Server) publish(diags diag.List) {
 	}
 	for file := range s.published {
 		if _, still := byFile[file]; !still {
-			s.sendNotification("textDocument/publishDiagnostics", PublishDiagnosticsParams{URI: pathToURI(file), Diagnostics: []Diagnostic{}})
+			s.sendNotification("textDocument/publishDiagnostics", PublishDiagnosticsParams{URI: s.uriOf(file), Diagnostics: []Diagnostic{}})
 			delete(s.published, file)
 		}
 	}
 	for file, list := range byFile {
-		s.sendNotification("textDocument/publishDiagnostics", PublishDiagnosticsParams{URI: pathToURI(file), Diagnostics: list})
+		s.sendNotification("textDocument/publishDiagnostics", PublishDiagnosticsParams{URI: s.uriOf(file), Diagnostics: list})
 		s.published[file] = true
 	}
 }
@@ -515,4 +521,13 @@ func diagnosticSeverity(sev diag.Severity) DiagnosticSeverity {
 		return SeverityInformation
 	}
 	return SeverityError
+}
+
+// uriOf names a file to the editor: in the editor's own spelling if it
+// opened it, otherwise built from the path.
+func (s *Server) uriOf(path string) string {
+	if uri, ok := s.clientURIs[path]; ok {
+		return uri
+	}
+	return pathToURI(path)
 }

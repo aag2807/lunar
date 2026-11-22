@@ -3,6 +3,7 @@ package lsp
 import (
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -14,26 +15,65 @@ import (
 
 // uriToPath turns a file:// URI into an absolute path. On Windows the URI
 // path starts with a slash before the drive letter, which is dropped.
-func uriToPath(uri string) string {
-	u, err := url.Parse(uri)
-	if err != nil || u.Scheme != "file" {
+func uriToPath(uri string) string { return uriToPathOn(runtime.GOOS, uri) }
+
+// uriToPathOn converts for the given OS. On Windows a drive letter comes
+// out upper case whichever way the editor wrote it (VS Code sends
+// file:///c%3A/...), so one file always has one path, and a URI with a host
+// (file://wsl$/Ubuntu/home/...) is a \\host\share path. The authority is
+// taken apart by hand: Go's url.Parse refuses the escaped host wsl%24.
+func uriToPathOn(goos, uri string) string {
+	rest, ok := strings.CutPrefix(uri, "file://")
+	if !ok {
 		return uri
 	}
-	path := u.Path
-	if runtime.GOOS == "windows" && len(path) > 2 && path[0] == '/' && path[2] == ':' {
-		path = path[1:]
+	host, p, _ := strings.Cut(rest, "/")
+	if i := strings.IndexAny(p, "?#"); i >= 0 {
+		p = p[:i]
 	}
-	return filepath.Clean(filepath.FromSlash(path))
+	p = "/" + p
+	if unescaped, err := url.PathUnescape(p); err == nil {
+		p = unescaped
+	}
+	if unescaped, err := url.PathUnescape(host); err == nil {
+		host = unescaped
+	}
+	if goos != "windows" {
+		return filepath.Clean(filepath.FromSlash(p))
+	}
+	if host != "" && host != "localhost" {
+		return `\\` + host + strings.ReplaceAll(path.Clean(p), "/", `\`)
+	}
+	if len(p) > 2 && p[0] == '/' && p[2] == ':' {
+		p = p[1:]
+	}
+	p = path.Clean(p)
+	if len(p) >= 2 && p[1] == ':' {
+		p = strings.ToUpper(p[:1]) + p[1:]
+		if len(p) == 2 {
+			p += "/" // the drive's root
+		}
+	}
+	return strings.ReplaceAll(p, "/", `\`)
 }
 
 // pathToURI is the inverse of uriToPath.
-func pathToURI(path string) string {
-	if strings.HasPrefix(path, "<stdlib>/") {
-		path = stdlibCopy(strings.TrimPrefix(path, "<stdlib>/"))
+func pathToURI(path string) string { return pathToURIOn(runtime.GOOS, path) }
+
+func pathToURIOn(goos, p string) string {
+	if strings.HasPrefix(p, "<stdlib>/") {
+		p = stdlibCopy(strings.TrimPrefix(p, "<stdlib>/"))
 	}
-	slashed := filepath.ToSlash(path)
+	if goos != "windows" {
+		return (&url.URL{Scheme: "file", Path: filepath.ToSlash(p)}).String()
+	}
+	slashed := strings.ReplaceAll(p, `\`, "/")
+	if share, ok := strings.CutPrefix(slashed, "//"); ok {
+		host, rest, _ := strings.Cut(share, "/")
+		return (&url.URL{Scheme: "file", Host: host, Path: "/" + rest}).String()
+	}
 	if !strings.HasPrefix(slashed, "/") {
-		slashed = "/" + slashed // a Windows drive path
+		slashed = "/" + slashed // C:/... becomes /C:/...
 	}
 	return (&url.URL{Scheme: "file", Path: slashed}).String()
 }

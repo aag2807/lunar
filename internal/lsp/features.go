@@ -54,7 +54,7 @@ func (s *Server) tokenRange(tok lexer.Token) Range {
 }
 
 func (s *Server) location(tok lexer.Token) Location {
-	return Location{URI: pathToURI(tok.File), Range: s.tokenRange(tok)}
+	return Location{URI: s.uriOf(tok.File), Range: s.tokenRange(tok)}
 }
 
 func (s *Server) definition(uri string, pos Position) (interface{}, error) {
@@ -245,7 +245,7 @@ func (s *Server) rename(uri string, pos Position, newName string) (interface{}, 
 	}
 	edit := WorkspaceEdit{Changes: map[string][]TextEdit{}}
 	for _, o := range s.occurrencesOf(occ.Sym, true) {
-		u := pathToURI(o.Tok.File)
+		u := s.uriOf(o.Tok.File)
 		edit.Changes[u] = append(edit.Changes[u], TextEdit{Range: s.tokenRange(o.Tok), NewText: newName})
 	}
 	return edit, nil

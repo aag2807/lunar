@@ -105,7 +105,7 @@ function to_string(val)
     return tostring(val)
 end
 
-local user = {profile = {age = 30, name = "Alice"}}
+local user = {profile = {name = "Alice", age = 30}}
 
 local user_name = to_string(default_value(get_property(get_property(user, "profile"), "name"), "Unknown"))
 
@@ -113,9 +113,9 @@ print("Example 6:", user_name)
 
 function validate_positive(x)
     if x > 0 then
-        return {error = nil, success = true, value = x}
+        return {success = true, value = x, error = nil}
     end
-    return {error = "Must be positive", success = false, value = nil}
+    return {success = false, value = nil, error = "Must be positive"}
 end
 
 function validate_range(result, min, max)
@@ -125,7 +125,7 @@ function validate_range(result, min, max)
     if result.value >= min and result.value <= max then
         return result
     end
-    return {error = "Out of range", success = false, value = nil}
+    return {success = false, value = nil, error = "Out of range"}
 end
 
 function extract_value(result, default)

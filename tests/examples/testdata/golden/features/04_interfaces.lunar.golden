@@ -3,7 +3,6 @@ Circle.__index = Circle
 
 function Circle.new(radius)
     local self = setmetatable({}, Circle)
-    self.radius = nil
     self.radius = radius
     return self
 end
@@ -22,7 +21,6 @@ Square.__index = Square
 
 function Square.new(side)
     local self = setmetatable({}, Square)
-    self.side = nil
     self.side = side
     return self
 end
@@ -48,15 +46,15 @@ local duel = {name = "duel"}
 
 local chase = {name = "chase", speed = 3}
 
-local orc = {attack = function(self, target)
+local orc = {name = "orc", attack = function(self, target)
     return # target + # self.name
-end, name = "orc", onHit = function(damage)
+end, onHit = function(damage)
     return damage * 2
 end}
 
-local arrows = {count = 20, item = "arrow"}
+local arrows = {item = "arrow", count = 20}
 
-local coins = {count = 3, item = 5}
+local coins = {item = 5, count = 3}
 
 assert(report(Circle.new(1)) == "circle: 3.14159")
 

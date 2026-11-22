@@ -146,7 +146,7 @@ end
 
 local successResult = {type = "Success", value = 42}
 
-local errorResult = {message = "Network timeout", type = "Error"}
+local errorResult = {type = "Error", message = "Network timeout"}
 
 print("\nDiscriminated unions:")
 
@@ -170,11 +170,11 @@ function calculateArea(shape)
 end)()
 end
 
-local circle = {radius = 5, type = "Circle"}
+local circle = {type = "Circle", radius = 5}
 
-local rectangle = {height = 20, type = "Rectangle", width = 10}
+local rectangle = {type = "Rectangle", width = 10, height = 20}
 
-local triangle = {base = 6, height = 8, type = "Triangle"}
+local triangle = {type = "Triangle", base = 6, height = 8}
 
 print("\nShape area calculator:")
 
@@ -201,7 +201,7 @@ function greet(person)
 end)()
 end
 
-local alice = {age = 30, name = "Alice"}
+local alice = {name = "Alice", age = 30}
 
 local bob = {name = "Bob"}
 
@@ -299,11 +299,11 @@ function processEvent(event)
 end)()
 end
 
-local clickEvent = {button = 1, type = "click"}
+local clickEvent = {type = "click", button = 1}
 
-local keyEvent = {key = "Enter", type = "keypress"}
+local keyEvent = {type = "keypress", key = "Enter"}
 
-local scrollEvent = {delta = 120, type = "scroll"}
+local scrollEvent = {type = "scroll", delta = 120}
 
 print("\nNested patterns:")
 
@@ -343,11 +343,11 @@ function handleResponse(response)
 end)()
 end
 
-local okResponse = {body = "Data loaded", status = 200}
+local okResponse = {status = 200, body = "Data loaded"}
 
-local notFoundResponse = {body = "", status = 404}
+local notFoundResponse = {status = 404, body = ""}
 
-local serverErrorResponse = {body = "", status = 500}
+local serverErrorResponse = {status = 500, body = ""}
 
 print("\nHTTP response handler:")
 

@@ -9,8 +9,6 @@ TodoList.__index = TodoList
 
 function TodoList.new()
     local self = setmetatable({}, TodoList)
-    self.tasks = nil
-    self.nextId = nil
     self.tasks = {}
     self.nextId = 1
     return self
@@ -21,7 +19,7 @@ function TodoList:add(title, priority)
     if priority ~= nil then
         level = priority
     end
-    local task = {done = false, id = self.nextId, priority = level, title = title}
+    local task = {id = self.nextId, title = title, done = false, priority = level}
     table.insert(self.tasks, task)
     self.nextId = self.nextId + 1
     return task.id

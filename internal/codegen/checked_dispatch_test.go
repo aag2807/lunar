@@ -183,3 +183,25 @@ print(m.from, p.match(2), p.get(3), g(1, 2, 3))
 	assertContains(t, out, "p:get(3)")
 	assertContains(t, out, "function g(public, private, class)")
 }
+
+// A table literal comes out in the order it was written, positional values
+// and keys interleaved as in the source.
+func TestTableLiteralKeepsSourceOrder(t *testing.T) {
+	out := generate(t, `local t = { zeta = 1, alpha = 2, [3] = "c", "first", mid = 3 }`)
+	assertContains(t, out, `{zeta = 1, alpha = 2, [3] = "c", "first", mid = 3}`)
+}
+
+// A field declared with no value needs no line in the constructor: it is
+// nil until set.
+func TestFieldWithoutValueWritesNothing(t *testing.T) {
+	out := generateChecked(t, `class Mob
+    n: number
+    hp: number = 3
+    constructor(n: number)
+        self.n = n
+    end
+end
+`)
+	assertNotContains(t, out, "self.n = nil")
+	assertContains(t, out, "self.hp = 3")
+}

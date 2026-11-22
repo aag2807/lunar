@@ -3,7 +3,6 @@ Vehicle.__index = Vehicle
 
 function Vehicle.new(wheels)
     local self = setmetatable({}, Vehicle)
-    self.wheels = nil
     self.wheels = wheels
     return self
 end

@@ -245,6 +245,15 @@ type TableLiteral struct {
 	Token  lexer.Token               // '{' token
 	Pairs  map[Expression]Expression // for key-value pairs
 	Values []Expression              // for array-style values
+	// Entries are the pairs and values in the order written (Key nil for a
+	// positional value), so the Lua keeps the source's order.
+	Entries []TableEntry
+}
+
+// TableEntry is one field of a table literal.
+type TableEntry struct {
+	Key   Expression // nil for a positional value
+	Value Expression
 }
 
 func (tl *TableLiteral) expressionNode()      {}

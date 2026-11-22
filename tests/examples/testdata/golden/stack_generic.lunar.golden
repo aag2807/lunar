@@ -3,7 +3,6 @@ Stack.__index = Stack
 
 function Stack.new()
     local self = setmetatable({}, Stack)
-    self.items = nil
     self.items = 0
     return self
 end

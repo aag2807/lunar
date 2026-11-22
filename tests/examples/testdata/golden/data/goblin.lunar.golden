@@ -1,3 +1,3 @@
-local goblin = {hp = 10, name = "goblin", stats = {atk = 3, def = 1}, tags = {"melee", "green"}}
+local goblin = {name = "goblin", hp = 10, tags = {"melee", "green"}, stats = {atk = 3, def = 1}}
 
 return goblin

@@ -2866,6 +2866,7 @@ func (p *Parser) parseTableLiteral() ast.Expression {
 			p.nextToken() // move past '='
 			value := p.parseExpression(LOWEST)
 			table.Pairs[key] = value
+			table.Entries = append(table.Entries, ast.TableEntry{Key: key, Value: value})
 		} else if p.curTokenIsIdentOrContextual() && p.peekTokenIs(lexer.ASSIGN) {
 			// Key-value pair with identifier key
 			key := p.parseIdentifierOrContextual()
@@ -2874,10 +2875,12 @@ func (p *Parser) parseTableLiteral() ast.Expression {
 
 			value := p.parseExpression(LOWEST)
 			table.Pairs[key] = value
+			table.Entries = append(table.Entries, ast.TableEntry{Key: key, Value: value})
 		} else {
 			// Array-style value
 			value := p.parseExpression(LOWEST)
 			table.Values = append(table.Values, value)
+			table.Entries = append(table.Entries, ast.TableEntry{Value: value})
 		}
 
 		// Fields are separated by ',' or ';', as in Lua

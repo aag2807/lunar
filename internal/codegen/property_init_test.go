@@ -37,8 +37,9 @@ end
 	if !strings.Contains(output, `self.age = 25`) {
 		t.Errorf("Expected instance property 'age' to be initialized with 25")
 	}
-	if !strings.Contains(output, `self.city = nil`) {
-		t.Errorf("Expected instance property 'city' to be initialized with nil")
+	// A field with no value is nil until set; assigning nil is a dead line.
+	if strings.Contains(output, `self.city = nil`) {
+		t.Errorf("A field with no value should write nothing")
 	}
 
 	// Check that properties are initialized in the new() function
@@ -112,8 +113,8 @@ end
 	if !strings.Contains(output, `Counter.maxCount = 100`) {
 		t.Errorf("Expected static property 'maxCount' to be initialized")
 	}
-	if !strings.Contains(output, `Counter.name = nil`) {
-		t.Errorf("Expected static property 'name' to be initialized with nil")
+	if strings.Contains(output, `Counter.name = nil`) {
+		t.Errorf("A static field with no value should write nothing")
 	}
 
 	// Static properties should NOT be in the constructor

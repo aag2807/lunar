@@ -762,17 +762,12 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 		output.WriteString("local self = setmetatable({}, " + className + ")\n")
 
 		// Initialize instance properties with their default values
+		// A field with no initial value is nil until set: no line for it.
 		for _, prop := range node.Properties {
-			if !prop.IsStatic {
+			if !prop.IsStatic && prop.Value != nil {
 				output.WriteString(g.generateIndent())
-				if prop.Value != nil {
-					// Property has an initial value
-					value := g.generateExpression(prop.Value)
-					output.WriteString(fmt.Sprintf("self.%s = %s\n", prop.Name.Value, value))
-				} else {
-					// Property has no initial value, initialize to nil
-					output.WriteString(fmt.Sprintf("self.%s = nil\n", prop.Name.Value))
-				}
+				value := g.generateExpression(prop.Value)
+				output.WriteString(fmt.Sprintf("self.%s = %s\n", prop.Name.Value, value))
 			}
 		}
 
@@ -809,17 +804,12 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 
 	// Generate static properties
 	for _, prop := range node.Properties {
-		if prop.IsStatic {
-			// Static properties go directly on the class table
+		if prop.IsStatic && prop.Value != nil {
+			// Static properties go directly on the class table; one with
+			// no initial value is nil until set.
 			output.WriteString(g.generateIndent())
-			if prop.Value != nil {
-				// Static property has an initial value
-				value := g.generateExpression(prop.Value)
-				output.WriteString(fmt.Sprintf("%s.%s = %s\n", className, prop.Name.Value, value))
-			} else {
-				// Static property has no initial value, initialize to nil
-				output.WriteString(fmt.Sprintf("%s.%s = nil\n", className, prop.Name.Value))
-			}
+			value := g.generateExpression(prop.Value)
+			output.WriteString(fmt.Sprintf("%s.%s = %s\n", className, prop.Name.Value, value))
 		}
 	}
 	if len(node.Properties) > 0 {
@@ -1130,11 +1120,40 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 		}
 	}
 
+	// The fields in the order written, when the parser recorded it.
+	entries := node.Entries
+	if len(entries) != len(node.Pairs)+len(node.Values) {
+		entries = nil
+	}
+
 	// If we have key-value pairs AND spread expressions, treat spreads as object spreads
 	// Example: {...obj1, key = val, ...obj2}
 	if len(node.Pairs) > 0 && hasSpread {
 		var output strings.Builder
 		output.WriteString("(function() local __temp = {}; ")
+
+		// In source order, a later field or spread overrides an earlier one.
+		if entries != nil {
+			for _, e := range entries {
+				switch {
+				case e.Key != nil:
+					key, val := g.tableKey(e.Key), g.generateExpression(e.Value)
+					if isLuaIdentifier(key) {
+						output.WriteString(fmt.Sprintf("__temp[\"%s\"] = %s; ", key, val))
+					} else {
+						output.WriteString(fmt.Sprintf("__temp[%s] = %s; ", key, val))
+					}
+				default:
+					if spread, ok := e.Value.(*ast.SpreadExpression); ok {
+						output.WriteString(spreadMerge(g.generateExpression(spread.Value)))
+					} else {
+						output.WriteString(fmt.Sprintf("table.insert(__temp, %s); ", g.generateExpression(e.Value)))
+					}
+				}
+			}
+			output.WriteString("return __temp end)()")
+			return output.String()
+		}
 
 		// First, merge all spread expressions
 		for _, val := range node.Values {
@@ -1182,6 +1201,25 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 	// No spread - use normal table literal generation
 	var output strings.Builder
 	output.WriteString("{")
+
+	if entries != nil {
+		fields := make([]string, len(entries))
+		for i, e := range entries {
+			if e.Key == nil {
+				fields[i] = g.generateExpression(e.Value)
+				continue
+			}
+			key, val := g.tableKey(e.Key), g.generateExpression(e.Value)
+			if isLuaIdentifier(key) {
+				fields[i] = fmt.Sprintf("%s = %s", key, val)
+			} else {
+				fields[i] = fmt.Sprintf("[%s] = %s", key, val)
+			}
+		}
+		output.WriteString(strings.Join(fields, ", "))
+		output.WriteString("}")
+		return output.String()
+	}
 
 	// Generate array-style values
 	if len(node.Values) > 0 {
@@ -1277,6 +1315,15 @@ func spreadMerge(source string) string {
 // sortedPairs renders a table literal's key/value pairs in a stable order.
 // Ranging over the map directly makes the same source compile to different
 // output from run to run.
+// tableKey renders a table literal's key: a name as itself, anything else
+// as the expression inside [ ].
+func (g *Generator) tableKey(key ast.Expression) string {
+	if ident, ok := key.(*ast.Identifier); ok {
+		return ident.Value
+	}
+	return g.generateExpression(key)
+}
+
 func (g *Generator) sortedPairs(pairs map[ast.Expression]ast.Expression) [][2]string {
 	rendered := make([][2]string, 0, len(pairs))
 

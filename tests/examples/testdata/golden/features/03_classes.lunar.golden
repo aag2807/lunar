@@ -3,8 +3,6 @@ Animal.__index = Animal
 
 function Animal.new(name, legs)
     local self = setmetatable({}, Animal)
-    self.name = nil
-    self.legs = nil
     self.name = name
     self.legs = legs
     return self

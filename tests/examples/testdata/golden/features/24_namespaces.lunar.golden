@@ -12,7 +12,6 @@ Orc.__index = Orc
 
 function Orc.new(hp)
     local self = setmetatable({}, Orc)
-    self.hp = nil
     self.hp = hp
     return self
 end

@@ -11,7 +11,6 @@ Box.__index = Box
 
 function Box.new(value)
     local self = setmetatable({}, Box)
-    self.value = nil
     self.value = value
     return self
 end
@@ -26,8 +25,6 @@ Pair.__index = Pair
 
 function Pair.new(left, right)
     local self = setmetatable({}, Pair)
-    self.left = nil
-    self.right = nil
     self.left = left
     self.right = right
     return self

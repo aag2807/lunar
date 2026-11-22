@@ -3,14 +3,6 @@ Ball.__index = Ball
 
 function Ball.new(x, y)
     local self = setmetatable({}, Ball)
-    self.x = nil
-    self.y = nil
-    self.vx = nil
-    self.vy = nil
-    self.radius = nil
-    self.red = nil
-    self.green = nil
-    self.blue = nil
     self.x = x
     self.y = y
     self.vx = math.random(- 260, 260)

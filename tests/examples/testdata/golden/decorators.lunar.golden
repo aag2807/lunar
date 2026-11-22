@@ -61,7 +61,6 @@ Database.__index = Database
 
 function Database.new(conn)
     local self = setmetatable({}, Database)
-    self.connection = nil
     self.connection = conn
     return self
 end

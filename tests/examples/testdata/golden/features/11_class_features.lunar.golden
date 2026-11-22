@@ -5,8 +5,6 @@ Account.__setters = {}
 
 function Account.new(id, balance)
     local self = setmetatable({}, Account)
-    self.id = nil
-    self.balance = nil
     self.id = id
     self.balance = balance
     return self
@@ -70,7 +68,6 @@ Savings.__setters = setmetatable({}, {__index = Account.__setters})
 
 function Savings.new(id, balance, rate)
     local self = setmetatable({}, Savings)
-    self.rate = nil
     do local __parent = Account.new(id, balance); for __k, __v in pairs(__parent) do self[__k] = __v end end
     self.rate = rate
     return self

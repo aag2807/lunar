@@ -20,9 +20,11 @@ func (s *Server) occurrenceAt(uri string, pos Position) (types.Occurrence, bool)
 			return occ, true
 		}
 	}
-	if s.prog != nil && s.prog.DeclIndex != nil {
-		if occ, ok := s.prog.DeclIndex.At(path, offset); ok {
-			return occ, true
+	for _, prog := range s.progs {
+		if prog.DeclIndex != nil {
+			if occ, ok := prog.DeclIndex.At(path, offset); ok {
+				return occ, true
+			}
 		}
 	}
 	return types.Occurrence{}, false
@@ -39,8 +41,10 @@ func (s *Server) indexes() []*types.Index {
 	for _, path := range paths {
 		out = append(out, s.modules[path].Index)
 	}
-	if s.prog != nil && s.prog.DeclIndex != nil {
-		out = append(out, s.prog.DeclIndex)
+	for _, prog := range s.progs {
+		if prog.DeclIndex != nil {
+			out = append(out, prog.DeclIndex)
+		}
 	}
 	return out
 }
@@ -288,8 +292,13 @@ func (s *Server) documentSymbols(uri string) []DocumentSymbol {
 	var ix *types.Index
 	if m := s.modules[path]; m != nil {
 		ix = m.Index
-	} else if s.prog != nil {
-		ix = s.prog.DeclIndex
+	} else {
+		for _, prog := range s.progs {
+			if prog.DeclIndex != nil && len(ownSymbols(path, prog.DeclIndex)) > 0 {
+				ix = prog.DeclIndex
+				break
+			}
+		}
 	}
 	out := []DocumentSymbol{}
 	if ix == nil {

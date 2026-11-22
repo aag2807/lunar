@@ -33,7 +33,13 @@ func gameRoot(t *testing.T) string {
 
 func newClient(t *testing.T) *client {
 	t.Helper()
-	c := &client{t: t, out: &bytes.Buffer{}, root: gameRoot(t)}
+	return newClientAt(t, gameRoot(t))
+}
+
+// newClientAt starts a server on the workspace folder root.
+func newClientAt(t *testing.T, root string) *client {
+	t.Helper()
+	c := &client{t: t, out: &bytes.Buffer{}, root: root}
 	c.s = NewServer()
 	c.s.writer = c.out
 	c.s.logger = log.New(io.Discard, "", 0)

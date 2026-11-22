@@ -10,7 +10,9 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,8 +42,11 @@ type Server struct {
 	timer       *time.Timer
 	dirty       bool
 
-	prog    *project.Program
+	progs   []*project.Program         // from the last analysis, one per project
 	modules map[string]*project.Module // last module without syntax errors, by path
+	// configErrors is the error last shown for each config file, so it is
+	// shown once rather than on every keystroke.
+	configErrors map[string]string
 	// broken are the files that do not parse now, so their entries in
 	// modules describe an older text.
 	broken    map[string]bool
@@ -52,13 +57,14 @@ type Server struct {
 // NewServer creates a server speaking on stdin and stdout.
 func NewServer() *Server {
 	return &Server{
-		reader:    bufio.NewReader(os.Stdin),
-		writer:    os.Stdout,
-		logger:    log.New(os.Stderr, "[lunar-lsp] ", log.LstdFlags),
-		docs:      map[string]string{},
-		debounce:  150 * time.Millisecond,
-		modules:   map[string]*project.Module{},
-		published: map[string]bool{},
+		reader:       bufio.NewReader(os.Stdin),
+		writer:       os.Stdout,
+		logger:       log.New(os.Stderr, "[lunar-lsp] ", log.LstdFlags),
+		docs:         map[string]string{},
+		debounce:     150 * time.Millisecond,
+		modules:      map[string]*project.Module{},
+		configErrors: map[string]string{},
+		published:    map[string]bool{},
 	}
 }
 
@@ -336,40 +342,130 @@ func (s *Server) analyze() {
 		}
 	}()
 
-	opts := project.Options{Dir: s.root, Overlay: map[string]string{}}
+	overlay := map[string]string{}
 	for path, text := range s.docs {
-		opts.Overlay[path] = text
+		overlay[path] = text
 	}
-	if s.root == "" {
-		// No workspace folder: analyse the open files on their own.
-		for path := range s.docs {
-			opts.Files = append(opts.Files, path)
+	s.files = map[string]*source.File{}
+	s.progs = nil
+	s.broken = map[string]bool{}
+
+	// Each file belongs to the lunar.config.json found from its own folder,
+	// as for `lunar build` run there; "" when there is none.
+	configs := map[string]string{}
+	configOf := func(path string) string {
+		dir := filepath.Dir(path)
+		if cfg, ok := configs[dir]; ok {
+			return cfg
 		}
-		if len(opts.Files) == 0 {
+		cfg, _ := project.FindConfig(dir)
+		configs[dir] = cfg
+		return cfg
+	}
+
+	// One analysis per config: the workspace's own (or the workspace folder
+	// itself when it has none), and one for each open document's.
+	type run struct {
+		key  string // the config that owns what this run reports
+		opts project.Options
+	}
+	var runs []run
+	seen := map[string]bool{}
+	if s.root != "" {
+		cfg, _ := project.FindConfig(s.root)
+		runs = append(runs, run{cfg, project.Options{Dir: s.root, ConfigPath: cfg, Overlay: overlay}})
+		seen[cfg] = true
+	}
+	docs := make([]string, 0, len(s.docs))
+	for path := range s.docs {
+		docs = append(docs, path)
+	}
+	sort.Strings(docs)
+	for _, path := range docs {
+		if cfg := configOf(path); cfg != "" && !seen[cfg] {
+			runs = append(runs, run{cfg, project.Options{ConfigPath: cfg, Overlay: overlay}})
+			seen[cfg] = true
+		}
+	}
+
+	var diags diag.List
+	covered := map[string]bool{}
+	analyse := func(r run, owns func(path string) bool) {
+		p, openDiags := project.Open(r.opts)
+		if openDiags.HasErrors() {
+			diags = append(diags, s.configProblem(r.key, openDiags)...)
 			return
 		}
-	}
-
-	s.files = map[string]*source.File{}
-	p, diags := project.Open(opts)
-	if diags.HasErrors() {
-		s.logger.Printf("cannot open the project: %s", diags[0].Message)
-		s.publish(diags)
-		return
-	}
-	prog, diags := p.Check()
-	s.prog = prog
-
-	// A module whose text does not parse keeps serving its last good index.
-	s.broken = map[string]bool{}
-	for _, m := range prog.Modules {
-		if m.Broken {
-			s.broken[m.Path] = true
-		} else if m.Index != nil {
-			s.modules[m.Path] = m
+		delete(s.configErrors, r.key)
+		prog, checkDiags := p.Check()
+		s.progs = append(s.progs, prog)
+		for _, m := range prog.Modules {
+			if !owns(m.Path) {
+				continue
+			}
+			covered[m.Path] = true
+			if m.Broken {
+				s.broken[m.Path] = true
+			} else if m.Index != nil {
+				// A module that does not parse keeps its last good index.
+				s.modules[m.Path] = m
+			}
+		}
+		for _, d := range checkDiags {
+			if d.File == "" || strings.HasPrefix(d.File, "<") || owns(d.File) {
+				diags = append(diags, d)
+			}
 		}
 	}
+	for _, r := range runs {
+		key := r.key
+		analyse(r, func(path string) bool { return configOf(path) == key })
+	}
+
+	// Open documents no project covers (no config, or outside its
+	// rootDir) are analysed on their own, a folder at a time.
+	byDir := map[string][]string{}
+	var dirs []string
+	for _, path := range docs {
+		if covered[path] {
+			continue
+		}
+		dir := filepath.Dir(path)
+		if byDir[dir] == nil {
+			dirs = append(dirs, dir)
+		}
+		byDir[dir] = append(byDir[dir], path)
+	}
+	for _, dir := range dirs {
+		files := byDir[dir]
+		own := map[string]bool{}
+		for _, f := range files {
+			own[f] = true
+		}
+		analyse(run{"", project.Options{Dir: dir, Files: files, Overlay: overlay}}, func(path string) bool { return own[path] })
+	}
+
 	s.publish(diags)
+}
+
+// configProblem places the errors from opening a project on its config
+// file, and shows the first in a message once, so a typo in the config
+// does not just make every diagnostic disappear.
+func (s *Server) configProblem(configPath string, diags diag.List) diag.List {
+	out := make(diag.List, 0, len(diags))
+	for _, d := range diags {
+		if d.File == "" && configPath != "" {
+			d.File, d.Line, d.Column, d.EndLine, d.EndColumn = configPath, 1, 1, 1, 1
+		}
+		out = append(out, d)
+	}
+	msg := diags[0].Message
+	s.logger.Printf("cannot open the project: %s", msg)
+	if s.configErrors[configPath] != msg {
+		s.configErrors[configPath] = msg
+		s.sendNotification("window/showMessage", map[string]any{"type": 1, "message": "Lunar: " + msg})
+	}
+	return out
 }
 
 // publish sends the diagnostics for every file that has some, and an empty

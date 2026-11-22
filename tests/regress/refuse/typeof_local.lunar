@@ -1,0 +1,5 @@
+-- type T = typeof x takes the type of a local declared before it.
+local n = 3
+type N = typeof n
+-- error: Cannot assign type
+local m: N = "x"

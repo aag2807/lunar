@@ -3399,8 +3399,8 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 				prop.IsStatic = isStatic
 				prop.IsReadonly = isReadonly
 				class.Properties = append(class.Properties, prop)
-			} else if p.peekTokenIs(lexer.LPAREN) {
-				// It's a method
+			} else if p.peekTokenIs(lexer.LPAREN) || p.peekTokenIs(lexer.LT) {
+				// It's a method (generic if '<' follows its name)
 				method := p.parseMethodDeclaration(isAbstract)
 				method.IsStatic = isStatic
 				method.IsAbstract = isAbstract
@@ -3466,6 +3466,12 @@ func (p *Parser) parseMethodDeclaration(isAbstract bool) *ast.FunctionDeclaratio
 	method := &ast.FunctionDeclaration{
 		Token: p.curToken,
 		Name:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+	}
+
+	// A generic method: pass<U>(x: U): U
+	if p.peekTokenIs(lexer.LT) {
+		p.nextToken() // consume <
+		method.GenericParams = p.parseGenericParameters()
 	}
 
 	// Parse parameters
@@ -3722,8 +3728,8 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 				// Property
 				prop := p.parsePropertyDeclaration()
 				iface.Properties = append(iface.Properties, prop)
-			} else if p.peekTokenIs(lexer.LPAREN) {
-				// Method signature
+			} else if p.peekTokenIs(lexer.LPAREN) || p.peekTokenIs(lexer.LT) {
+				// Method signature (generic if '<' follows its name)
 				method := p.parseInterfaceMethod()
 				iface.Methods = append(iface.Methods, method)
 			} else {
@@ -3744,6 +3750,12 @@ func (p *Parser) parseInterfaceMethod() *ast.InterfaceMethod {
 	method := &ast.InterfaceMethod{
 		Token: p.curToken,
 		Name:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+	}
+
+	// A generic method: pass<U>(x: U): U
+	if p.peekTokenIs(lexer.LT) {
+		p.nextToken() // consume <
+		method.GenericParams = p.parseGenericParameters()
 	}
 
 	// Parse parameters

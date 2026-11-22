@@ -355,6 +355,9 @@ type Checker struct {
 	// stringDots are the s.m expressions that resolved through the string
 	// library; a call through one may be plain Lua's s.m(s, ...).
 	stringDots map[*ast.DotExpression]*FunctionType
+	// resolvingTypeof: a type alias using typeof is being resolved where it
+	// is declared, not in the early registration pass.
+	resolvingTypeof bool
 
 	// exprTypes records the type computed for each expression checked.
 	exprTypes map[ast.Expression]Type
@@ -1171,6 +1174,16 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 
 	// Register methods
 	for _, method := range node.Methods {
+		// A generic method's type parameters are in scope for its signature.
+		prevSigEnv := c.env
+		methodGenerics := make([]string, len(method.GenericParams))
+		if len(method.GenericParams) > 0 {
+			c.env = NewEnclosedEnvironment(prevSigEnv)
+			for i, gp := range method.GenericParams {
+				c.env.Set(gp.Value, &GenericParamType{Name: gp.Value})
+				methodGenerics[i] = gp.Value
+			}
+		}
 		params := make([]Type, len(method.Parameters))
 		optionalParams := make([]bool, len(method.Parameters))
 		hasRestParam := false
@@ -1188,10 +1201,11 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		if method.ReturnType != nil {
 			returnType = c.resolveTypeExpression(method.ReturnType)
 		}
+		c.env = prevSigEnv
 		funcType := &FunctionType{
 			Parameters:       params,
 			ReturnType:       returnType,
-			GenericParams:    []string{}, // Methods are not separately generic
+			GenericParams:    methodGenerics,
 			OptionalParams:   optionalParams,
 			HasRestParameter: hasRestParam,
 		}
@@ -1443,6 +1457,15 @@ func (c *Checker) buildInterface(node *ast.InterfaceDeclaration, name string, sy
 
 	// Register methods
 	for _, method := range node.Methods {
+		prevSigEnv := c.env
+		methodGenerics := make([]string, len(method.GenericParams))
+		if len(method.GenericParams) > 0 {
+			c.env = NewEnclosedEnvironment(prevSigEnv)
+			for i, gp := range method.GenericParams {
+				c.env.Set(gp.Value, &GenericParamType{Name: gp.Value})
+				methodGenerics[i] = gp.Value
+			}
+		}
 		// Optional and rest parameters count as they do for functions:
 		// seek(whence?: string, offset?: number) may be called with none.
 		params := make([]Type, len(method.Parameters))
@@ -1462,10 +1485,11 @@ func (c *Checker) buildInterface(node *ast.InterfaceDeclaration, name string, sy
 		if method.ReturnType != nil {
 			returnType = c.resolveTypeExpression(method.ReturnType)
 		}
+		c.env = prevSigEnv
 		interfaceType.Methods[method.Name.Value] = &FunctionType{
 			Parameters:       params,
 			ReturnType:       returnType,
-			GenericParams:    []string{}, // Interface methods are not separately generic
+			GenericParams:    methodGenerics,
 			ParamNames:       parameterNames(method.Parameters),
 			OptionalParams:   optional,
 			HasRestParameter: hasRest,
@@ -1579,6 +1603,15 @@ func withNil(t Type) Type {
 
 // registerTypeAlias registers a type alias
 func (c *Checker) registerTypeAlias(node *ast.TypeDeclaration) {
+	// type T = typeof u names a local that does not exist yet when types
+	// are registered: T is any until the declaration is reached, then
+	// resolved there (checkStatement), with the locals in scope.
+	if !c.resolvingTypeof && node.Type != nil && containsTypeof(reflect.ValueOf(node.Type)) {
+		if node.Name != nil {
+			c.typeAliases[node.Name.Value] = Any
+		}
+		return
+	}
 	// Check if this is a generic type alias
 	if len(node.GenericParams) > 0 {
 		// Generic type alias: type Name<T, U> = Type
@@ -2229,16 +2262,30 @@ func (c *Checker) pickType(t Type, keys Type) Type {
 			StaticProps: make(map[string]bool),
 		}
 
-		// Extract keys from the keys type
+		// Extract keys from the keys type. Fields and methods inherited
+		// through extends count, and keep whether they may be left out.
 		keyList := c.extractKeyNames(keys)
+		props, methods := allProperties(objType), allMethods(objType)
 		for _, key := range keyList {
-			if propType, ok := objType.Properties[key]; ok {
+			if propType, ok := props[key]; ok {
 				picked.Properties[key] = propType
 				if objType.StaticProps != nil && objType.StaticProps[key] {
 					picked.StaticProps[key] = true
 				}
+				if optionalProperty(objType, key) {
+					if picked.OptionalProps == nil {
+						picked.OptionalProps = map[string]bool{}
+					}
+					picked.OptionalProps[key] = true
+				}
+				if objType.ReadonlyProps[key] {
+					if picked.ReadonlyProps == nil {
+						picked.ReadonlyProps = map[string]bool{}
+					}
+					picked.ReadonlyProps[key] = true
+				}
 			}
-			if methodType, ok := objType.Methods[key]; ok {
+			if methodType, ok := methods[key]; ok {
 				picked.Methods[key] = methodType
 			}
 		}
@@ -2278,6 +2325,22 @@ func (c *Checker) omitType(t Type, keys Type) Type {
 
 // allProperties are an interface's properties, those of the interfaces
 // it extends included.
+func allMethods(t *InterfaceType) map[string]*FunctionType {
+	methods := map[string]*FunctionType{}
+	for _, parent := range t.Extends {
+		if parent == nil {
+			continue
+		}
+		for name, m := range allMethods(parent) {
+			methods[name] = m
+		}
+	}
+	for name, m := range t.Methods {
+		methods[name] = m
+	}
+	return methods
+}
+
 func allProperties(t *InterfaceType) map[string]Type {
 	props := map[string]Type{}
 	for _, parent := range t.Extends {
@@ -2523,11 +2586,11 @@ func (c *Checker) resolveKeyof(objectType Type) Type {
 		}
 
 	case *InterfaceType:
-		// Extract property names from interface
-		for _, propName := range memberNames(t.Properties) {
+		// Extract property names from interface, inherited ones included
+		for _, propName := range memberNames(allProperties(t)) {
 			keys = append(keys, &StringLiteralType{Value: propName})
 		}
-		for _, methodName := range memberNames(t.Methods) {
+		for _, methodName := range memberNames(allMethods(t)) {
 			keys = append(keys, &StringLiteralType{Value: methodName})
 		}
 
@@ -2555,6 +2618,33 @@ func (c *Checker) resolveKeyof(objectType Type) Type {
 	}
 
 	return &UnionType{Types: keys}
+}
+
+// containsTypeof says whether a type expression uses typeof.
+func containsTypeof(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Interface, reflect.Ptr:
+		if v.IsNil() {
+			return false
+		}
+		if _, ok := v.Interface().(*ast.TypeofExpression); ok {
+			return true
+		}
+		return containsTypeof(v.Elem())
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			if v.Type().Field(i).IsExported() && containsTypeof(v.Field(i)) {
+				return true
+			}
+		}
+	case reflect.Slice:
+		for i := 0; i < v.Len(); i++ {
+			if containsTypeof(v.Index(i)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // resolveTypeof resolves the typeof operator, returning the type of an expression
@@ -2785,7 +2875,13 @@ func (c *Checker) checkStatement(stmt ast.Statement) {
 	case *ast.EnumDeclaration:
 		// Enum declarations don't need runtime checking
 	case *ast.TypeDeclaration:
-		// Type declarations don't need runtime checking
+		// Type declarations don't need runtime checking, except one that
+		// takes the type of a value (typeof), resolved here.
+		if node.Type != nil && containsTypeof(reflect.ValueOf(node.Type)) {
+			c.resolvingTypeof = true
+			c.registerTypeAlias(node)
+			c.resolvingTypeof = false
+		}
 	case *ast.NamespaceDeclaration:
 		c.checkNamespaceDeclaration(node)
 	case *ast.DeclareStatement:
@@ -4602,8 +4698,12 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		c.env = NewEnclosedEnvironment(prevEnv)
 		c.currentClass = classType
 
-		// Add generic type parameters to scope
+		// Add generic type parameters to scope: the class's, and the
+		// method's own (pass<U>).
 		for _, genericParam := range node.GenericParams {
+			c.env.Set(genericParam.Value, Any)
+		}
+		for _, genericParam := range method.GenericParams {
 			c.env.Set(genericParam.Value, Any)
 		}
 
@@ -5528,6 +5628,9 @@ func (c *Checker) checkPrefixExpression(node *ast.PrefixExpression) Type {
 	if hasMetatable(rightType) && node.Operator != "not" {
 		return Any
 	}
+	if node.Operator != "not" && c.usesUnknown(rightType, node.Token) {
+		return Any
+	}
 
 	switch node.Operator {
 	case "-":
@@ -5801,6 +5904,16 @@ func patternCanMatch(lit, t Type) bool {
 	return lit.IsAssignableTo(t) || widenLiteralType(lit).IsAssignableTo(widenLiteralType(t))
 }
 
+// usesUnknown reports using a value of type unknown before narrowing it,
+// which is what unknown is for, and says whether it did.
+func (c *Checker) usesUnknown(t Type, tok lexer.Token) bool {
+	if _, ok := t.(*UnknownType); !ok {
+		return false
+	}
+	c.addErrorCode("unknown", "A value of type 'unknown' has to be narrowed before it is used: check it first (type(v) == \"table\", v ~= nil), or assert a type with 'as'", tok)
+	return true
+}
+
 // hasMetatable says whether t is a table given a metatable, whose
 // operators and calls come from it.
 func hasMetatable(t Type) bool {
@@ -5820,6 +5933,12 @@ func (c *Checker) checkInfixExpression(node *ast.InfixExpression) Type {
 	rightType := c.checkExpression(node.Right)
 	if hasMetatable(leftType) || hasMetatable(rightType) {
 		return Any
+	}
+	// == and ~= compare anything; every other operator needs to know.
+	if node.Operator != "==" && node.Operator != "~=" && node.Operator != "!=" {
+		if c.usesUnknown(leftType, node.Token) || c.usesUnknown(rightType, node.Token) {
+			return Any
+		}
 	}
 
 	switch node.Operator {
@@ -6403,6 +6522,9 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 	if _, ok := actualLeftType.(*StringLiteralType); ok {
 		actualLeftType = String
 	}
+	if c.usesUnknown(actualLeftType, rightIdent.Token) {
+		return Any
+	}
 
 	// Check if left type has the property
 	switch typ := actualLeftType.(type) {
@@ -6619,6 +6741,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 				c.stringDots[node] = fn
 				return resolved(ast.DispatchSelf, Any)
 			}
+			c.addErrorCode("unknown-member", fmt.Sprintf("A string has no method '%s'.%s", propertyName, didYouMean(propertyName, interfaceMemberNames(lib))), rightIdent.Token)
 		}
 		return wrapIfOptional(Any)
 
@@ -6792,6 +6915,10 @@ func (c *Checker) checkIndexExpression(node *ast.IndexExpression) Type {
 			return &OptionalType{BaseType: resultType}
 		}
 		return resultType
+	}
+
+	if c.usesUnknown(leftType, node.Token) {
+		return Any
 	}
 
 	switch typ := leftType.(type) {

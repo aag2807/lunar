@@ -1,0 +1,17 @@
+-- Generic methods, in a class and in an interface.
+class Box
+    pass<U>(x: U): U
+        return x
+    end
+end
+local b = Box()
+local n: number = b.pass(1)
+local s: string = b.pass("a")
+interface Mapper
+    map<V>(f: (n: number) => V): V
+end
+local m: Mapper = {
+    map = function(self, f) return f(2) end,
+}
+local doubled: number = m.map(function(n) return n * 2 end)
+assert(n == 1 and s == "a" and doubled == 4)

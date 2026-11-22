@@ -1,0 +1,16 @@
+-- Pick, Omit and keyof see fields inherited through extends, and keep
+-- which may be left out.
+interface A
+    id: number
+    tag?: string
+end
+interface B extends A
+    name: string
+end
+type P = Pick<B, "id" | "tag">
+local p: P = { id = 1 }
+type O = Omit<B, "name">
+local o: O = { id = 2 }
+type K = keyof B
+local k: K = "id"
+assert(p.id == 1 and o.id == 2 and k == "id")

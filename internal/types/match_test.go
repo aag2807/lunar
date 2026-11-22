@@ -29,3 +29,30 @@ func TestMatchIsTyped(t *testing.T) {
 		}
 	}
 }
+
+// unknown has to be narrowed before use; a string has only the string
+// library's methods.
+func TestUnknownAndStringMembers(t *testing.T) {
+	refused := map[string]string{
+		"local function f(v: unknown)\n    print(v.x)\nend\n":              "narrowed",
+		"local function f(v: unknown)\n    v.y = 1\nend\n":                 "narrowed",
+		"local function f(v: unknown)\n    print(v .. \"x\", v[1])\nend\n": "narrowed",
+		"local s = \"a\"\nprint(s.nonexistent())\n":                        "has no method 'nonexistent'",
+		"local s = \"a\"\nprint(s:uper())\n":                               "Did you mean 'upper'",
+	}
+	for src, want := range refused {
+		errs := checkSource(t, src)
+		if len(errs) == 0 || !strings.Contains(strings.Join(messages(errs), "\n"), want) {
+			t.Errorf("%q: %v, want an error with %q", src, messages(errs), want)
+		}
+	}
+	accepted := []string{
+		"local function f(v: unknown): number\n    if type(v) == \"number\" then\n        return v + 1\n    end\n    return 0\nend\n",
+		"local function g(v: unknown): boolean\n    return v == nil\nend\n",
+	}
+	for _, src := range accepted {
+		if errs := checkSource(t, src); len(errs) != 0 {
+			t.Errorf("%q: %v", src, messages(errs))
+		}
+	}
+}

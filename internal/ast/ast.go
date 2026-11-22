@@ -1245,11 +1245,12 @@ func (id *InterfaceDeclaration) String() string {
 }
 
 type InterfaceMethod struct {
-	Token      lexer.Token
-	Name       *Identifier
-	Parameters []*Parameter
-	ReturnType Expression
-	IsStatic   bool // static method
+	Token         lexer.Token
+	Name          *Identifier
+	GenericParams []*Identifier // pass<U>(x: U): U
+	Parameters    []*Parameter
+	ReturnType    Expression
+	IsStatic      bool // static method
 }
 
 func (im *InterfaceMethod) statementNode()       {}

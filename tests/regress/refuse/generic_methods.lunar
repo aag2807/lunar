@@ -1,0 +1,9 @@
+-- A generic method infers its type parameter at each call.
+class Box
+    pass<U>(x: U): U
+        return x
+    end
+end
+local b = Box()
+-- error: Cannot assign type
+local bad: string = b.pass(1)

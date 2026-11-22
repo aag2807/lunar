@@ -708,6 +708,10 @@ func (p *Parser) curPrecedence() int {
 }
 
 func (p *Parser) noPrefixParseFnError(t lexer.TokenType) {
+	if t == lexer.ILLEGAL && strings.HasPrefix(p.curToken.Literal, "unterminated") {
+		p.addError(p.curToken.Literal, p.curToken)
+		return
+	}
 	msg := fmt.Sprintf("no prefix parse function for %s found", t)
 	p.addError(msg, p.curToken)
 }

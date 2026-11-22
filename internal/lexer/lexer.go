@@ -10,6 +10,9 @@ type Lexer struct {
 	line         int
 	column       int
 	file         string
+	// unterminated names what reached the end of input unclosed, if
+	// anything did; NextToken turns it into an ILLEGAL token.
+	unterminated string
 }
 
 // NewFile lexes input, recording path as every token's File.
@@ -59,6 +62,10 @@ func (l *Lexer) NextToken() Token {
 
 	start, line, column := l.position, l.line, l.column
 	tok := l.scanToken()
+	if l.unterminated != "" {
+		tok.Type, tok.Literal = ILLEGAL, l.unterminated
+		l.unterminated = ""
+	}
 
 	end := l.position
 	if tok.Type == EOF || start >= len(l.input) {
@@ -275,6 +282,9 @@ func (l *Lexer) skipMultiLineComment() {
 	l.readChar() // consume first '['
 	for {
 		if l.ch == 0 {
+			// Lua rejects this; silently treating the rest of the file as
+			// a comment would compile less code than was written.
+			l.unterminated = "unterminated long comment"
 			return
 		}
 
@@ -424,9 +434,11 @@ func (l *Lexer) readString(delimiter byte) string {
 			break
 		}
 
-		if l.ch != 0 {
-			result = append(result, l.ch)
+		if l.ch == 0 {
+			l.unterminated = "unterminated string"
+			break
 		}
+		result = append(result, l.ch)
 	}
 
 	return string(result)
@@ -497,10 +509,12 @@ func (l *Lexer) readTemplateString() string {
 			break
 		}
 
-		// Preserve ${} expressions as-is (parser will handle them)
-		if l.ch != 0 {
-			result = append(result, l.ch)
+		if l.ch == 0 {
+			l.unterminated = "unterminated template string"
+			break
 		}
+		// Preserve ${} expressions as-is (parser will handle them)
+		result = append(result, l.ch)
 	}
 
 	return string(result)
@@ -529,7 +543,7 @@ func (l *Lexer) readLongString() string {
 		l.readChar()
 
 		if l.ch == 0 {
-			// End of input
+			l.unterminated = "unterminated long string"
 			break
 		}
 

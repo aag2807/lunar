@@ -12,6 +12,8 @@ type ParseError struct {
 	File      string
 	EndLine   int
 	EndColumn int
+	// Code is the stable error kind for JSON output: always "syntax".
+	Code string
 }
 
 // Error implements the error interface

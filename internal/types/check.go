@@ -20,6 +20,9 @@ type TypeError struct {
 	File      string
 	EndLine   int
 	EndColumn int
+	// Code is a stable kebab-case name for the kind of error, "type" by
+	// default; see addErrorCode.
+	Code string
 }
 
 func (e *TypeError) Error() string {
@@ -408,7 +411,7 @@ func (c *Checker) loadStdlib() {
 			for _, e := range p.Errors() {
 				c.errors = append(c.errors, &TypeError{
 					Message: e.Message, Line: e.Line, Column: e.Column,
-					File: e.File, EndLine: e.EndLine, EndColumn: e.EndColumn,
+					File: e.File, EndLine: e.EndLine, EndColumn: e.EndColumn, Code: "syntax",
 				})
 			}
 			continue
@@ -2415,7 +2418,7 @@ func isConstAssertion(expr ast.Expression) bool {
 // checkFunctionDeclaration checks a function declaration
 func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	if node.IsAsync {
-		c.addError("'async' functions are not supported: nothing would resume them. Use coroutine.create and coroutine.resume", node.Token)
+		c.addErrorCode("not-supported", "'async' functions are not supported: nothing would resume them. Use coroutine.create and coroutine.resume", node.Token)
 	}
 
 	// Check decorators
@@ -2530,7 +2533,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 					node.Name.Value, existingFunc.String()), node.Name.Token)
 			}
 		case isFunc && inThisScope && !node.IsLocal && c.funcDefs[existingFunc].Line > 0:
-			c.addError(fmt.Sprintf("Function '%s' is already defined at line %d. Overloads can only be declared with 'declare function'",
+			c.addErrorCode("duplicate-function", fmt.Sprintf("Function '%s' is already defined at line %d. Overloads can only be declared with 'declare function'",
 				node.Name.Value, c.funcDefs[existingFunc].Line), node.Name.Token)
 		case !isFunc && inThisScope:
 			c.addError(
@@ -4612,7 +4615,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 				names = append(names, name)
 			}
 			sort.Strings(names)
-			c.addError(fmt.Sprintf("Namespace '%s' has no member '%s'.%s", typ.Name, propertyName, didYouMean(propertyName, names)), rightIdent.Token)
+			c.addErrorCode("unknown-member", fmt.Sprintf("Namespace '%s' has no member '%s'.%s", typ.Name, propertyName, didYouMean(propertyName, names)), rightIdent.Token)
 		}
 		return wrapIfOptional(Any)
 	case *ClassType:
@@ -4709,7 +4712,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		if member, ok := c.subclassMember(typ, propertyName); ok {
 			return resolved(ast.DispatchPlain, withNil(member))
 		}
-		c.addError(fmt.Sprintf("Class '%s' has no member '%s'.%s", typ.Name, propertyName, didYouMean(propertyName, typ.MemberNames())), rightIdent.Token)
+		c.addErrorCode("unknown-member", fmt.Sprintf("Class '%s' has no member '%s'.%s", typ.Name, propertyName, didYouMean(propertyName, typ.MemberNames())), rightIdent.Token)
 		return wrapIfOptional(Any)
 
 	case *InterfaceType:
@@ -5038,7 +5041,7 @@ func (c *Checker) applyConstToTableLiteral(node *ast.TableLiteral) Type {
 
 // checkAwaitExpression checks an await expression
 func (c *Checker) checkAwaitExpression(node *ast.AwaitExpression) Type {
-	c.addError("'await' is not supported: use coroutine.yield inside a coroutine", node.Token)
+	c.addErrorCode("not-supported", "'await' is not supported: use coroutine.yield inside a coroutine", node.Token)
 
 	// Check the expression being awaited
 	exprType := c.checkExpression(node.Expression)
@@ -5103,6 +5106,12 @@ func (c *Checker) canAccessMember(targetClass *ClassType, visibility string) boo
 
 // addError adds a type error to the checker
 func (c *Checker) addError(message string, token lexer.Token) {
+	c.addErrorCode("type", message, token)
+}
+
+// addErrorCode records an error with a specific code. Codes are part of the
+// JSON output that editors match on, so once released they do not change.
+func (c *Checker) addErrorCode(code, message string, token lexer.Token) {
 	endLine, endColumn := token.EndLine, token.EndColumn
 	if endLine == 0 {
 		endLine, endColumn = token.Line, token.Column
@@ -5114,6 +5123,7 @@ func (c *Checker) addError(message string, token lexer.Token) {
 		File:      token.File,
 		EndLine:   endLine,
 		EndColumn: endColumn,
+		Code:      code,
 	})
 }
 

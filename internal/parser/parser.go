@@ -92,6 +92,7 @@ func (p *Parser) addError(message string, token lexer.Token) {
 		File:      token.File,
 		EndLine:   endLine,
 		EndColumn: endColumn,
+		Code:      "syntax",
 	})
 }
 

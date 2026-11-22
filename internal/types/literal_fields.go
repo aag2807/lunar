@@ -117,7 +117,7 @@ func (c *Checker) checkRecordLiteral(lit *ast.TableLiteral, iface *InterfaceType
 				msg += fmt.Sprintf(". Did you mean '%s'?", joinPath(path, similar[0]))
 				explained[similar[0]] = true
 			}
-			c.addError(msg, f.key.Token)
+			c.addErrorCode("unknown-field", msg, f.key.Token)
 			reported = true
 			continue
 		}
@@ -131,7 +131,7 @@ func (c *Checker) checkRecordLiteral(lit *ast.TableLiteral, iface *InterfaceType
 
 		actual := c.typeOf(f.value)
 		if actual != nil && !actual.IsAssignableTo(expected) {
-			c.addError(fmt.Sprintf("Field '%s' of '%s' must be '%s', got '%s'",
+			c.addErrorCode("field-type", fmt.Sprintf("Field '%s' of '%s' must be '%s', got '%s'",
 				label, root, expected.String(), widenLiteralType(actual).String()), exprToken(f.value, f.key.Token))
 			reported = true
 		}
@@ -145,7 +145,7 @@ func (c *Checker) checkRecordLiteral(lit *ast.TableLiteral, iface *InterfaceType
 	}
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		c.addError(fmt.Sprintf("Missing field(s) %s required by '%s'", strings.Join(missing, ", "), root), lit.Token)
+		c.addErrorCode("missing-fields", fmt.Sprintf("Missing field(s) %s required by '%s'", strings.Join(missing, ", "), root), lit.Token)
 		reported = true
 	}
 

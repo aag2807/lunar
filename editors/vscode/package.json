@@ -1,25 +1,30 @@
 {
-  "name": "lunar-lang",
-  "displayName": "Lunar Language",
-  "description": "Language support for Lunar - a statically-typed superset of Lua",
-  "version": "1.5.0",
-  "publisher": "lunar-lang",
+  "name": "lunar",
+  "displayName": "Lunar",
+  "description": "Lunar, a statically-typed superset of Lua: highlighting and the Lunar language server",
+  "version": "2.0.0",
+  "publisher": "lunar",
   "engines": {
-    "vscode": "^1.75.0"
+    "vscode": "^1.82.0"
   },
   "categories": [
     "Programming Languages"
   ],
   "activationEvents": [
-    "onLanguage:lunar"
+    "onLanguage:lunar",
+    "workspaceContains:**/lunar.config.json"
   ],
-  "main": "./extension.js",
+  "main": "./dist/extension.js",
   "contributes": {
     "languages": [
       {
         "id": "lunar",
-        "aliases": ["Lunar", "lunar"],
-        "extensions": [".lunar", ".d.lunar"],
+        "aliases": [
+          "Lunar"
+        ],
+        "extensions": [
+          ".lunar"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -36,23 +41,55 @@
       "properties": {
         "lunar.serverPath": {
           "type": "string",
-          "default": "lunar-lsp",
-          "description": "Path to the lunar-lsp executable"
+          "default": "lunar",
+          "scope": "machine-overridable",
+          "markdownDescription": "The `lunar` executable. The server is started as `<serverPath> lsp`. In WSL, this is the Linux binary."
         },
         "lunar.trace.server": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
-          "description": "Traces the communication between VS Code and the language server"
+          "description": "Traces the communication between VS Code and the language server."
         }
       }
-    }
+    },
+    "commands": [
+      {
+        "command": "lunar.restartServer",
+        "title": "Lunar: Restart Language Server"
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "lunar",
+        "owner": "lunar",
+        "source": "lunar",
+        "fileLocation": "absolute",
+        "pattern": {
+          "regexp": "^\\{\"kind\":\"diagnostic\",\"file\":\"(.*?)\",\"line\":(\\d+),\"column\":(\\d+),\"endLine\":(\\d+),\"endColumn\":(\\d+),\"severity\":\"(\\w+)\",\"code\":\"(.*?)\",\"message\":\"(.*)\"\\}$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "endLine": 4,
+          "endColumn": 5,
+          "severity": 6,
+          "code": 7,
+          "message": 8
+        }
+      }
+    ]
   },
   "dependencies": {
-    "vscode-languageclient": "^8.1.0"
+    "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
-    "@types/vscode": "^1.75.0"
+    "@types/vscode": "^1.82.0",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.24.0"
   },
   "repository": {
     "type": "git",
@@ -63,5 +100,14 @@
     "lua",
     "typed",
     "language"
-  ]
+  ],
+  "license": "MIT",
+  "extensionKind": [
+    "workspace"
+  ],
+  "scripts": {
+    "build": "esbuild extension.js --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package --no-dependencies"
+  }
 }

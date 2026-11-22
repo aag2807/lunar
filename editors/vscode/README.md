@@ -1,68 +1,45 @@
-# Lunar Language Support for VS Code
+# Lunar for VS Code
 
-Provides language support for Lunar - a statically-typed superset of Lua.
+Syntax highlighting (TextMate grammar) and the Lunar language server
+(`lunar lsp`): diagnostics, go to definition, references, rename, hover,
+completion, signature help and symbols.
 
-## Features
+## Build and install
 
-- Syntax highlighting
-- Real-time error diagnostics
-- Go to definition
-- Hover type information
-- Auto-completion
-
-## Requirements
-
-1. Build the Lunar LSP server:
-   ```bash
-   cd /path/to/lunar
-   go build -o lunar-lsp ./cmd/lunar-lsp
-   ```
-
-2. Add `lunar-lsp` to your PATH or configure the path in settings.
-
-## Installation
-
-### From Source
-
-1. Clone the repository
-2. Install dependencies:
-   ```bash
-   cd editors/vscode
-   npm install
-   ```
-3. Copy to VS Code extensions folder:
-   ```bash
-   cp -r . ~/.vscode/extensions/lunar-lang
-   ```
-4. Restart VS Code
-
-### From VSIX (coming soon)
-
-```bash
-code --install-extension lunar-lang-1.5.0.vsix
+```sh
+cd editors/vscode
+npm ci
+npm run package        # bundles with esbuild and writes lunar-2.0.0.vsix
 ```
 
-## Configuration
+Then in VS Code: *Extensions* → `…` → *Install from VSIX…*.
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `lunar.serverPath` | Path to lunar-lsp executable | `lunar-lsp` |
-| `lunar.trace.server` | Enable LSP tracing | `off` |
+### Project in WSL, VS Code on Windows
 
-## Commands
+Open the folder through the WSL extension (`code .` from a WSL shell). The
+extension declares `"extensionKind": ["workspace"]`, so it installs and runs
+inside WSL and starts the Linux `lunar`; install the VSIX from that WSL
+window. `lunar` must be on the WSL `PATH` (`make install PREFIX=$HOME/.local`),
+or set `lunar.serverPath`.
 
-- `Lunar: Restart Server` - Restart the language server
+## Settings
 
-## Development
+- `lunar.serverPath` (default `lunar`): the executable; the server runs as
+  `<serverPath> lsp`.
+- `lunar.trace.server`: `off`, `messages` or `verbose`.
 
-```bash
-# Install dependencies
-npm install
+Command: **Lunar: Restart Language Server**.
 
-# Package extension
-npx vsce package
+## Build task errors
+
+The `lunar` problem matcher reads `lunar build --json`, so a task like this
+lists build errors in the Problems panel:
+
+```json
+{
+  "label": "lunar build",
+  "type": "shell",
+  "command": "lunar build --json",
+  "problemMatcher": "$lunar"
+}
 ```
-
-## License
-
-MIT

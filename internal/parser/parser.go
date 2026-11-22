@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"lunar/internal/ast"
 	"lunar/internal/lexer"
+	"reflect"
 	"strconv"
 	"strings"
 )
@@ -322,6 +323,9 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		return nil
 	}
 	leftExp := prefix()
+	if isNilNode(leftExp) {
+		return nil
+	}
 
 	for precedence < p.peekPrecedence() {
 		infix := p.infixParseFns[p.peekToken.Type]
@@ -331,6 +335,9 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 
 		p.nextToken()
 		leftExp = infix(leftExp)
+		if isNilNode(leftExp) {
+			return nil
+		}
 	}
 
 	return leftExp
@@ -739,7 +746,7 @@ func (p *Parser) parseStatements(terminator lexer.TokenType) []ast.Statement {
 	for !p.curTokenIs(terminator) && !p.curTokenIs(lexer.EOF) {
 		start := p.curToken
 		stmt := p.parseStatement()
-		if stmt != nil {
+		if !isNilNode(stmt) {
 			if returned != nil && !reported {
 				p.addError("'return' must be the last statement in a block", start)
 				reported = true
@@ -776,6 +783,11 @@ func (p *Parser) parseTypeAssertion(left ast.Expression) ast.Expression {
 	}
 
 	p.nextToken()
+	// `as const` keeps literal types; const is not a type of its own.
+	if p.curTokenIs(lexer.CONST) {
+		assertion.TargetType = &ast.Identifier{Token: p.curToken, Value: "const"}
+		return assertion
+	}
 	assertion.TargetType = p.parseType()
 
 	return assertion
@@ -1098,6 +1110,7 @@ func (p *Parser) parseType() ast.Expression {
 	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
 		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	default:
+		p.addError(fmt.Sprintf("expected a type, got '%s'", p.curToken.Literal), p.curToken)
 		return nil
 	}
 
@@ -1904,6 +1917,7 @@ type ParserState struct {
 	curToken   lexer.Token
 	peekToken  lexer.Token
 	lexerState lexer.LexerState
+	errorCount int
 }
 
 // SaveState saves the current parser state for lookahead
@@ -1912,6 +1926,7 @@ func (p *Parser) SaveState() ParserState {
 		curToken:   p.curToken,
 		peekToken:  p.peekToken,
 		lexerState: p.l.SaveState(),
+		errorCount: len(p.errors),
 	}
 }
 
@@ -1920,6 +1935,46 @@ func (p *Parser) RestoreState(state ParserState) {
 	p.curToken = state.curToken
 	p.peekToken = state.peekToken
 	p.l.RestoreState(state.lexerState)
+	// A look-ahead that is abandoned leaves no errors behind.
+	if state.errorCount < len(p.errors) {
+		p.errors = p.errors[:state.errorCount]
+	}
+}
+
+// luaReserved are Lua's own keywords, which can never name anything.
+var luaReserved = map[string]bool{
+	"and": true, "break": true, "do": true, "else": true, "elseif": true, "end": true,
+	"false": true, "for": true, "function": true, "goto": true, "if": true, "in": true,
+	"local": true, "nil": true, "not": true, "or": true, "repeat": true, "return": true,
+	"then": true, "true": true, "until": true, "while": true,
+}
+
+// isWord reports whether s has the shape of an identifier.
+func isWord(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		if r == '_' || ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || (i > 0 && '0' <= r && r <= '9') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// unclosedAtEOF reports a construct that the end of input cut off: Lua
+// would refuse it, and filling in the missing token silently would compile
+// code that was never finished.
+func (p *Parser) unclosedAtEOF(closer string, opener lexer.Token) {
+	if !p.curTokenIs(lexer.EOF) {
+		return
+	}
+	what := fmt.Sprintf("the block that starts on line %d", opener.Line)
+	if lexer.LookupIdent(opener.Literal) != lexer.IDENT || opener.Literal == "{" {
+		what = fmt.Sprintf("the '%s' on line %d", opener.Literal, opener.Line)
+	}
+	p.addError(fmt.Sprintf("missing '%s' to close %s", closer, what), opener)
 }
 
 func (p *Parser) expectPeekIdentOrContextual() bool {
@@ -2017,6 +2072,12 @@ func (p *Parser) parseParameter() *ast.Parameter {
 		p.nextToken()
 	}
 
+	// Any word will do, Lunar's own keywords included (string.gmatch's
+	// declaration names a parameter `match`): only Lua's reserved words and
+	// punctuation are refused.
+	if !isWord(p.curToken.Literal) || luaReserved[p.curToken.Literal] {
+		p.addError(fmt.Sprintf("expected a parameter name, got '%s'", p.curToken.Literal), p.curToken)
+	}
 	param.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
 	// Check for optional parameter (name?: type)
@@ -2198,6 +2259,11 @@ func (p *Parser) parseBlockStatementUntil(terminator lexer.TokenType) *ast.Block
 	p.nextToken()
 	block.Statements = p.parseStatements(terminator)
 	block.EndToken = p.curToken
+	if terminator == lexer.UNTIL {
+		p.unclosedAtEOF("until", block.Token)
+	} else {
+		p.unclosedAtEOF("end", block.Token)
+	}
 
 	return block
 }
@@ -2284,7 +2350,28 @@ func (p *Parser) parseExpressionStatement() ast.Statement {
 	}
 }
 
+// isNilNode reports whether a node is nil, including a nil pointer of a
+// concrete node type wrapped in the interface: every parseX function returns
+// its own pointer type, and its nil must not reach the checker as a node.
+func isNilNode(n any) bool {
+	if n == nil {
+		return true
+	}
+	v := reflect.ValueOf(n)
+	return v.Kind() == reflect.Ptr && v.IsNil()
+}
+
+// parseStatement parses one statement, or returns a true nil when there is
+// none (an empty statement, or one that failed to parse and was reported).
 func (p *Parser) parseStatement() ast.Statement {
+	stmt := p.parseStatementNode()
+	if isNilNode(stmt) {
+		return nil
+	}
+	return stmt
+}
+
+func (p *Parser) parseStatementNode() ast.Statement {
 	switch p.curToken.Type {
 	case lexer.SEMICOLON:
 		// Lua's empty statement.
@@ -2386,11 +2473,12 @@ func (p *Parser) parseIfBlockStatement() *ast.BlockStatement {
 
 	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.ELSE) && !p.curTokenIs(lexer.ELSEIF) && !p.curTokenIs(lexer.EOF) {
 		stmt := p.parseStatement()
-		if stmt != nil {
+		if !isNilNode(stmt) {
 			block.Statements = append(block.Statements, stmt)
 		}
 		p.nextToken()
 	}
+	p.unclosedAtEOF("end", block.Token)
 
 	return block
 }
@@ -2581,6 +2669,7 @@ func (p *Parser) parseTableLiteral() ast.Expression {
 			p.nextToken() // move to '}'
 		}
 	}
+	p.unclosedAtEOF("}", table.Token)
 
 	return table
 }
@@ -2777,6 +2866,7 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 			p.nextToken()
 		}
 	}
+	p.unclosedAtEOF("end", class.Token)
 
 	return class
 }
@@ -3053,6 +3143,7 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 			p.nextToken()
 		}
 	}
+	p.unclosedAtEOF("end", iface.Token)
 
 	return iface
 }
@@ -3155,6 +3246,7 @@ func (p *Parser) parseEnumDeclaration() *ast.EnumDeclaration {
 
 		p.nextToken()
 	}
+	p.unclosedAtEOF("end", enum.Token)
 
 	return enum
 }
@@ -3208,6 +3300,7 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 			}
 			p.nextToken()
 		}
+		p.unclosedAtEOF("end", typeDecl.Token)
 	}
 
 	return typeDecl
@@ -3268,6 +3361,7 @@ func (p *Parser) parseImportStatement() *ast.ImportStatement {
 				p.nextToken() // move past comma
 			}
 		}
+		p.unclosedAtEOF("}", importStmt.Token)
 
 		if !p.curTokenIs(lexer.RBRACE) {
 			p.addError("expected '}' after import names", p.curToken)
@@ -3313,11 +3407,12 @@ func (p *Parser) parseNamespaceDeclaration() *ast.NamespaceDeclaration {
 	// Parse namespace body until 'end'
 	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
 		stmt := p.parseStatement()
-		if stmt != nil {
+		if !isNilNode(stmt) {
 			ns.Statements = append(ns.Statements, stmt)
 		}
 		p.nextToken()
 	}
+	p.unclosedAtEOF("end", ns.Token)
 
 	return ns
 }
@@ -3529,6 +3624,7 @@ func (p *Parser) parseMatchExpression() ast.Expression {
 		// Move to the next token (either next '|' or 'end')
 		p.nextToken()
 	}
+	p.unclosedAtEOF("end", matchExpr.Token)
 
 	if len(matchExpr.Cases) == 0 {
 		p.addError("match expression must have at least one case", matchExpr.Token)

@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -323,6 +324,15 @@ func (s *Server) flush() {
 // analyze checks the workspace and publishes diagnostics for every file,
 // clearing those that have none now. The caller holds s.mu.
 func (s *Server) analyze() {
+	// A compiler bug must not take the editor's server down with it.
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Printf("internal error while analysing: %v\n%s", r, debug.Stack())
+			s.sendNotification("window/showMessage", map[string]any{
+				"type": 1, "message": fmt.Sprintf("Lunar: internal compiler error: %v", r)})
+		}
+	}()
+
 	opts := project.Options{Dir: s.root, Overlay: map[string]string{}}
 	for path, text := range s.docs {
 		opts.Overlay[path] = text

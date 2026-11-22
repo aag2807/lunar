@@ -28,6 +28,9 @@ type Module struct {
 	// Emit is false for a module that was only loaded because something
 	// imports it, when compiling a single file.
 	Emit bool
+	// Broken is set when the module does not parse: it is not checked or
+	// emitted, and its importers take its names as 'any'.
+	Broken bool
 
 	imports []resolvedImport
 }
@@ -92,6 +95,7 @@ func (p *Project) Check() (*Program, diag.List) {
 		m.Statements, err = nil, nil
 		statements, parseDiags := parseSource(path, text)
 		m.Statements = statements
+		m.Broken = parseDiags.HasErrors()
 		diags = append(diags, parseDiags...)
 
 		name, nameErr := requireName(m.Rel)
@@ -139,35 +143,56 @@ func (p *Project) Check() (*Program, diag.List) {
 				if exports == nil {
 					exports = map[string]types.Type{}
 				}
-				return &types.ModuleInfo{Path: ri.target.Path, Exports: exports, Symbols: ri.target.Symbols}, nil
+				return &types.ModuleInfo{Path: ri.target.Path, Exports: exports, Symbols: ri.target.Symbols, Broken: ri.target.Broken}, nil
 			}
 			return nil, fmt.Errorf("Cannot find module '%s'", node.Module)
 		})
 
-		// The declarations again, freshly parsed: the checker annotates the
-		// trees it checks, so modules do not share them.
-		var statements []ast.Statement
-		for i, path := range p.DeclFiles {
-			decls, _ := parseSource(path, declSources[i])
-			statements = append(statements, decls...)
+		// A module that does not parse is reported by its syntax errors
+		// alone; checking a half-built tree only produces noise, or worse.
+		if m.Broken {
+			continue
 		}
-		statements = append(statements, m.Statements...)
-
-		for _, e := range checker.Check(statements) {
-			if e.File == m.Path {
-				diags = append(diags, typeDiag(e))
-			}
-		}
-		m.Exports = checker.Exports()
-		m.Symbols = checker.ExportSymbols()
-		m.Index = checker.Index()
-		if p.isDataFile(m.Rel) {
-			diags = append(diags, dataFileDiagnostics(m, checker)...)
-		}
+		diags = append(diags, p.checkModule(m, checker, declSources)...)
 	}
 
 	diags.Sort()
 	return &Program{Project: p, Modules: sorted, DeclIndex: declChecker.Index()}, diags
+}
+
+// checkModule checks one module with the declarations, recording its
+// exports and index. A checker panic is turned into an internal error on
+// the module rather than taking the process down.
+func (p *Project) checkModule(m *Module, checker *types.Checker, declSources []string) (diags diag.List) {
+	defer func() {
+		if r := recover(); r != nil {
+			diags = append(diags, diag.Diagnostic{File: m.Path, Line: 1, Column: 1, EndLine: 1, EndColumn: 1,
+				Severity: diag.Error, Code: "internal", Message: fmt.Sprintf("internal compiler error checking this file: %v", r)})
+			m.Broken = true
+		}
+	}()
+
+	// The declarations again, freshly parsed: the checker annotates the
+	// trees it checks, so modules do not share them.
+	var statements []ast.Statement
+	for i, path := range p.DeclFiles {
+		decls, _ := parseSource(path, declSources[i])
+		statements = append(statements, decls...)
+	}
+	statements = append(statements, m.Statements...)
+
+	for _, e := range checker.Check(statements) {
+		if e.File == m.Path {
+			diags = append(diags, typeDiag(e))
+		}
+	}
+	m.Exports = checker.Exports()
+	m.Symbols = checker.ExportSymbols()
+	m.Index = checker.Index()
+	if p.isDataFile(m.Rel) {
+		diags = append(diags, dataFileDiagnostics(m, checker)...)
+	}
+	return diags
 }
 
 func (p *Project) newChecker() *types.Checker {

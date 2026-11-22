@@ -8,6 +8,7 @@ import (
 	"lunar/internal/parser"
 	"lunar/stdlib"
 	"os"
+	"reflect"
 	"sort"
 )
 
@@ -303,6 +304,9 @@ type ModuleInfo struct {
 	Exports map[string]Type
 	// Symbols are where each export is defined, for editors.
 	Symbols map[string]*Symbol
+	// Broken is set when the module does not parse: its own syntax errors
+	// are reported, and what it would export is taken as 'any' here.
+	Broken bool
 }
 
 // ImportResolver returns the module an import statement names, or an error
@@ -2225,6 +2229,9 @@ func (c *Checker) substituteType(typ Type, substitutions map[string]Type) Type {
 
 // checkStatement checks a statement
 func (c *Checker) checkStatement(stmt ast.Statement) {
+	if isNilNode(stmt) {
+		return
+	}
 	if stmt == nil {
 		return
 	}
@@ -3860,7 +3867,7 @@ func (c *Checker) isVisibilityCompatible(parentVis, childVis string) bool {
 
 // checkExpression checks an expression and returns its type
 func (c *Checker) checkExpression(expr ast.Expression) Type {
-	if expr == nil {
+	if isNilNode(expr) {
 		return Void
 	}
 	t := c.checkExpressionKind(expr)
@@ -3869,6 +3876,16 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 	}
 	c.exprTypes[expr] = t
 	return t
+}
+
+// isNilNode reports whether a node is absent, including a nil pointer of a
+// concrete node type inside the interface, as a failed parse leaves.
+func isNilNode(n any) bool {
+	if n == nil {
+		return true
+	}
+	v := reflect.ValueOf(n)
+	return v.Kind() == reflect.Ptr && v.IsNil()
 }
 
 // checkExpressionKind computes an expression's type; checkExpression records
@@ -5465,6 +5482,10 @@ func (c *Checker) bindImport(node *ast.ImportStatement) {
 	}
 	for _, name := range node.Names {
 		typ, ok := info.Exports[name.Value]
+		if !ok && info.Broken {
+			c.env.Set(name.Value, Any)
+			continue
+		}
 		if !ok {
 			c.addErrorCode("import", fmt.Sprintf("Module '%s' does not export '%s'", node.Module, name.Value), name.Token)
 			c.env.Set(name.Value, Any)

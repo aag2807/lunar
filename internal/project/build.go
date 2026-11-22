@@ -30,22 +30,17 @@ func (prog *Program) Emit() ([]Output, diag.List) {
 	written := map[string]string{} // output rel -> source
 
 	for _, m := range prog.Modules {
-		if !m.Emit {
+		if !m.Emit || m.Broken {
 			continue
 		}
 		rel := strings.TrimSuffix(m.Rel, ".lunar") + ".lua"
-		var code string
-		if p.SourceMap {
-			lua, sm := codegen.GenerateWithSourceMapAndTarget(m.Statements, m.Path, rel, p.Target)
-			mapJSON, err := sm.ToJSON()
-			if err != nil {
-				diags = append(diags, diag.Diagnostic{File: m.Path, Severity: diag.Error, Code: "internal", Message: err.Error()})
-				continue
-			}
-			code = lua + "\n" + sm.GenerateComment(filepath.Base(rel)+".map") + "\n"
+		code, mapJSON, err := p.generate(m, rel)
+		if err != nil {
+			diags = append(diags, diag.Diagnostic{File: m.Path, Severity: diag.Error, Code: "internal", Message: err.Error()})
+			continue
+		}
+		if mapJSON != "" {
 			outs = append(outs, Output{Rel: rel + ".map", Content: []byte(mapJSON), Source: m.Path})
-		} else {
-			code = codegen.GenerateWithTarget(m.Statements, p.Target)
 		}
 		outs = append(outs, Output{Rel: rel, Content: []byte(code), Source: m.Path})
 		written[rel] = m.Path
@@ -68,6 +63,24 @@ func (prog *Program) Emit() ([]Output, diag.List) {
 
 	sort.Slice(outs, func(i, j int) bool { return outs[i].Rel < outs[j].Rel })
 	return outs, diags
+}
+
+// generate turns one module into Lua (and its source map, if enabled). A
+// code generator panic becomes an error on the module.
+func (p *Project) generate(m *Module, rel string) (code, mapJSON string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("internal compiler error generating Lua: %v", r)
+		}
+	}()
+	if !p.SourceMap {
+		return codegen.GenerateWithTarget(m.Statements, p.Target), "", nil
+	}
+	lua, sm := codegen.GenerateWithSourceMapAndTarget(m.Statements, m.Path, rel, p.Target)
+	if mapJSON, err = sm.ToJSON(); err != nil {
+		return "", "", err
+	}
+	return lua + "\n" + sm.GenerateComment(filepath.Base(rel)+".map") + "\n", mapJSON, nil
 }
 
 // Result describes a build.

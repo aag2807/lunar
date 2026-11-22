@@ -1,0 +1,19 @@
+id = "lunar"
+name = "Lunar"
+description = "Lunar, a statically-typed superset of Lua: syntax highlighting and the Lunar language server."
+version = "0.1.0"
+schema_version = 1
+authors = ["Lunar contributors"]
+repository = "https://github.com/aag2807/lunar"
+
+[language_servers.lunar]
+name = "Lunar"
+languages = ["Lunar"]
+
+# The grammar lives in this repository. `rev` must name a commit that is on
+# GitHub; update it when the grammar changes. For local development, use
+# repository = "file:///path/to/your/checkout" instead.
+[grammars.lunar]
+repository = "https://github.com/aag2807/lunar"
+rev = "62b75b7d9484e84ae4a00e84a248b2b63ce678eb"
+path = "editors/tree-sitter-lunar"

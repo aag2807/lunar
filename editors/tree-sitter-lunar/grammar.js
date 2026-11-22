@@ -733,8 +733,10 @@ module.exports = grammar({
     string: (_) =>
       token(
         choice(
-          seq('"', repeat(choice(/[^"\\\n]+/, /\\(.|\n)/)), '"'),
-          seq("'", repeat(choice(/[^'\\\n]+/, /\\(.|\n)/)), "'"),
+          // \z skips the whitespace after it, line breaks included; a
+          // backslash keeps a line break, CRLF included.
+          seq('"', repeat(choice(/[^"\\\n]+/, /\\(z[ \t\r\n\f\v]*|\r\n|.|\n)/)), '"'),
+          seq("'", repeat(choice(/[^'\\\n]+/, /\\(z[ \t\r\n\f\v]*|\r\n|.|\n)/)), "'"),
           seq('[[', /([^\]]|\][^\]])*/, ']]'),
           seq('[=[', /([^\]]|\][^=]|\]=[^\]])*/, ']=]'),
           seq('[==[', /([^\]]|\][^=]|\]=[^=]|\]==[^\]])*/, ']==]'),

@@ -5401,12 +5401,24 @@
             "name": "_type_primary"
           },
           {
-            "type": "STRING",
-            "value": "["
-          },
-          {
-            "type": "STRING",
-            "value": "]"
+            "type": "TOKEN",
+            "content": {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "["
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "\\s*"
+                },
+                {
+                  "type": "STRING",
+                  "value": "]"
+                }
+              ]
+            }
           }
         ]
       }

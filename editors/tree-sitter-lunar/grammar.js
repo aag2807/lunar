@@ -674,7 +674,9 @@ module.exports = grammar({
     type_parameters: ($) =>
       seq('<', commaSep1(seq($.identifier, optional(seq('extends', $._type)))), '>'),
 
-    array_type: ($) => prec(2, seq($._type_primary, '[', ']')),
+    // '[]' is one token: a '[' followed by anything else after a type is
+    // the next member, such as an index signature on the following line.
+    array_type: ($) => prec(2, seq($._type_primary, token(seq('[', /\s*/, ']')))),
 
     optional_type: ($) => prec(2, seq($._type_primary, '?')),
 

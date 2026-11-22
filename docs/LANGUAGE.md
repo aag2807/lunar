@@ -56,6 +56,12 @@ end
 ::done::
 ```
 
+A string's methods may be called with `.` as with `:` (`s.upper()` is
+`s:upper()`), the way Lunar calls methods. A call that is already complete
+as plain Lua stays as written: `s.sub(s, 2, 3)`, which passes the string
+itself, and `s.upper("xyz")`, whose arguments fill every parameter, are
+`string.sub(s, 2, 3)` and `string.upper("xyz")`.
+
 Conditions test truthiness as in Lua: everything but `nil` and `false` is true,
 so `while true do` and `if enemy then` work. A file may end in `return value`,
 which is how data files are written.

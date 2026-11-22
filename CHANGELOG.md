@@ -31,6 +31,20 @@ their changelog described features that did not work.
 - Compiling one file: flags may follow the file name, `-o` may be a device or
   pipe, and with no config only the declarations beside the file are read. A
   file outside its config's `rootDir` is reported as such.
+- Two builds of one project at once wait for each other (they used to delete
+  each other's outputs). A replaced file is never missing, even for a moment.
+- Folders reached through symlinks are scanned (the root included), absolute
+  paths in the config are used as given, and an `outDir` holding `rootDir`
+  is refused. `lunar build` with no config anywhere says so at once.
+- Declaration files are parsed once per build: a large engine API no longer
+  costs a parse per script.
+- `dataFiles` globs match as globs usually do, and one matching nothing is a
+  warning. Imports of types generate nothing, so a data file may import an
+  interface it shares with the game code; importing a value is an error.
+- Source maps map every statement, nested ones included, and follow `-o`.
+- Two modules with the same `require` name (`a.lunar`, `a/init.lunar`) are an
+  error. A flag of the other mode (`lunar build -o`, `--out` for one file) is
+  a usage error. `-o` may name the source no more.
 
 ### Errors
 
@@ -49,7 +63,11 @@ their changelog described features that did not work.
   string, template, long comment, table, block or `end` is reported where it
   starts, and a file that does not parse is not type checked.
 - `--json=VALUE` counts from the first line; `<` and `>` are written as is.
-- Messages print union types in a fixed order.
+- Messages print union types in a fixed order, and "did you mean"
+  suggestions are the same from run to run.
+- A recovered compiler crash exits 3. Lexical errors read as Lua's: an
+  invalid escape, a malformed number (`5print`), an unexpected character
+  (once, not once per byte).
 
 ### Language
 
@@ -60,8 +78,25 @@ their changelog described features that did not work.
   `<const>` and `<close>`; `;` between table fields; `(f())` keeping one
   value; and every word Lunar adds (`from`, `match`, `class`, ...) usable
   as a name, since only Lua's reserved words are reserved.
+- Lua's lexing exactly: every escape (`\ddd`, `\z`, `\x`, `\u{...}` to
+  7FFFFFFF), strings as bytes (Latin-1 and binary strings survive), long
+  strings and comments of any level, their first line break dropped and line
+  endings normalised, numerals with a trailing point, a NUL byte, a UTF-8
+  byte-order mark, a `#!` first line, CR-only line endings.
+- More Lua compiles unchanged: bracketed keys (`{[KEY] = 1}`), parentheses
+  around a callee or index (`(t.f or g)(2)`), `;` before `(`, a `(` starting
+  a statement, long `elseif` chains (written flat), `(...)`, `... - 1`,
+  `print(a < b, c > d)`, `local x` before a label, a label first in a
+  function body, and `s.sub(s, 2, 3)`.
+- More Lua is accepted: generic `for` with an expression list and any
+  iterator function; `{}` taking any key and any later table; untyped
+  functions called with any number of arguments; `local f` then
+  `function f()`; locals and parameters shadowing library names; `local m =
+  ...`; `cache = nil`; calls and operators on a table given a metatable;
+  globals defined in a block; file handles' methods; a function returning
+  itself (which crashed the compiler).
 - A statement that is only an expression, not a call, is an error, as in
-  Lua.
+  Lua, and so is an assignment to anything but a name, a field or an index.
 - Untyped Lua is checked as Lua: `and`/`or` have the type of the operand they
   return; empty locals, tables grown field by field, left-out untyped
   parameters, values adjusted to names, and `function M.f()` /
@@ -120,6 +155,14 @@ their changelog described features that did not work.
   file and what imports it (about 70 ms instead of 1 s for 200 scripts).
   Windows drive letters and `\\wsl$` paths are handled, and replies use the
   editor's own URIs.
+- Completion while typing (from the text with the line being typed set
+  aside), of imported names, string methods, plain tables' fields and a
+  class's statics; not in comments or strings, and only types where a type
+  goes. Definition, hover, references and rename on every kind of name.
+  Rename refuses to change what a name refers to. A workspace folder with
+  no config checks each project in it, and loose files on their own; every
+  workspace folder counts; files are watched; the shutdown and exit
+  lifecycle follows the protocol.
 - A tree-sitter grammar (`editors/tree-sitter-lunar`), a Neovim plugin for
   `vim.lsp` and nvim-treesitter's main branch, a Zed extension, and an updated
   VS Code extension.

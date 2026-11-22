@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"lunar/internal/testutil"
 )
 
 var (
@@ -93,5 +95,13 @@ func compileExample(t *testing.T, rel, outFile, target string) {
 	cmd.Dir = filepath.Dir(src)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("compiling %s: %v\n%s", rel, err, out)
+	}
+}
+
+// TestCompilerSourcesAreTracked reads the compiler's sources so Go's test
+// cache re-runs this package when they change; see TouchCompilerSources.
+func TestCompilerSourcesAreTracked(t *testing.T) {
+	if err := testutil.TouchCompilerSources(repoRoot); err != nil {
+		t.Fatal(err)
 	}
 }

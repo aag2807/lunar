@@ -127,7 +127,7 @@ local result4 = oldAPI(21)
 
 print("oldAPI result:", result4)
 
-local db = Database:new("localhost:5432")
+local db = Database.new("localhost:5432")
 
 print("Database connection:", db.connection)
 

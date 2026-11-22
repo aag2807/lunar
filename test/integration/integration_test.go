@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"lunar/internal/testutil"
 	"lunar/internal/version"
 )
 
@@ -258,5 +259,13 @@ func TestNoTypecheckFlagIsGone(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "no-typecheck") {
 		t.Errorf("error should name the flag, got:\n%s", out)
+	}
+}
+
+// TestCompilerSourcesAreTracked reads the compiler's sources so Go's test
+// cache re-runs this package when they change; see TouchCompilerSources.
+func TestCompilerSourcesAreTracked(t *testing.T) {
+	if err := testutil.TouchCompilerSources(filepath.Join("..", "..")); err != nil {
+		t.Fatal(err)
 	}
 }

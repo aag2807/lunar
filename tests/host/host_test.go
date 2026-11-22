@@ -11,7 +11,18 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"lunar/internal/testutil"
 )
+
+// TestCompilerSourcesAreTracked reads the compiler's sources so Go's test
+// cache re-runs this package, whose data-file test builds the compiler, when
+// they change; see TouchCompilerSources.
+func TestCompilerSourcesAreTracked(t *testing.T) {
+	if err := testutil.TouchCompilerSources(filepath.Join("..", "..")); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // luaPackages are the pkg-config names tried for each Lua version.
 var luaPackages = []string{"lua5.4", "lua5.3"}

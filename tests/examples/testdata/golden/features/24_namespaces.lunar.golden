@@ -1,31 +1,36 @@
-local Geometry = {}
+local Geometry, Game
 
-function Geometry.area(w, h)
-    return w * h
+Geometry = {}
+do
+    local area
+    function area(w, h)
+        return w * h
+    end
+    Geometry.area = area
 end
 
+Game = {}
+do
+    local Orc
+    Orc = {}
+    Orc.__index = Orc
 
-local Game = {}
+    function Orc.__init(self, hp)
+        self.hp = hp
+    end
+    function Orc.new(...)
+        local self = setmetatable({}, Orc)
+        Orc.__init(self, ...)
+        return self
+    end
 
-local Orc = {}
-Orc.__index = Orc
+    function Orc:hit(n)
+        self.hp = self.hp - n
+        return self.hp
+    end
 
-function Orc.__init(self, hp)
-    self.hp = hp
+    Game.Orc = Orc
 end
-function Orc.new(...)
-    local self = setmetatable({}, Orc)
-    Orc.__init(self, ...)
-    return self
-end
-
-function Orc:hit(n)
-    self.hp = self.hp - n
-    return self.hp
-end
-
-Game.Orc = Orc
-
 
 local orc = Game.Orc.new(5)
 

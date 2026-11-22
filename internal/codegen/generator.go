@@ -21,6 +21,9 @@ type Generator struct {
 	// varargs says, for each function being generated, whether it takes
 	// '...'; empty means the main chunk.
 	varargs []bool
+	// namespaceLocals are the members of the namespaces being generated,
+	// declared local at the start of each namespace's block.
+	namespaceLocals map[string]bool
 	// forwardDeclared are the top-level classes and enums declared local at
 	// the start of the chunk, which their declarations then assign.
 	forwardDeclared  map[string]bool
@@ -128,6 +131,9 @@ func (g *Generator) Generate(statements []ast.Statement) string {
 			names = append(names, n.Name.Value)
 			g.forwardDeclared[n.Name.Value] = true
 		case *ast.EnumDeclaration:
+			names = append(names, n.Name.Value)
+			g.forwardDeclared[n.Name.Value] = true
+		case *ast.NamespaceDeclaration:
 			names = append(names, n.Name.Value)
 			g.forwardDeclared[n.Name.Value] = true
 		}
@@ -697,6 +703,9 @@ func (g *Generator) localUnlessForward(name string) string {
 	if g.indent == 0 && g.forwardDeclared[name] {
 		return ""
 	}
+	if g.namespaceLocals[name] && g.indent > 0 {
+		return ""
+	}
 	return "local "
 }
 
@@ -1202,60 +1211,92 @@ func (g *Generator) generateNamespaceDeclaration(node *ast.NamespaceDeclaration)
 	var output strings.Builder
 	nsName := node.Name.Value
 
-	// Create namespace table
+	// The namespace is a table; its body runs in a block of its own, where
+	// every member is a local (so members call each other by name, in any
+	// order, private ones included) and the exported ones are also put in
+	// the table.
 	output.WriteString(g.generateIndent())
-	output.WriteString(fmt.Sprintf("local %s = {}\n\n", nsName))
+	output.WriteString(fmt.Sprintf("%s%s = {}\n", g.localUnlessForward(nsName), nsName))
+	output.WriteString(g.generateIndent())
+	output.WriteString("do\n")
+	g.indent++
 
-	// Generate all statements in the namespace
+	var names []string
 	for _, stmt := range node.Statements {
-		// `export` inside a namespace marks a member of that namespace; the
-		// declaration it wraps is what gets attached to the table.
 		if exported, ok := stmt.(*ast.ExportStatement); ok && exported.Statement != nil {
 			stmt = exported.Statement
 		}
-
 		switch s := stmt.(type) {
-		case *ast.ClassDeclaration:
-			// Generate class and assign to namespace
-			classCode := g.generateClassDeclaration(s)
-			output.WriteString(classCode)
-			output.WriteString(g.generateIndent())
-			output.WriteString(fmt.Sprintf("%s.%s = %s\n\n", nsName, s.Name.Value, s.Name.Value))
 		case *ast.FunctionDeclaration:
-			// Generate function and assign to namespace
-			output.WriteString(g.generateIndent())
-			output.WriteString(fmt.Sprintf("function %s.%s(", nsName, s.Name.Value))
-			params := make([]string, len(s.Parameters))
-			for i, param := range s.Parameters {
-				params[i] = param.Name.Value
+			if s.Receiver == nil && s.Name != nil {
+				names = append(names, s.Name.Value)
 			}
-			output.WriteString(strings.Join(params, ", "))
-			output.WriteString(")\n")
-
-			g.indent++
-			if s.Body != nil {
-				for _, bodyStmt := range s.Body.Statements {
-					output.WriteString(g.generateStatement(bodyStmt))
-				}
-			}
-			g.indent--
-
-			output.WriteString(g.generateIndent())
-			output.WriteString("end\n\n")
+		case *ast.ClassDeclaration:
+			names = append(names, s.Name.Value)
 		case *ast.EnumDeclaration:
-			// Generate enum and assign to namespace
-			enumCode := g.generateEnumDeclaration(s)
-			output.WriteString(enumCode)
-			output.WriteString(g.generateIndent())
-			output.WriteString(fmt.Sprintf("%s.%s = %s\n\n", nsName, s.Name.Value, s.Name.Value))
+			names = append(names, s.Name.Value)
+		case *ast.NamespaceDeclaration:
+			names = append(names, s.Name.Value)
+		}
+	}
+	if len(names) > 0 {
+		output.WriteString(g.generateIndent())
+		output.WriteString("local " + strings.Join(names, ", ") + "\n")
+	}
+	prevLocals := g.namespaceLocals
+	g.namespaceLocals = map[string]bool{}
+	for _, name := range names {
+		g.namespaceLocals[name] = true
+	}
+	defer func() { g.namespaceLocals = prevLocals }()
+
+	for _, stmt := range node.Statements {
+		exported := false
+		if exp, ok := stmt.(*ast.ExportStatement); ok && exp.Statement != nil {
+			stmt, exported = exp.Statement, true
+		}
+		publish := func(name string) {
+			if exported {
+				output.WriteString(g.generateIndent())
+				output.WriteString(fmt.Sprintf("%s.%s = %s\n", nsName, name, name))
+			}
+		}
+		switch s := stmt.(type) {
+		case *ast.FunctionDeclaration:
+			if s.Receiver != nil {
+				output.WriteString(g.generateStatement(s))
+				continue
+			}
+			// The local declared above is assigned: function f() ... end.
+			local := s.IsLocal
+			s.IsLocal = false
+			output.WriteString(g.generateFunctionDeclaration(s))
+			s.IsLocal = local
+			publish(s.Name.Value)
+		case *ast.ClassDeclaration:
+			output.WriteString(g.generateClassDeclaration(s))
+			publish(s.Name.Value)
+		case *ast.EnumDeclaration:
+			output.WriteString(g.generateEnumDeclaration(s))
+			publish(s.Name.Value)
+		case *ast.NamespaceDeclaration:
+			output.WriteString(g.generateNamespaceDeclaration(s))
+			publish(s.Name.Value)
+		case *ast.VariableDeclaration:
+			output.WriteString(g.generateStatement(s))
+			for _, name := range s.Names {
+				publish(name.Value)
+			}
 		case *ast.InterfaceDeclaration, *ast.TypeDeclaration:
 			// Type-only declarations don't generate code
 		default:
-			// Generate other statements normally
 			output.WriteString(g.generateStatement(stmt))
 		}
 	}
 
+	g.indent--
+	output.WriteString(g.generateIndent())
+	output.WriteString("end\n")
 	return output.String()
 }
 

@@ -30,7 +30,8 @@ func TestLiteralReceiverIsParenthesised(t *testing.T) {
 func TestNamespaceExportsAttachToTable(t *testing.T) {
 	output := generate(t, "namespace Geometry\n\texport function area(w: number, h: number): number\n\t\treturn w * h\n\tend\nend")
 
-	assertContains(t, output, "function Geometry.area(w, h)")
+	assertContains(t, output, "function area(w, h)")
+	assertContains(t, output, "Geometry.area = area")
 }
 
 // Import paths become dotted module names require can resolve.

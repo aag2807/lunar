@@ -233,6 +233,8 @@ type Checker struct {
 	classes           map[string]*ClassType
 	interfaces        map[string]*InterfaceType
 	genericInterfaces map[string]*GenericInterfaceType
+	// namespaces are the types of the namespace declarations seen.
+	namespaces map[*ast.NamespaceDeclaration]*NamespaceType
 	// sharedMemberSyms are the member symbols of the generic interface an
 	// instance is being built from.
 	sharedMemberSyms   map[string]*Symbol
@@ -382,6 +384,7 @@ func NewCheckerWithOptions(opts Options) *Checker {
 		classes:            make(map[string]*ClassType),
 		interfaces:         make(map[string]*InterfaceType),
 		genericInterfaces:  make(map[string]*GenericInterfaceType),
+		namespaces:         make(map[*ast.NamespaceDeclaration]*NamespaceType),
 		enums:              make(map[string]*EnumType),
 		typeAliases:        make(map[string]Type),
 		genericTypeAliases: make(map[string]*GenericTypeAlias),
@@ -5468,7 +5471,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		if member, ok := typ.Members[propertyName]; ok {
 			return resolved(ast.DispatchPlain, member)
 		}
-		if typ.Ambient {
+		{
 			names := make([]string, 0, len(typ.Members))
 			for name := range typ.Members {
 				names = append(names, name)
@@ -6116,6 +6119,15 @@ func (c *Checker) addErrorCode(code, message string, token lexer.Token) {
 
 // registerNamespace registers all declarations in a namespace
 func (c *Checker) registerNamespace(node *ast.NamespaceDeclaration) {
+	nsType := c.buildNamespace(node)
+	c.namespaces[node] = nsType
+	c.env.Set(node.Name.Value, nsType)
+}
+
+// buildNamespace makes the type of a namespace from its declarations: its
+// exported members, with the types their declarations give. Functions and
+// variables get their checked types when the body is checked.
+func (c *Checker) buildNamespace(node *ast.NamespaceDeclaration) *NamespaceType {
 	nsName := node.Name.Value
 
 	// Create a namespace type to track its contents
@@ -6172,12 +6184,21 @@ func (c *Checker) registerNamespace(node *ast.NamespaceDeclaration) {
 				ReturnType: returnType,
 			}
 			nsType.Members[s.Name.Value] = funcType
-			c.env.Set(s.Name.Value, funcType)
+		case *ast.VariableDeclaration:
+			for i, name := range s.Names {
+				var t Type = Any
+				if i < len(s.Types) && s.Types[i] != nil {
+					t = c.resolveTypeExpression(s.Types[i])
+				}
+				nsType.Members[name.Value] = t
+			}
+		case *ast.NamespaceDeclaration:
+			inner := c.buildNamespace(s)
+			c.namespaces[s] = inner
+			nsType.Members[s.Name.Value] = inner
 		}
 	}
-
-	// Register the namespace itself
-	c.env.Set(nsName, nsType)
+	return nsType
 }
 
 // registerAmbientNamespace builds the type of a `declare namespace`, such as
@@ -6222,9 +6243,41 @@ func (c *Checker) registerAmbientNamespace(node *ast.NamespaceDeclaration) *Name
 
 // checkNamespaceDeclaration checks all statements in a namespace
 func (c *Checker) checkNamespaceDeclaration(node *ast.NamespaceDeclaration) {
-	// Check all statements in the namespace
+	nsType := c.namespaces[node]
+	// The body is a scope of its own: its members are names there (calling
+	// each other in any order), not in the scope around it.
+	prevEnv := c.env
+	c.env = NewEnclosedEnvironment(prevEnv)
+	defer func() { c.env = prevEnv }()
+	if nsType != nil {
+		for name, t := range nsType.Members {
+			c.env.Set(name, t)
+		}
+	}
+	c.hoistFunctionSignatures(node.Statements)
+
 	for _, stmt := range node.Statements {
+		exported := false
+		if exp, ok := stmt.(*ast.ExportStatement); ok && exp.Statement != nil {
+			stmt, exported = exp.Statement, true
+		}
 		c.checkStatement(stmt)
+		if !exported || nsType == nil {
+			continue
+		}
+		// The member's type is what checking its declaration gave.
+		switch s := stmt.(type) {
+		case *ast.FunctionDeclaration:
+			if t, ok := c.env.Get(s.Name.Value); ok {
+				nsType.Members[s.Name.Value] = t
+			}
+		case *ast.VariableDeclaration:
+			for _, name := range s.Names {
+				if t, ok := c.env.Get(name.Value); ok {
+					nsType.Members[name.Value] = t
+				}
+			}
+		}
 	}
 }
 

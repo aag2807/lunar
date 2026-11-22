@@ -1,0 +1,46 @@
+-- Members of a namespace are reached through it; inside, they call each
+-- other by name, private ones included, in any order.
+local helper = "outer"
+
+namespace Game
+    export const MAX = 10
+    export local level = 1
+
+    local function helper(n: number): number
+        return n * 2
+    end
+
+    export function double(n: number): number
+        return helper(n)
+    end
+
+    export function quad(n: number): number
+        return double(double(n))
+    end
+
+    export function later(): number
+        return defined()
+    end
+
+    export function defined(): number
+        return MAX
+    end
+
+    export namespace Inner
+        export function hi(): string
+            return "hi"
+        end
+    end
+
+    export class Orc
+        kind(): string
+            return "game orc"
+        end
+    end
+end
+
+assert(Game.MAX == 10 and Game.level == 1)
+assert(Game.double(3) == 6 and Game.quad(1) == 4 and Game.later() == 10)
+assert(Game.Inner.hi() == "hi")
+assert(Game.Orc().kind() == "game orc")
+assert(helper == "outer")

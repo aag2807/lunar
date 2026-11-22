@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -195,7 +196,25 @@ func renamable(sym *types.Symbol) error {
 	return nil
 }
 
+// renameBlocked refuses a rename while any file does not parse: its
+// positions are from an older text, and editing at them would change the
+// wrong characters.
+func (s *Server) renameBlocked() error {
+	if len(s.broken) == 0 {
+		return nil
+	}
+	var names []string
+	for path := range s.broken {
+		names = append(names, s.relName(path))
+	}
+	sort.Strings(names)
+	return fmt.Errorf("%s does not parse; fix it before renaming", strings.Join(names, ", "))
+}
+
 func (s *Server) prepareRename(uri string, pos Position) (interface{}, error) {
+	if err := s.renameBlocked(); err != nil {
+		return nil, err
+	}
 	occ, ok := s.occurrenceAt(uri, pos)
 	if !ok {
 		return nil, nil
@@ -207,6 +226,9 @@ func (s *Server) prepareRename(uri string, pos Position) (interface{}, error) {
 }
 
 func (s *Server) rename(uri string, pos Position, newName string) (interface{}, error) {
+	if err := s.renameBlocked(); err != nil {
+		return nil, err
+	}
 	occ, ok := s.occurrenceAt(uri, pos)
 	if !ok {
 		return nil, fmt.Errorf("there is nothing to rename here")
@@ -314,4 +336,14 @@ func (s *Server) workspaceSymbols(query string) []SymbolInformation {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// relName is a file's path relative to the workspace, for messages.
+func (s *Server) relName(path string) string {
+	if s.root != "" {
+		if rel, err := filepath.Rel(s.root, path); err == nil && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return filepath.Base(path)
 }

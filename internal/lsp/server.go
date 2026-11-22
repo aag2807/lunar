@@ -40,10 +40,13 @@ type Server struct {
 	timer       *time.Timer
 	dirty       bool
 
-	prog      *project.Program
-	modules   map[string]*project.Module // last module without syntax errors, by path
-	published map[string]bool            // files whose diagnostics were last non-empty
-	files     map[string]*source.File    // text of files positions were mapped in
+	prog    *project.Program
+	modules map[string]*project.Module // last module without syntax errors, by path
+	// broken are the files that do not parse now, so their entries in
+	// modules describe an older text.
+	broken    map[string]bool
+	published map[string]bool         // files whose diagnostics were last non-empty
+	files     map[string]*source.File // text of files positions were mapped in
 }
 
 // NewServer creates a server speaking on stdin and stdout.
@@ -358,14 +361,11 @@ func (s *Server) analyze() {
 	s.prog = prog
 
 	// A module whose text does not parse keeps serving its last good index.
-	broken := map[string]bool{}
-	for _, d := range diags {
-		if d.Code == "syntax" {
-			broken[d.File] = true
-		}
-	}
+	s.broken = map[string]bool{}
 	for _, m := range prog.Modules {
-		if !broken[m.Path] && m.Index != nil {
+		if m.Broken {
+			s.broken[m.Path] = true
+		} else if m.Index != nil {
 			s.modules[m.Path] = m
 		}
 	}

@@ -109,6 +109,8 @@ func (c *Checker) checkRecordLiteral(lit *ast.TableLiteral, iface *InterfaceType
 		name := f.key.Value
 		present[name] = true
 		label := joinPath(path, name)
+		// The key names the interface's field, for references and rename.
+		c.reference(f.key.Token, memberSymbol(iface, name))
 
 		expected, known := iface.propertyType(name)
 		isMethod := false

@@ -374,6 +374,9 @@ func (t *AnyType) IsAssignableTo(other Type) bool {
 // ArrayType represents an array type with element type
 type ArrayType struct {
 	ElementType Type
+	// EmptyLiteral marks the type of a bare `{}`, which can still become a
+	// record, so it may be assigned to an interface with no required members.
+	EmptyLiteral bool
 }
 
 func (t *ArrayType) String() string {
@@ -406,6 +409,11 @@ func (t *ArrayType) IsAssignableTo(other Type) bool {
 		if _, isAny := t.ElementType.(*AnyType); isAny {
 			return true
 		}
+	}
+	// `{}` is a record with no fields yet: it fits an interface whose
+	// members are all optional.
+	if iface, ok := other.(*InterfaceType); ok && t.EmptyLiteral {
+		return len(iface.requiredProperties()) == 0 && len(iface.Methods) == 0
 	}
 	return false
 }
@@ -953,6 +961,50 @@ type InterfaceType struct {
 	ReadonlyProps  map[string]bool // Track readonly properties (for as const)
 	StaticProps    map[string]bool // Track static properties
 	StaticMethods  map[string]bool // Track static methods
+	// OptionalProps are the properties a table literal may leave out:
+	// written `name?: T`, or typed so that they admit nil (`name: T?`).
+	OptionalProps map[string]bool
+}
+
+// requiredProperties returns every property the interface requires,
+// including those inherited through extends, with their types.
+func (t *InterfaceType) requiredProperties() map[string]Type {
+	required := map[string]Type{}
+	var collect func(*InterfaceType, map[*InterfaceType]bool)
+	collect = func(it *InterfaceType, seen map[*InterfaceType]bool) {
+		if it == nil || seen[it] {
+			return
+		}
+		seen[it] = true
+		for _, parent := range it.Extends {
+			collect(parent, seen)
+		}
+		for name, typ := range it.Properties {
+			if it.OptionalProps[name] {
+				delete(required, name)
+				continue
+			}
+			required[name] = typ
+		}
+	}
+	collect(t, map[*InterfaceType]bool{})
+	return required
+}
+
+// propertyType looks a property up on the interface or what it extends.
+func (t *InterfaceType) propertyType(name string) (Type, bool) {
+	if typ, ok := t.Properties[name]; ok {
+		return typ, true
+	}
+	for _, parent := range t.Extends {
+		if parent == nil {
+			continue
+		}
+		if typ, ok := parent.propertyType(name); ok {
+			return typ, true
+		}
+	}
+	return nil, false
 }
 
 // IndexSignature represents an index signature like [key: string]: number
@@ -989,15 +1041,26 @@ func (t *InterfaceType) IsAssignableTo(other Type) bool {
 			}
 		}
 
-		// Structural compatibility: check if this interface has all required properties
-		// This allows table literals to be assigned to interface types
-		for propName, propType := range otherInterface.Properties {
-			myPropType, hasProperty := t.Properties[propName]
+		// Structural compatibility: every property the target requires,
+		// inherited ones included, must be present with a compatible type.
+		// This is what lets table literals be assigned to interface types.
+		required := otherInterface.requiredProperties()
+		for propName, propType := range required {
+			myPropType, hasProperty := t.propertyType(propName)
 			if !hasProperty {
 				return false // Missing required property
 			}
 			if !myPropType.IsAssignableTo(propType) {
 				return false // Property type mismatch
+			}
+		}
+
+		// An optional property that is present still has to fit.
+		for propName := range otherInterface.OptionalProps {
+			if myPropType, has := t.propertyType(propName); has {
+				if propType, ok := otherInterface.propertyType(propName); ok && !myPropType.IsAssignableTo(propType) {
+					return false
+				}
 			}
 		}
 

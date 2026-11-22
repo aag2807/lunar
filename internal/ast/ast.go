@@ -1064,6 +1064,7 @@ type PropertyDeclaration struct {
 	Visibility string      // "public", "private", "protected"
 	IsStatic   bool        // static property
 	IsReadonly bool        // readonly property
+	IsOptional bool        // `name?: T`: may be left out of a table literal
 	Name       *Identifier
 	Type       Expression
 	Value      Expression // initial/default value

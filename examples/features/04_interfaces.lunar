@@ -47,6 +47,18 @@ end
 print(report(Circle(1)))
 print(report(Square(3)))
 
+-- Optional fields may be left out of a literal: the duel phase has no speed.
+interface Phase
+    name: string
+    speed: number?
+    delay?: number
+end
+
+local duel: Phase = { name = "duel" }
+local chase: Phase = { name = "chase", speed = 3 }
+
 -- Checked results: a wrong answer fails the run, not just a crash.
 assert(report(Circle(1)) == "circle: 3.14159")
 assert(report(Square(3)) == "square: 9")
+assert(duel.speed == nil and duel.delay == nil)
+assert(chase.speed == 3)

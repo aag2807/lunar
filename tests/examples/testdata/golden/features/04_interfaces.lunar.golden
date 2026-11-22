@@ -44,6 +44,14 @@ print(report(Circle.new(1)))
 
 print(report(Square.new(3)))
 
+local duel = {name = "duel"}
+
+local chase = {name = "chase", speed = 3}
+
 assert(report(Circle.new(1)) == "circle: 3.14159")
 
 assert(report(Square.new(3)) == "square: 9")
+
+assert(duel.speed == nil and duel.delay == nil)
+
+assert(chase.speed == 3)

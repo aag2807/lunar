@@ -714,6 +714,9 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 	// Register properties
 	for _, prop := range node.Properties {
 		propType := c.resolveTypeExpression(prop.Type)
+		if prop.IsOptional {
+			propType = withNil(propType)
+		}
 		propName := prop.Name.Value
 
 		// Track static vs instance properties
@@ -925,11 +928,7 @@ func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
 
 	// Register properties
 	for _, prop := range node.Properties {
-		propType := c.resolveTypeExpression(prop.Type)
-		interfaceType.Properties[prop.Name.Value] = propType
-		if prop.IsStatic {
-			interfaceType.StaticProps[prop.Name.Value] = true
-		}
+		c.addInterfaceProperty(interfaceType, prop)
 	}
 
 	// Register methods
@@ -1006,6 +1005,38 @@ func (c *Checker) registerEnum(node *ast.EnumDeclaration) {
 	}
 }
 
+// addInterfaceProperty records one property of an interface or object
+// shape. `name?: T` is stored as T | nil, the same as `name: T?`, so reading
+// it gives an optional either way; both spellings may be left out.
+func (c *Checker) addInterfaceProperty(iface *InterfaceType, prop *ast.PropertyDeclaration) {
+	propType := c.resolveTypeExpression(prop.Type)
+	if prop.IsOptional {
+		propType = withNil(propType)
+	}
+	name := prop.Name.Value
+	iface.Properties[name] = propType
+	if prop.IsStatic {
+		if iface.StaticProps == nil {
+			iface.StaticProps = make(map[string]bool)
+		}
+		iface.StaticProps[name] = true
+	}
+	if _, admitsNil := removeNil(propType); admitsNil {
+		if iface.OptionalProps == nil {
+			iface.OptionalProps = make(map[string]bool)
+		}
+		iface.OptionalProps[name] = true
+	}
+}
+
+// withNil returns t | nil, or t itself when it already admits nil.
+func withNil(t Type) Type {
+	if _, admitsNil := removeNil(t); admitsNil {
+		return t
+	}
+	return &UnionType{Types: []Type{t, Nil}}
+}
+
 // registerTypeAlias registers a type alias
 func (c *Checker) registerTypeAlias(node *ast.TypeDeclaration) {
 	// Check if this is a generic type alias
@@ -1044,11 +1075,7 @@ func (c *Checker) registerTypeAlias(node *ast.TypeDeclaration) {
 
 		// Register properties
 		for _, prop := range node.Properties {
-			propType := c.resolveTypeExpression(prop.Type)
-			interfaceType.Properties[prop.Name.Value] = propType
-			if prop.IsStatic {
-				interfaceType.StaticProps[prop.Name.Value] = true
-			}
+			c.addInterfaceProperty(interfaceType, prop)
 		}
 
 		aliasType = interfaceType
@@ -3844,7 +3871,7 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 		}
 
 		// Empty array defaults to any[]
-		return &ArrayType{ElementType: Any}
+		return &ArrayType{ElementType: Any, EmptyLiteral: true}
 	}
 
 	// For mixed or key-value tables, return a generic table type

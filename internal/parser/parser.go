@@ -2735,7 +2735,7 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 
 		case lexer.IDENT, lexer.STRING_TYPE, lexer.TABLE, lexer.TYPE:
 			// Could be property or method
-			if p.peekTokenIs(lexer.COLON) || p.peekTokenIs(lexer.ASSIGN) {
+			if p.peekTokenIs(lexer.COLON) || p.peekTokenIs(lexer.ASSIGN) || p.peekTokenIs(lexer.QUESTION) {
 				// It's a property (with type annotation or initial value)
 				prop := p.parsePropertyDeclaration()
 				prop.Visibility = visibility
@@ -2771,6 +2771,12 @@ func (p *Parser) parsePropertyDeclaration() *ast.PropertyDeclaration {
 	prop := &ast.PropertyDeclaration{
 		Token: p.curToken,
 		Name:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+	}
+
+	// `name?: T` marks the field optional.
+	if p.peekTokenIs(lexer.QUESTION) {
+		p.nextToken()
+		prop.IsOptional = true
 	}
 
 	// Check for type annotation (: type)
@@ -3003,7 +3009,7 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 			// Handle static keyword
 			p.nextToken() // move past 'static'
 			if p.curTokenIsIdentOrContextual() {
-				if p.peekTokenIs(lexer.COLON) {
+				if p.peekTokenIs(lexer.COLON) || p.peekTokenIs(lexer.QUESTION) {
 					// Static property
 					prop := p.parsePropertyDeclaration()
 					prop.IsStatic = true
@@ -3018,7 +3024,7 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 				}
 			}
 		} else if p.curTokenIsIdentOrContextual() {
-			if p.peekTokenIs(lexer.COLON) {
+			if p.peekTokenIs(lexer.COLON) || p.peekTokenIs(lexer.QUESTION) {
 				// Property
 				prop := p.parsePropertyDeclaration()
 				iface.Properties = append(iface.Properties, prop)
@@ -3171,6 +3177,11 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 				prop := &ast.PropertyDeclaration{
 					Token: p.curToken,
 					Name:  p.parseIdentifierOrContextual(),
+				}
+
+				if p.peekTokenIs(lexer.QUESTION) {
+					p.nextToken()
+					prop.IsOptional = true
 				}
 
 				if !p.expectPeek(lexer.COLON) {

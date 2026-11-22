@@ -280,6 +280,7 @@ module.exports = grammar({
 
     class_method: ($) =>
       seq(
+        repeat($.decorator),
         repeat($.modifier),
         optional('async'),
         optional('function'),
@@ -443,6 +444,7 @@ module.exports = grammar({
           $.interface_declaration,
           $.enum_declaration,
           $.type_alias,
+          $.namespace_declaration,
           $.decorated_declaration,
           seq(choice('const', 'local'), commaSep1($.typed_name), '=', commaSep1($._expression)),
           seq('{', optional(trailingCommaSep1($.identifier)), '}'),

@@ -906,6 +906,10 @@
       "required": false,
       "types": [
         {
+          "type": "decorator",
+          "named": true
+        },
+        {
           "type": "modifier",
           "named": true
         },
@@ -1448,6 +1452,10 @@
         },
         {
           "type": "interface_declaration",
+          "named": true
+        },
+        {
+          "type": "namespace_declaration",
           "named": true
         },
         {

@@ -8,6 +8,10 @@
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
+# A private parser cache: the CLI otherwise shares ~/.cache/tree-sitter/lib
+# by language name, and another checkout's build of "lunar" can be used.
+TREE_SITTER_LIBDIR=$(mktemp -d)
+export TREE_SITTER_LIBDIR
 repo=$(cd "$here/../.." && pwd)
 cd "$here"
 
@@ -21,7 +25,7 @@ fi
 tree-sitter test -p .
 
 list=$(mktemp)
-trap 'rm -f "$list"' EXIT
+trap 'rm -f "$list"; rm -rf "$TREE_SITTER_LIBDIR"' EXIT
 # Plain Lua is Lunar too: the compiler's Lua corpus must parse as well.
 git -C "$repo" ls-files '*.lunar' 'tests/luacompat/*.lua' | sed "s|^|$repo/|" > "$list"
 bad=$(tree-sitter parse -p . --quiet --paths "$list" 2>/dev/null | grep -E 'ERROR|MISSING' || true)

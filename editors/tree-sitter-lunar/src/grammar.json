@@ -1790,6 +1790,13 @@
           "type": "REPEAT",
           "content": {
             "type": "SYMBOL",
+            "name": "decorator"
+          }
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
             "name": "modifier"
           }
         },
@@ -3029,6 +3036,10 @@
             {
               "type": "SYMBOL",
               "name": "type_alias"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "namespace_declaration"
             },
             {
               "type": "SYMBOL",

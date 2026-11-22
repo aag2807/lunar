@@ -202,26 +202,11 @@ func TestVersionFlagPrintsSingleSourcedVersion(t *testing.T) {
 	}
 }
 
-// TestInstalledLayoutFindsStdlib mirrors `make install`: the binary in
-// <prefix>/bin and the declarations in <prefix>/share/lunar/stdlib. Compiling
-// from an unrelated directory must still know about print.
-func TestInstalledLayoutFindsStdlib(t *testing.T) {
-	prefix := t.TempDir()
-	bin := filepath.Join(prefix, "bin", filepath.Base(compilerBin))
-	stdlibDir := filepath.Join(prefix, "share", "lunar", "stdlib")
-	for _, dir := range []string{filepath.Dir(bin), stdlibDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
+// TestInstalledBinaryNeedsNothingElse: the standard library declarations
+// are compiled into lunar, so the binary alone, anywhere, knows print.
+func TestInstalledBinaryNeedsNothingElse(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), filepath.Base(compilerBin))
 	copyFile(t, compilerBin, bin, 0o755)
-	decls, err := filepath.Glob(filepath.Join("..", "..", "stdlib", "*.d.lunar"))
-	if err != nil || len(decls) == 0 {
-		t.Fatalf("no stdlib declarations found: %v", err)
-	}
-	for _, d := range decls {
-		copyFile(t, d, filepath.Join(stdlibDir, filepath.Base(d)), 0o644)
-	}
 
 	work := t.TempDir()
 	if err := os.WriteFile(filepath.Join(work, "hello.lunar"), []byte("print(\"hello\")\n"), 0o644); err != nil {
@@ -230,7 +215,7 @@ func TestInstalledLayoutFindsStdlib(t *testing.T) {
 	cmd := exec.Command(bin, "hello.lunar")
 	cmd.Dir = work
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("installed lunar failed outside the repo: %v\n%s", err, out)
+		t.Fatalf("lunar on its own failed: %v\n%s", err, out)
 	}
 }
 

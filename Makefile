@@ -13,7 +13,6 @@ else
 endif
 
 BINDIR    ?= $(PREFIX)/bin
-STDLIBDIR ?= $(PREFIX)/share/lunar/stdlib
 
 LUNAR_BIN     := $(DIST_DIR)/lunar$(EXE_EXT)
 LUNAR_LSP_BIN := $(DIST_DIR)/lunar-lsp$(EXE_EXT)
@@ -31,16 +30,14 @@ build-lunar:
 build-lunar-lsp:
 	$(GO) build $(GOFLAGS) -o $(LUNAR_LSP_BIN) ./cmd/lunar-lsp
 
-## install: copy the binaries to $(BINDIR) and the stdlib declarations to $(STDLIBDIR)
+## install: copy the binaries to $(BINDIR); the stdlib declarations are built in
 install: build
-	mkdir -p "$(BINDIR)" "$(STDLIBDIR)"
+	mkdir -p "$(BINDIR)"
 	cp $(LUNAR_BIN) $(LUNAR_LSP_BIN) "$(BINDIR)/"
-	cp stdlib/*.d.lunar "$(STDLIBDIR)/"
 
 ## uninstall: remove what install copied
 uninstall:
 	rm -f "$(BINDIR)/lunar$(EXE_EXT)" "$(BINDIR)/lunar-lsp$(EXE_EXT)"
-	rm -rf "$(STDLIBDIR)"
 
 ## test: run every Go test (runtime tests skip when Lua is missing)
 test:

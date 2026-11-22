@@ -1,0 +1,3 @@
+-- Functions only Lua 5.4 has. Loaded when compiling for --target lua54.
+
+declare function warn(...messages: string): void

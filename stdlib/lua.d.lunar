@@ -18,7 +18,7 @@ declare function ipairs(t: any): any end
 declare function next(t: any, key: any): any end
 
 -- Loading and Execution
-declare function loadstring(source: string): any end
+declare function load(chunk: any, chunkname?: string, mode?: string, env?: any): any end
 declare function loadfile(filename: string): any end
 declare function dofile(filename: string): any end
 declare function require(modulename: string): any end

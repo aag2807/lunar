@@ -2,11 +2,12 @@ package types
 
 import (
 	"fmt"
+	"io/fs"
 	"lunar/internal/ast"
 	"lunar/internal/lexer"
 	"lunar/internal/parser"
+	"lunar/stdlib"
 	"os"
-	"path/filepath"
 	"sort"
 )
 
@@ -238,7 +239,8 @@ type Checker struct {
 	currentModule string                 // Current module being checked
 
 	// Standard library path
-	stdlibPath string // Path to the stdlib directory
+	stdlibPath string // Directory to read stdlib declarations from; "" for the bundled copy
+	target     string // Lua version being compiled for
 
 	// Current function return type (for checking return statements)
 	currentFunctionReturnType Type
@@ -285,6 +287,25 @@ type ModuleInfo struct {
 // If stdlibPath is provided, it will be used to locate stdlib files
 // Otherwise, it will search relative to the current directory (for backwards compatibility)
 func NewChecker(stdlibPath ...string) *Checker {
+	var dir string
+	if len(stdlibPath) > 0 {
+		dir = stdlibPath[0]
+	}
+	return NewCheckerWithOptions(Options{StdlibDir: dir})
+}
+
+// Options configures a Checker.
+type Options struct {
+	// StdlibDir reads the standard library declarations from a directory
+	// instead of the copy compiled into lunar.
+	StdlibDir string
+	// Target is the Lua version, "lua53" (the default) or "lua54"; it
+	// selects the declarations only that version has.
+	Target string
+}
+
+// NewCheckerWithOptions creates a checker with the standard library loaded.
+func NewCheckerWithOptions(opts Options) *Checker {
 	env := NewEnvironment()
 
 	// Register built-in types
@@ -297,12 +318,6 @@ func NewChecker(stdlibPath ...string) *Checker {
 	env.Set("never", Never)
 	env.Set("unknown", Unknown)
 
-	// Determine stdlib path
-	var stdlib string
-	if len(stdlibPath) > 0 && stdlibPath[0] != "" {
-		stdlib = stdlibPath[0]
-	}
-
 	checker := &Checker{
 		env:                env,
 		errors:             []*TypeError{},
@@ -314,7 +329,8 @@ func NewChecker(stdlibPath ...string) *Checker {
 		exports:            make(map[string]Type),
 		modules:            make(map[string]*ModuleInfo),
 		currentModule:      "",
-		stdlibPath:         stdlib,
+		stdlibPath:         opts.StdlibDir,
+		target:             opts.Target,
 	}
 
 	// Register built-in utility types
@@ -345,61 +361,20 @@ func (c *Checker) registerUtilityTypes() {
 
 // loadStdlib loads the Lua standard library type definitions
 func (c *Checker) loadStdlib() {
-	// Lua's own standard libraries are always in scope. Bindings for third-party
-	// rocks (lfs, lpeg, ...) also live in stdlib/ but stay opt-in, so that using
-	// one without installing it is still reported.
-	stdlibFiles := []string{
-		"lua.d.lunar",
-		"table.d.lunar",
-		"string.d.lunar",
-		"math.d.lunar",
-		"os.d.lunar",
-		"io.d.lunar",
-		"coroutine.d.lunar",
-		"debug.d.lunar",
-		"package.d.lunar",
-	}
-
-	var foundDir string
-
-	// If a specific stdlib path was provided, use it directly
+	// Lua's own standard libraries are always in scope; they are compiled
+	// into lunar, or read from StdlibDir when one is given.
+	var files fs.FS = stdlib.Files
 	if c.stdlibPath != "" {
-		if _, err := os.Stat(c.stdlibPath); err == nil {
-			foundDir = c.stdlibPath
-		}
+		files = os.DirFS(c.stdlibPath)
 	}
 
-	// If not found yet, try to find stdlib directory relative to the current directory (for backwards compatibility)
-	if foundDir == "" {
-		stdlibDirs := []string{
-			"stdlib",
-			"../stdlib",
-			"../../stdlib",
-			"../../../stdlib",
-		}
-
-		for _, dir := range stdlibDirs {
-			if _, err := os.Stat(dir); err == nil {
-				foundDir = dir
-				break
-			}
-		}
-	}
-
-	if foundDir == "" {
-		// If stdlib not found, silently continue (tests can still define what they need)
-		return
-	}
-
-	// Load each stdlib file
-	for _, filename := range stdlibFiles {
-		filePath := filepath.Join(foundDir, filename)
-		content, err := os.ReadFile(filePath)
+	names := append(append([]string{}, stdlib.Core...), stdlib.ForTarget(c.target)...)
+	for _, filename := range names {
+		content, err := fs.ReadFile(files, filename)
 		if err != nil {
-			continue // Skip files that don't exist
+			continue // a test directory may hold only some of them
 		}
 
-		// Parse the stdlib file
 		// Stdlib errors are reported as <stdlib>/<file>, wherever it lives.
 		l := lexer.NewFile("<stdlib>/"+filename, string(content))
 		p := parser.New(l)

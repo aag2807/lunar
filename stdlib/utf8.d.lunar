@@ -1,0 +1,13 @@
+-- Lua 5.3+ utf8 library
+-- https://www.lua.org/manual/5.4/manual.html#6.5
+
+declare interface Utf8Lib
+    char: function(...codepoints: number): string
+    charpattern: string
+    codes: function(s: string): any
+    codepoint: function(s: string, i?: number, j?: number): any
+    len: function(s: string, i?: number, j?: number): number
+    offset: function(s: string, n: number, i?: number): number
+end
+
+declare const utf8: Utf8Lib

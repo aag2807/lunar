@@ -34,30 +34,6 @@ const (
 // supportedTargets are the Lua versions the compiler is tested against.
 var supportedTargets = map[string]bool{"lua53": true, "lua54": true}
 
-// getStdlibPath returns the stdlib directory next to the executable, one
-// level up (builds in dist/), or where `make install` puts it
-// (<prefix>/share/lunar/stdlib); "" lets the checker search from cwd.
-func getStdlibPath() string {
-	exePath, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	exeDir := filepath.Dir(exePath)
-	for _, candidate := range []string{
-		filepath.Join(exeDir, "stdlib"),
-		filepath.Join(exeDir, "..", "stdlib"),
-		filepath.Join(exeDir, "..", "share", "lunar", "stdlib"),
-	} {
-		if _, err := os.Stat(candidate); err == nil {
-			if abs, err := filepath.Abs(candidate); err == nil {
-				return abs
-			}
-			return candidate
-		}
-	}
-	return ""
-}
-
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -222,7 +198,7 @@ func compile(inputFile, outputFile string, opts compileOptions) compileResult {
 
 	// The checker also decides ':' versus '.' and which calls construct, so
 	// it always runs, and codegen depends on what it records.
-	checker := types.NewChecker(getStdlibPath())
+	checker := types.NewCheckerWithOptions(types.Options{Target: opts.target})
 	res.diags = append(res.diags, typeDiagnostics(checker.Check(append(declarations, statements...)))...)
 	if res.diags.HasErrors() {
 		return res

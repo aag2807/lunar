@@ -66,6 +66,10 @@ type infixParseFn func(ast.Expression) ast.Expression
 type Parser struct {
 	l *lexer.Lexer
 
+	// bodilessDeclare is the last `declare function` written without an
+	// `end`, so a stray `end` after it can be explained as its body.
+	bodilessDeclare *ast.FunctionDeclaration
+
 	curToken  lexer.Token
 	peekToken lexer.Token
 
@@ -719,6 +723,17 @@ func (p *Parser) noPrefixParseFnError(t lexer.TokenType) {
 		p.addError(p.curToken.Literal, p.curToken)
 		return
 	}
+	if t == lexer.END {
+		// Most often the body of a declare function, which has none.
+		if fd := p.bodilessDeclare; fd != nil && fd.Name != nil {
+			p.addError(fmt.Sprintf("'declare function %s' cannot have a body: a declaration is only the signature of a function implemented elsewhere (such as in the engine). Remove the body and this 'end', or drop 'declare' to implement it here",
+				fd.Name.Value), p.curToken)
+			p.bodilessDeclare = nil
+			return
+		}
+		p.addError("unexpected 'end': it closes nothing", p.curToken)
+		return
+	}
 	msg := fmt.Sprintf("no prefix parse function for %s found", t)
 	p.addError(msg, p.curToken)
 }
@@ -747,7 +762,8 @@ func (p *Parser) parseStatements(terminator lexer.TokenType) []ast.Statement {
 		start := p.curToken
 		stmt := p.parseStatement()
 		if !isNilNode(stmt) {
-			if returned != nil && !reported {
+			// A stray 'end' is reported on its own.
+			if returned != nil && !reported && start.Type != lexer.END {
 				p.addError("'return' must be the last statement in a block", start)
 				reported = true
 			}
@@ -3458,8 +3474,10 @@ func (p *Parser) parseDeclareStatement() *ast.DeclareStatement {
 		if fd == nil {
 			return nil
 		}
+		p.bodilessDeclare = fd
 		if p.peekTokenIs(lexer.END) {
 			p.nextToken()
+			p.bodilessDeclare = nil
 		}
 		declareStmt.Declaration = fd
 	case lexer.CLASS:

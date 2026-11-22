@@ -1,27 +1,27 @@
--- Lunar plugin entry point
--- This file is automatically loaded by Neovim
-
--- Prevent loading twice
+-- Lunar support for Neovim 0.11+: the language server through vim.lsp, and
+-- the tree-sitter parser through nvim-treesitter (main branch).
 if vim.g.loaded_lunar then
   return
 end
 vim.g.loaded_lunar = true
 
--- Create user command to manually setup
-vim.api.nvim_create_user_command("LunarSetup", function()
-  require("lunar").setup()
-end, { desc = "Setup Lunar LSP" })
+local lunar = require('lunar')
 
--- Create command to show LSP info
-vim.api.nvim_create_user_command("LunarInfo", function()
-  local clients = vim.lsp.get_clients({ name = "lunar_lsp" })
-  if #clients > 0 then
-    print("Lunar LSP is active")
-    for _, client in ipairs(clients) do
-      print("  ID: " .. client.id)
-      print("  Root: " .. (client.config.root_dir or "N/A"))
+-- nvim-treesitter learns about the parser here; `:TSInstall lunar` builds it.
+-- A checkout of the repository builds from its own grammar; otherwise it is
+-- fetched from GitHub.
+vim.api.nvim_create_autocmd('User', {
+  pattern = 'TSUpdate',
+  callback = function()
+    local ok, parsers = pcall(require, 'nvim-treesitter.parsers')
+    if ok then
+      parsers.lunar = { install_info = lunar.parser_install_info() }
     end
-  else
-    print("Lunar LSP is not active")
-  end
-end, { desc = "Show Lunar LSP info" })
+  end,
+})
+
+-- Start the server for Lunar buffers unless the user opted out with
+-- vim.g.lunar_lsp = false (to enable it themselves, or not at all).
+if vim.g.lunar_lsp ~= false and vim.lsp.enable then
+  vim.lsp.enable('lunar')
+end

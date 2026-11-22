@@ -1,171 +1,66 @@
-# Lunar Neovim Plugin
+# Lunar for Neovim
 
-LSP integration for the Lunar programming language in Neovim.
+Language server (diagnostics, go to definition, references, rename, hover,
+completion, signature help, symbols) through Neovim's built-in LSP client,
+and highlighting, folding and indentation through tree-sitter.
 
-## Features
+Needs Neovim 0.11 or newer, and nvim-treesitter's `main` branch for the parser.
 
-- Real-time diagnostics (type errors, parse errors)
-- Hover information with type details
-- Go to definition
-- Auto-completion
-- Syntax-aware commenting
+## Install
 
-## Requirements
+1. Put `lunar` on your `PATH`; the plugin runs `lunar lsp`.
 
-- Neovim 0.8+
-- `lunar-lsp` binary (included with Lunar compiler)
-- (Optional) [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig) for easier setup
+   ```sh
+   make install PREFIX=$HOME/.local   # in the Lunar repository
+   ```
 
-## Installation
+2. Add the plugin. With lazy.nvim (for NvChad, in `lua/plugins/init.lua`):
 
-### 1. Build the LSP Server
+   ```lua
+   {
+     dir = "~/personal/lunar/editors/nvim", -- this folder, in your checkout
+     lazy = false, -- it is small, and must register the parser before :TSInstall
+     dependencies = { "nvim-treesitter/nvim-treesitter" },
+   },
+   ```
 
-First, build the `lunar-lsp` binary:
+   From a checkout, the parser is built from the repository's own grammar
+   (`editors/tree-sitter-lunar`); otherwise it is fetched from GitHub.
 
-```bash
-cd /path/to/lunar
-go build -o lunar-lsp ./cmd/lunar-lsp
+3. Build the parser, then restart Neovim:
 
-# Move to a directory in your PATH
-mv lunar-lsp ~/.local/bin/
-# or
-sudo mv lunar-lsp /usr/local/bin/
-```
+   ```vim
+   :TSInstall lunar
+   ```
 
-### 2. Install the Plugin
+4. Check everything is found:
 
-#### Using lazy.nvim
+   ```vim
+   :checkhealth lunar
+   ```
 
-```lua
-{
-  dir = "/path/to/lunar/editors/nvim",
-  ft = "lunar",
-  config = function()
-    require("lunar").setup({
-      -- Optional: specify path to lunar-lsp if not in PATH
-      -- lsp_binary = "/path/to/lunar-lsp",
-    })
-  end,
-}
-```
+## Configure
 
-#### Using packer.nvim
+The language server is enabled for `lunar` buffers with `vim.lsp.enable('lunar')`
+when the plugin loads. Its configuration is `lsp/lunar.lua` and can be extended
+like any other:
 
 ```lua
-use {
-  "/path/to/lunar/editors/nvim",
-  ft = "lunar",
-  config = function()
-    require("lunar").setup()
-  end,
-}
-```
-
-#### Using vim-plug
-
-```vim
-Plug '/path/to/lunar/editors/nvim'
-
-" In your init.lua or after/plugin:
-lua require("lunar").setup()
-```
-
-#### Manual Installation
-
-Copy or symlink the plugin to your Neovim config:
-
-```bash
-# Option 1: Symlink
-ln -s /path/to/lunar/editors/nvim ~/.config/nvim/pack/lunar/start/lunar
-
-# Option 2: Copy
-cp -r /path/to/lunar/editors/nvim ~/.config/nvim/pack/lunar/start/lunar
-```
-
-Then add to your `init.lua`:
-
-```lua
-require("lunar").setup()
-```
-
-## Configuration
-
-```lua
-require("lunar").setup({
-  -- Path to lunar-lsp binary (searches PATH if nil)
-  lsp_binary = nil,
-
-  -- Enable/disable features
-  diagnostics = true,
-  hover = true,
-  completion = true,
-  definition = true,
-
-  -- Auto-attach to lunar files
-  auto_attach = true,
+vim.lsp.config("lunar", {
+  cmd = { "/path/to/lunar", "lsp" }, -- if lunar is not on PATH
 })
 ```
 
-## Key Mappings
+Set `vim.g.lunar_lsp = false` before the plugin loads to enable it yourself
+(or not at all). The project root is the nearest folder with a
+`lunar.config.json`, or `.git`.
 
-The plugin sets up these buffer-local mappings when attached to a Lunar file:
+Without the tree-sitter parser, buffers fall back to the regex syntax in
+`syntax/lunar.lua`.
 
-| Key | Action |
-|-----|--------|
-| `K` | Show hover information |
-| `gd` | Go to definition |
-| `gD` | Go to declaration |
-| `gr` | Find references |
-| `gi` | Go to implementation |
-| `<leader>rn` | Rename symbol |
-| `<leader>ca` | Code actions |
-| `[d` | Previous diagnostic |
-| `]d` | Next diagnostic |
-| `<leader>e` | Show diagnostic float |
+## Test
 
-## Commands
-
-- `:LunarSetup` - Manually trigger LSP setup
-- `:LunarInfo` - Show LSP connection status
-
-## Usage with nvim-cmp
-
-If you use [nvim-cmp](https://github.com/hrsh7th/nvim-cmp) for completion, add the LSP source:
-
-```lua
-require("cmp").setup({
-  sources = {
-    { name = "nvim_lsp" },
-    -- ... other sources
-  },
-})
+```sh
+editors/nvim/test/run.sh   # headless: builds lunar and the parser, then checks
+                           # highlighting, attach, definition and diagnostics
 ```
-
-## Troubleshooting
-
-### LSP not starting
-
-1. Check if `lunar-lsp` is in your PATH:
-   ```bash
-   which lunar-lsp
-   ```
-
-2. Check Neovim LSP logs:
-   ```vim
-   :LspLog
-   ```
-
-3. Verify the plugin is loaded:
-   ```vim
-   :LunarInfo
-   ```
-
-### No diagnostics appearing
-
-1. Check if the file has a `.lunar` extension
-2. Check `:LspInfo` to see if the client is attached
-3. Try saving the file to trigger diagnostics
-
-## License
-
-Same license as the Lunar compiler.

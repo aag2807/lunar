@@ -1,9 +1,2 @@
--- Filetype detection for Lunar files
-vim.filetype.add({
-  extension = {
-    lunar = "lunar",
-  },
-  pattern = {
-    [".*%.d%.lunar"] = "lunar",
-  },
-})
+-- .lunar sources and .d.lunar declaration files.
+vim.filetype.add({ extension = { lunar = 'lunar' } })

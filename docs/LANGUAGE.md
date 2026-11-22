@@ -342,11 +342,22 @@ local label = `listening on ${port}`
 
 ## Spread and destructuring
 
+A spread copies a list's values, or a record's fields, into a table literal.
+Destructuring takes a call's several results by name, `local (a, b) = f()`
+(the same as Lua's `local a, b = f()`, which also works); there is no
+destructuring of a table's fields.
+
 ```lunar
 local base = { 1, 2, 3 }
 local more = { 0, ...base, 4 }
 local defaults = { retries = 3, timeout = 30 }
 local settings = { ...defaults, timeout = 60 }
+
+local function minmax(xs: number[]): (number, number)
+    return math.min(table.unpack(xs)), math.max(table.unpack(xs))
+end
+local (lo, hi) = minmax(base)
+print(#more, settings.timeout, lo, hi)
 ```
 
 ## Modules

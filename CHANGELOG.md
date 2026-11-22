@@ -109,6 +109,11 @@ their changelog described features that did not work.
   library's methods; `Pick`, `Omit` and `keyof` see inherited fields;
   `type T = typeof u` works for a local `u`.
 - A subclass inherits its parent's metamethods (`__tostring`, `__eq`, ...).
+- A subclass's field keeps the parent's type, a parent's `readonly` field
+  is set only by the parent, `table.insert` is checked against a typed
+  array, an assertion cannot turn one kind of value into another (`5 as
+  string`), and decorators apply to `local function` too. `_ENV` is
+  declared, and `ipairs`/`pairs` values are never nil.
 - Untyped Lua is checked as Lua: `and`/`or` have the type of the operand they
   return; empty locals, tables grown field by field, left-out untyped
   parameters, values adjusted to names, and `function M.f()` /
@@ -174,7 +179,13 @@ their changelog described features that did not work.
   Rename refuses to change what a name refers to. A workspace folder with
   no config checks each project in it, and loose files on their own; every
   workspace folder counts; files are watched; the shutdown and exit
-  lifecycle follows the protocol.
+  lifecycle follows the protocol, and a malformed message is skipped
+  rather than ending the server. Signature help ignores strings and
+  comments and knows `Class.new(`, generic calls and `s:sub(`; hover shows
+  `x?: T`, an instance's member types and setters' types; outline entries
+  span their declarations and list constructors; untitled buffers are
+  checked. The VS Code grammar treats Lunar's words as names where Lua
+  would, and highlights `goto`, labels and `<close>`.
 - A tree-sitter grammar (`editors/tree-sitter-lunar`), a Neovim plugin for
   `vim.lsp` and nvim-treesitter's main branch, a Zed extension, and an updated
   VS Code extension.

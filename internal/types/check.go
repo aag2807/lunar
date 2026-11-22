@@ -1604,11 +1604,11 @@ func (c *Checker) resolveClassIndexedAccess(classType *ClassType, indexType Type
 	// For string type, return union of all property types
 	if _, ok := indexType.(*StringType); ok {
 		var types []Type
-		for _, propType := range classType.Properties {
-			types = append(types, propType)
+		for _, name := range memberNames(classType.Properties) {
+			types = append(types, classType.Properties[name])
 		}
-		for _, methodType := range classType.Methods {
-			types = append(types, methodType)
+		for _, name := range memberNames(classType.Methods) {
+			types = append(types, classType.Methods[name])
 		}
 		if len(types) == 0 {
 			return Never
@@ -1658,11 +1658,11 @@ func (c *Checker) resolveInterfaceIndexedAccess(interfaceType *InterfaceType, in
 	// For string type, return union of all property types
 	if _, ok := indexType.(*StringType); ok {
 		var types []Type
-		for _, propType := range interfaceType.Properties {
-			types = append(types, propType)
+		for _, name := range memberNames(interfaceType.Properties) {
+			types = append(types, interfaceType.Properties[name])
 		}
-		for _, methodType := range interfaceType.Methods {
-			types = append(types, methodType)
+		for _, name := range memberNames(interfaceType.Methods) {
+			types = append(types, interfaceType.Methods[name])
 		}
 		if len(types) == 0 {
 			return Never
@@ -2014,19 +2014,19 @@ func (c *Checker) resolveKeyof(objectType Type) Type {
 	switch t := objectType.(type) {
 	case *ClassType:
 		// Extract property names from class
-		for propName := range t.Properties {
+		for _, propName := range memberNames(t.Properties) {
 			keys = append(keys, &StringLiteralType{Value: propName})
 		}
-		for methodName := range t.Methods {
+		for _, methodName := range memberNames(t.Methods) {
 			keys = append(keys, &StringLiteralType{Value: methodName})
 		}
 
 	case *InterfaceType:
 		// Extract property names from interface
-		for propName := range t.Properties {
+		for _, propName := range memberNames(t.Properties) {
 			keys = append(keys, &StringLiteralType{Value: propName})
 		}
-		for methodName := range t.Methods {
+		for _, methodName := range memberNames(t.Methods) {
 			keys = append(keys, &StringLiteralType{Value: methodName})
 		}
 
@@ -3906,6 +3906,17 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 	}
 	c.exprTypes[expr] = t
 	return t
+}
+
+// memberNames are a member map's names in order, so that types built from
+// them (keyof T, T[string]) print the same way on every run.
+func memberNames[V any](m map[string]V) []string {
+	names := make([]string, 0, len(m))
+	for name := range m {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // isNilNode reports whether a node is absent, including a nil pointer of a

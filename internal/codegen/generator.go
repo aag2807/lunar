@@ -1928,41 +1928,16 @@ func GenerateWithTarget(statements []ast.Statement, target string) string {
 	return generator.Generate(statements)
 }
 
-// GenerateWithOptions generates Lua code with configurable optimization
-func GenerateWithOptions(statements []ast.Statement, optimize bool) string {
-	return GenerateWithOptionsAndTarget(statements, optimize, "")
-}
-
-// GenerateWithOptionsAndTarget generates Lua code with configurable optimization and target
-func GenerateWithOptionsAndTarget(statements []ast.Statement, optimize bool, target string) string {
-	// Run optimizer if enabled
-	if optimize {
-		optimizer := NewOptimizer(true)
-		statements = optimizer.OptimizeStatements(statements)
-	}
-
-	generator := NewWithTarget(target)
-	return generator.Generate(statements)
-}
-
 // GenerateWithSourceMap generates Lua code and source map
-func GenerateWithSourceMap(statements []ast.Statement, sourceFile, generatedFile string, optimize bool) (string, *sourcemap.SourceMap) {
-	return GenerateWithSourceMapAndTarget(statements, sourceFile, generatedFile, optimize, "")
+func GenerateWithSourceMap(statements []ast.Statement, sourceFile, generatedFile string) (string, *sourcemap.SourceMap) {
+	return GenerateWithSourceMapAndTarget(statements, sourceFile, generatedFile, "")
 }
 
 // GenerateWithSourceMapAndTarget generates Lua code and source map for a specific target
-func GenerateWithSourceMapAndTarget(statements []ast.Statement, sourceFile, generatedFile string, optimize bool, target string) (string, *sourcemap.SourceMap) {
-	// Run optimizer if enabled
-	if optimize {
-		optimizer := NewOptimizer(true)
-		statements = optimizer.OptimizeStatements(statements)
-	}
-
+func GenerateWithSourceMapAndTarget(statements []ast.Statement, sourceFile, generatedFile string, target string) (string, *sourcemap.SourceMap) {
 	generator := NewWithSourceMapAndTarget(sourceFile, generatedFile, target)
 	code := generator.Generate(statements)
-	sourceMap := generator.GetSourceMap()
-
-	return code, sourceMap
+	return code, generator.GetSourceMap()
 }
 
 // needsParentheses determines if an expression needs parentheses

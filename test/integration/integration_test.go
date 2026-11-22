@@ -6,8 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"testing"
+
+	"lunar/internal/version"
 )
 
 // compilerBin is the compiler built once for the whole package by TestMain, so
@@ -37,6 +41,9 @@ func runIntegrationTests(m *testing.M) (int, error) {
 	projectRoot := filepath.Join(wd, "../..")
 
 	compilerBin = filepath.Join(tmpDir, "lunar")
+	if runtime.GOOS == "windows" {
+		compilerBin += ".exe"
+	}
 	build := exec.Command("go", "build", "-o", compilerBin, "./cmd/lunar")
 	build.Dir = projectRoot
 	if output, err := build.CombinedOutput(); err != nil {
@@ -176,4 +183,63 @@ local result: number = myVariabl + 1
 	}
 
 	t.Log("Error messages include helpful suggestions")
+}
+
+// TestVersionFlagPrintsSingleSourcedVersion checks `lunar --version` prints the
+// version from internal/version and nothing else on stdout.
+func TestVersionFlagPrintsSingleSourcedVersion(t *testing.T) {
+	cmd := exec.Command(compilerBin, "--version")
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("lunar --version failed: %v\nstderr: %s", err, stderr.String())
+	}
+	want := regexp.MustCompile(`^lunar ` + regexp.QuoteMeta(version.Version) + `( \([0-9a-f]{7,12}(-dirty)?\))?\n$`)
+	if !want.MatchString(stdout.String()) {
+		t.Fatalf("stdout = %q, want it to match %s", stdout.String(), want)
+	}
+}
+
+// TestInstalledLayoutFindsStdlib mirrors `make install`: the binary in
+// <prefix>/bin and the declarations in <prefix>/share/lunar/stdlib. Compiling
+// from an unrelated directory must still know about print.
+func TestInstalledLayoutFindsStdlib(t *testing.T) {
+	prefix := t.TempDir()
+	bin := filepath.Join(prefix, "bin", filepath.Base(compilerBin))
+	stdlibDir := filepath.Join(prefix, "share", "lunar", "stdlib")
+	for _, dir := range []string{filepath.Dir(bin), stdlibDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	copyFile(t, compilerBin, bin, 0o755)
+	decls, err := filepath.Glob(filepath.Join("..", "..", "stdlib", "*.d.lunar"))
+	if err != nil || len(decls) == 0 {
+		t.Fatalf("no stdlib declarations found: %v", err)
+	}
+	for _, d := range decls {
+		copyFile(t, d, filepath.Join(stdlibDir, filepath.Base(d)), 0o644)
+	}
+
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "hello.lunar"), []byte("print(\"hello\")\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bin, "hello.lunar")
+	cmd.Dir = work
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("installed lunar failed outside the repo: %v\n%s", err, out)
+	}
+}
+
+func copyFile(t *testing.T, from, to string, mode os.FileMode) {
+	t.Helper()
+	data, err := os.ReadFile(from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(to, data, mode); err != nil {
+		t.Fatal(err)
+	}
 }

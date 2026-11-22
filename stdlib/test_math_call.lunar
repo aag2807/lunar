@@ -1,8 +1,0 @@
--- Test math function call
-
-function test(): void
-	local sine: number = math.sin(1.5)
-	print("Sin called")
-end
-
-test()

@@ -1,0 +1,12 @@
+boss = false
+hp = 10
+name = "goblin"
+speed = 2.5
+stats = {
+  atk = 3
+  def = 1
+}
+tags = {
+  [1] = "melee"
+  [2] = "green"
+}

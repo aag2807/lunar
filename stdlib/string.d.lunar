@@ -8,10 +8,12 @@ declare interface StringLib
 	dump: function(f: any, strip?: boolean): string
 
 	-- String Searching
-	find: function(s: string, pattern: string, init?: number, plain?: boolean): number | nil
-	match: function(s: string, pattern: string, init?: number): string | nil
-	gmatch: function(s: string, pattern: string): function(): string
-	gsub: function(s: string, pattern: string, repl: string | function(match: string): string, n?: number): string
+	-- find and match give the captures too; gsub's replacement is a
+	-- string, a table or a function of the captures.
+	find: function(s: string, pattern: string, init?: number, plain?: boolean): any
+	match: function(s: string, pattern: string, init?: number): any
+	gmatch: function(s: string, pattern: string, init?: number): function(): any
+	gsub: function(s: string, pattern: string, repl: any, n?: number): (string, number)
 
 	-- String Manipulation
 	sub: function(s: string, i: number, j?: number): string
@@ -22,7 +24,7 @@ declare interface StringLib
 
 	-- String Formatting
 	format: function(formatstring: string, ...: any): string
-	byte: function(s: string, i?: number, j?: number): number
+	byte: function(s: string, i?: number, j?: number): any
 	char: function(...: number): string
 
 	-- String Length

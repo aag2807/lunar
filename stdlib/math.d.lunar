@@ -8,7 +8,7 @@ declare interface MathLib
 	tan: function(x: number): number
 	asin: function(x: number): number
 	acos: function(x: number): number
-	atan: function(x: number): number
+	atan: function(y: number, x?: number): number
 	atan2: function(y: number, x: number): number
 	sinh: function(x: number): number
 	cosh: function(x: number): number
@@ -25,11 +25,11 @@ declare interface MathLib
 	abs: function(x: number): number
 	floor: function(x: number): number
 	ceil: function(x: number): number
-	modf: function(x: number): number
+	modf: function(x: number): (number, number)
 
 	-- Random Numbers
 	random: function(m?: number, n?: number): number
-	randomseed: function(x: number): void
+	randomseed: function(x?: number, y?: number): any
 
 	-- Limits and Constants
 	min: function(...: number): number

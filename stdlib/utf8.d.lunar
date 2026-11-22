@@ -4,9 +4,10 @@
 declare interface Utf8Lib
     char: function(...codepoints: number): string
     charpattern: string
-    codes: function(s: string): any
-    codepoint: function(s: string, i?: number, j?: number): any
-    len: function(s: string, i?: number, j?: number): number
+    codes: function(s: string, lax?: boolean): any
+    codepoint: function(s: string, i?: number, j?: number, lax?: boolean): any
+    -- The length, or nil and the position of the first invalid byte.
+    len: function(s: string, i?: number, j?: number, lax?: boolean): any
     offset: function(s: string, n: number, i?: number): number
 end
 

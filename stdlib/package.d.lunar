@@ -1,29 +1,15 @@
--- Lua 5.3 and 5.4 Package/Module Library Type Declarations
--- This file provides type definitions for Lua's module loading and package management
+-- Lua 5.3 and 5.4 package library
+-- https://www.lua.org/manual/5.4/manual.html#6.3
 
--- Package module interface
 declare interface Package
-    -- The path used by require to search for Lua loaders
-    path: string
-
-    -- The path used by require to search for C loaders
-    cpath: string
-
-    -- A table of loaded modules
-    loaded: any
-
-    -- A table of preloaded modules
-    preload: any
-
-    -- A table of loader functions
-    loaders: any
-
-    -- Sets a metatable for module with __index pointing to global environment
-    seeall: function(module: any): void
+	config: string
+	cpath: string
+	loaded: any
+	loadlib: function(libname: string, funcname: string): any
+	path: string
+	preload: any
+	searchers: any
+	searchpath: function(name: string, path: string, sep?: string, rep?: string): any
 end
 
--- Global package table
 declare const package: Package
-
--- Creates a module (already declared in lua.d.lunar, keeping for reference)
--- declare function module(name: string, ...args: any): void end

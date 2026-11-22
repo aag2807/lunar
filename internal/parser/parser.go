@@ -525,9 +525,9 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 	// Save state for lookahead
 	savedState := p.SaveState()
 
-	// Quick checks for obvious arrow functions
-	if p.peekTokenIs(lexer.RPAREN) || p.peekTokenIs(lexer.ELLIPSIS) {
-		// () => or (...args) => pattern
+	// Quick checks for obvious arrow functions: () => and (...args) =>.
+	// (...) on its own is Lua's first vararg value.
+	if p.peekTokenIs(lexer.RPAREN) || p.peekTokenIs(lexer.ELLIPSIS) && p.looksLikeArrowFunction() {
 		return p.parseArrowFunction()
 	}
 
@@ -609,8 +609,16 @@ func (p *Parser) looksLikeArrowFunction() bool {
 	}
 
 	if p.peekTokenIs(lexer.ELLIPSIS) {
-		// (...args) pattern - rest parameter definitely arrow function
-		return true
+		// (...args) => is an arrow function; (...) alone is Lua's first
+		// vararg value, unless => (or a return type) follows.
+		state := p.SaveState()
+		defer p.RestoreState(state)
+		p.nextToken() // '...'
+		if !p.peekTokenIs(lexer.RPAREN) {
+			return true
+		}
+		p.nextToken() // ')'
+		return p.peekTokenIs(lexer.ARROW) || (p.peekTokenIs(lexer.COLON) && !p.isColonMethodCall())
 	}
 
 	// For other cases like (x: type) or (x, y) or (x) =>
@@ -819,6 +827,18 @@ func (p *Parser) isColonMethodCall() bool {
 	return p.peekTokenIs(lexer.LPAREN) || p.peekTokenIs(lexer.LBRACE) || p.peekTokenIs(lexer.STRING)
 }
 
+// peekStartsAnnotation says whether a ':' in peek position starts a type
+// annotation: `local x` then a `::label::` on the next line is a label.
+func (p *Parser) peekStartsAnnotation() bool {
+	if !p.peekTokenIs(lexer.COLON) {
+		return false
+	}
+	state := p.SaveState()
+	defer p.RestoreState(state)
+	p.nextToken() // curToken = ':'
+	return !p.peekTokenIs(lexer.COLON)
+}
+
 // isOptionalIndex reports whether a '?' in peek position starts an optional
 // index access (items?[1]).
 func (p *Parser) isOptionalIndex() bool {
@@ -899,6 +919,13 @@ func (p *Parser) peekPrecedence() int {
 		if p.isOptionalIndex() {
 			return CALL
 		}
+		return LOWEST
+	}
+
+	// `x as T` is on one line: a statement starting with a variable named
+	// as (`local y = 5` then `as = y`) is not an assertion on the line
+	// before.
+	if p.peekToken.Type == lexer.AS && p.peekToken.Line != p.curToken.EndLine {
 		return LOWEST
 	}
 
@@ -1086,6 +1113,19 @@ func (p *Parser) tryParseGenericType(baseExpr ast.Expression) ast.Expression {
 		return nil
 	}
 
+	// Type arguments in an expression are only for a call or a member:
+	// Box<number>(1), Pool<Enemy>.new(). `print(a < b, c > d)` compares.
+	if p.peekTokenIs(lexer.GT) {
+		after := p.SaveState()
+		p.nextToken() // '>'
+		called := p.peekTokenIs(lexer.LPAREN) || p.peekTokenIs(lexer.DOT)
+		p.RestoreState(after)
+		if !called {
+			p.RestoreState(startState)
+			return nil
+		}
+	}
+
 	// Handle >> as two > tokens for nested generics like Box<Box<T>>
 	if p.peekTokenIs(lexer.RIGHT_SHIFT) {
 		p.nextToken() // move to >>
@@ -1190,7 +1230,7 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 		decl.Names = append(decl.Names, p.parseIdentifierOrContextual())
 
 		// Parse type annotation if present
-		if p.peekTokenIs(lexer.COLON) {
+		if p.peekStartsAnnotation() {
 			p.nextToken() // consume identifier
 			p.nextToken() // consume :
 			decl.Types = append(decl.Types, p.parseType())
@@ -1211,7 +1251,7 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 			decl.Names = append(decl.Names, p.parseIdentifierOrContextual())
 
 			// Parse type annotation if present
-			if p.peekTokenIs(lexer.COLON) {
+			if p.peekStartsAnnotation() {
 				p.nextToken() // consume identifier
 				p.nextToken() // consume :
 				decl.Types = append(decl.Types, p.parseType())
@@ -1235,7 +1275,7 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 		decl.Attribs = append(decl.Attribs, p.parseAttrib())
 
 		// Parse type annotation if present
-		if p.peekTokenIs(lexer.COLON) {
+		if p.peekStartsAnnotation() {
 			p.nextToken() // consume :
 			p.nextToken() // move to type
 			decl.Types = append(decl.Types, p.parseType())
@@ -1255,7 +1295,7 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 			decl.Attribs = append(decl.Attribs, p.parseAttrib())
 
 			// Parse type annotation if present
-			if p.peekTokenIs(lexer.COLON) {
+			if p.peekStartsAnnotation() {
 				p.nextToken() // consume :
 				p.nextToken() // move to type
 				decl.Types = append(decl.Types, p.parseType())

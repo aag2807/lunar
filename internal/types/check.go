@@ -1430,19 +1430,32 @@ func (c *Checker) buildInterface(node *ast.InterfaceDeclaration, name string, sy
 
 	// Register methods
 	for _, method := range node.Methods {
+		// Optional and rest parameters count as they do for functions:
+		// seek(whence?: string, offset?: number) may be called with none.
 		params := make([]Type, len(method.Parameters))
+		optional := make([]bool, len(method.Parameters))
+		hasRest := false
 		for i, param := range method.Parameters {
 			params[i] = c.paramType(param)
+			if param.IsRest {
+				hasRest = true
+				if _, ok := params[i].(*ArrayType); !ok {
+					params[i] = &ArrayType{ElementType: params[i]}
+				}
+			}
+			optional[i] = paramIsOptional(param, params[i])
 		}
 		var returnType Type = Void
 		if method.ReturnType != nil {
 			returnType = c.resolveTypeExpression(method.ReturnType)
 		}
 		interfaceType.Methods[method.Name.Value] = &FunctionType{
-			Parameters:    params,
-			ReturnType:    returnType,
-			GenericParams: []string{}, // Interface methods are not separately generic
-			ParamNames:    parameterNames(method.Parameters),
+			Parameters:       params,
+			ReturnType:       returnType,
+			GenericParams:    []string{}, // Interface methods are not separately generic
+			ParamNames:       parameterNames(method.Parameters),
+			OptionalParams:   optional,
+			HasRestParameter: hasRest,
 		}
 		setMemberSym(&interfaceType.MemberSyms, method.Name.Value,
 			c.memberSym(method.Name.Token, SymMethod, interfaceType.Methods[method.Name.Value], interfaceType.Name))
@@ -5387,6 +5400,9 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 // checkPrefixExpression checks a prefix expression
 func (c *Checker) checkPrefixExpression(node *ast.PrefixExpression) Type {
 	rightType := c.checkExpression(node.Right)
+	if hasMetatable(rightType) && node.Operator != "not" {
+		return Any
+	}
 
 	switch node.Operator {
 	case "-":
@@ -5572,6 +5588,13 @@ func unionOf(types ...Type) Type {
 	return &UnionType{Types: members}
 }
 
+// hasMetatable says whether t is a table given a metatable, whose
+// operators and calls come from it.
+func hasMetatable(t Type) bool {
+	rec, ok := t.(*InterfaceType)
+	return ok && rec.Metatable
+}
+
 // checkInfixExpression checks an infix expression
 func (c *Checker) checkInfixExpression(node *ast.InfixExpression) Type {
 	switch node.Operator {
@@ -5582,6 +5605,9 @@ func (c *Checker) checkInfixExpression(node *ast.InfixExpression) Type {
 	}
 	leftType := c.checkExpression(node.Left)
 	rightType := c.checkExpression(node.Right)
+	if hasMetatable(leftType) || hasMetatable(rightType) {
+		return Any
+	}
 
 	switch node.Operator {
 	case "+", "-", "*", "/", "%", "^":
@@ -5634,6 +5660,17 @@ func (c *Checker) checkInfixExpression(node *ast.InfixExpression) Type {
 func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 	c.callee = node.Function
 	funcType := c.checkExpression(node.Function)
+
+	// setmetatable(Stack, mt) can give Stack __call, __add and the rest.
+	if ident, ok := node.Function.(*ast.Identifier); ok && ident.Value == "setmetatable" && len(node.Arguments) > 0 {
+		if arg, ok := node.Arguments[0].(*ast.Identifier); ok {
+			if t, found := c.env.Get(arg.Value); found {
+				if rec, ok := t.(*InterfaceType); ok && rec.Open {
+					rec.Metatable = true
+				}
+			}
+		}
+	}
 
 	// s.upper() is Lunar for s:upper(), but s.sub(s, 2, 3), the string
 	// passed as its own first argument, is plain Lua's string.sub(s, 2, 3)
@@ -5767,7 +5804,7 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 	// Check if it's a function type
 	fnType, ok := funcType.(*FunctionType)
 	if !ok {
-		if !funcType.Equals(Any) {
+		if !funcType.Equals(Any) && !hasMetatable(funcType) {
 			c.addError(
 				fmt.Sprintf("Cannot call type '%s'", funcType.String()),
 				node.Token,
@@ -6306,6 +6343,11 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		}
 		// Check methods
 		if methodType, ok := typ.GetMethod(propertyName); ok {
+			// A declared interface describes a Lua or engine table, whose
+			// functions are values like any other: io.stdout.write ~= nil.
+			if sym := typ.MemberSyms[propertyName]; sym != nil && strings.HasSuffix(sym.Decl.File, ".d.lunar") && !called && !node.IsMethodCall {
+				return resolved(ast.DispatchSelf, methodType)
+			}
 			return method(typ.String(), methodType)
 		}
 		// A string index signature covers every other name.

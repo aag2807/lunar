@@ -1,50 +1,25 @@
--- Lua 5.3 and 5.4 Debug Library Type Declarations
--- This file provides type definitions for Lua's debug/introspection functions
+-- Lua 5.3 and 5.4 debug library
+-- https://www.lua.org/manual/5.4/manual.html#6.10
+-- Most functions take an optional thread first, so their arguments are
+-- declared as a list.
 
--- Debug module interface
 declare interface Debug
-    -- Enters interactive mode
-    debug: function(): void
-
-    -- Returns the environment of object o
-    getfenv: function(o: any): any
-
-    -- Returns the current hook settings
-    gethook: function(): any
-
-    -- Returns a table with information about a function
-    getinfo: function(f: any, what: string): any
-
-    -- Returns the name and value of a local variable
-    getlocal: function(level: number, local_index: number): any
-
-    -- Returns the metatable of the given object
-    getmetatable: function(object: any): any
-
-    -- Returns the registry table
-    getregistry: function(): any
-
-    -- Returns the name and value of an upvalue
-    getupvalue: function(func: any, up: number): any
-
-    -- Sets the environment of the given object
-    setfenv: function(object: any, env: any): any
-
-    -- Sets the given function as a hook
-    sethook: function(hook: any, mask: string, count: number): void
-
-    -- Assigns a value to a local variable
-    setlocal: function(level: number, local_index: number, value: any): string
-
-    -- Sets the metatable for the given object
-    setmetatable: function(object: any, meta: any): any
-
-    -- Assigns a value to an upvalue
-    setupvalue: function(func: any, up: number, value: any): string
-
-    -- Returns a string with a traceback of the call stack
-    traceback: function(...args: any): string
+	debug: function(): void
+	gethook: function(thread?: any): any
+	getinfo: function(...args: any): any
+	getlocal: function(...args: any): any
+	getmetatable: function(value: any): any
+	getregistry: function(): any
+	getupvalue: function(f: any, up: number): any
+	getuservalue: function(u: any, n?: number): any
+	sethook: function(...args: any): void
+	setlocal: function(...args: any): any
+	setmetatable: function(value: any, meta: any): any
+	setupvalue: function(f: any, up: number, value: any): any
+	setuservalue: function(udata: any, value: any, n?: number): any
+	traceback: function(...args: any): any
+	upvalueid: function(f: any, n: number): any
+	upvaluejoin: function(f1: any, n1: number, f2: any, n2: number): void
 end
 
--- Global debug table
 declare const debug: Debug

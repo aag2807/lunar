@@ -1,38 +1,35 @@
--- Lua 5.3 and 5.4 I/O Library
--- Type declarations for file and I/O operations
+-- Lua 5.3 and 5.4 I/O library
+-- https://www.lua.org/manual/5.4/manual.html#6.8
 
+-- A file handle. Its functions are methods, called with ':' (f:read("l"),
+-- io.stdout:write("x")). Functions that can fail return nil and a message
+-- (their results are 'any' where that matters).
 declare interface File
-	read: function(format?: string): string | nil
-	write: function(...: string | number): any
-	close: function(): void
-	flush: function(): void
-	seek: function(whence?: string, offset?: number): number
-	setvbuf: function(mode: string, size?: number): void
-	lines: function(): function(): string
+	close(): any
+	flush(): any
+	lines(...formats: string | number): function(): any
+	read(...formats: string | number): any
+	seek(whence?: string, offset?: number): any
+	setvbuf(mode: string, size?: number): any
+	write(...values: string | number): any
 end
 
 declare interface IOLib
-	-- File Operations
-	open: function(filename: string, mode?: string): File | nil
-	close: function(file?: File): void
-	flush: function(): void
-	lines: function(filename?: string): function(): string
-	read: function(...: string): string
-	write: function(...: string | number): any
-
-	-- File Handles
+	close: function(file?: File): any
+	flush: function(): any
 	input: function(file?: File | string): File
+	lines: function(filename?: string, ...formats: string | number): function(): any
+	open: function(filename: string, mode?: string): File | nil
 	output: function(file?: File | string): File
 	popen: function(prog: string, mode?: string): File | nil
+	read: function(...formats: string | number): any
 	tmpfile: function(): File
+	type: function(obj: any): string | nil
+	write: function(...values: string | number): any
 
-	-- Standard Streams
 	stdin: File
 	stdout: File
 	stderr: File
-
-	-- File Types
-	type: function(obj: any): string | nil
 end
 
 declare const io: IOLib

@@ -30,7 +30,7 @@ declare function rawget(t: any, key: any): any end
 declare function rawset(t: any, key: any, value: any): any end
 declare function rawequal(v1: any, v2: any): boolean end
 declare function rawlen(v: any): number
-declare function collectgarbage(opt?: string, arg?: any): any
+declare function collectgarbage(opt?: string, ...args: any): any
 
 -- Collection Operations
 declare function select(index: any, ...args: any): any end

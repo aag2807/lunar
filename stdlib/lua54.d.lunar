@@ -2,6 +2,10 @@
 
 declare function warn(...messages: string): void
 
+declare interface Debug
+    setcstacklimit: function(limit: number): number
+end
+
 declare interface Coroutine
     -- Closes a coroutine and its pending to-be-closed variables
     close: function(co: any): (boolean, any)

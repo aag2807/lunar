@@ -1151,7 +1151,10 @@ type InterfaceType struct {
 	// Open is set for the type of an unannotated table literal: like a Lua
 	// table, it gains a field when one is assigned, and a field it lacks
 	// reads as any. Interfaces that are written down stay closed.
-	Open           bool
+	Open bool
+	// Metatable is set on an open table passed to setmetatable: what its
+	// metatable gives (calls, operators) is not known, so it is allowed.
+	Metatable      bool
 	Extends        []*InterfaceType
 	IndexSignature *IndexSignature // [key: KeyType]: ValueType
 	ReadonlyProps  map[string]bool // Track readonly properties (for as const)

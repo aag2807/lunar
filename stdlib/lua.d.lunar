@@ -37,4 +37,6 @@ declare function select(index: any, ...args: any): any end
 
 -- Global Environment
 declare const _G: any
+-- The environment globals are looked up in (Lua 5.2+); a chunk may replace it.
+declare local _ENV: any
 declare const _VERSION: string

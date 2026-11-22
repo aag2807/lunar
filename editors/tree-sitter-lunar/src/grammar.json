@@ -1501,6 +1501,10 @@
             {
               "type": "SYMBOL",
               "name": "class_declaration"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "variable_declaration"
             }
           ]
         }

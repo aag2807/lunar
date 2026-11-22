@@ -1,0 +1,9 @@
+-- A decorator on a local function wraps the local.
+local function twice(f)
+    return function(x) return f(f(x)) end
+end
+@twice
+local function inc(x)
+    return x + 1
+end
+assert(inc(1) == 3)

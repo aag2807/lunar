@@ -1,0 +1,25 @@
+-- A subclass's field keeps the parent's type, and a parent's readonly
+-- field is set in the parent's constructor only.
+class A
+    x: number = 1
+    readonly id: number = 1
+end
+class B extends A
+    -- error: 'x' is 'string' here but 'number' in 'A'
+    x: string = "s"
+    constructor()
+        super()
+        -- error: Cannot assign to readonly property 'id'
+        self.id = 2
+    end
+end
+interface P
+    x: number
+end
+local ps: P[] = {}
+-- error: Field 'x' of 'P' must be 'number'
+table.insert(ps, { x = "q" })
+local ns: number[] = {}
+-- error: Cannot insert type '"a"' into 'number[]'
+table.insert(ns, 1, "a")
+table.insert(ns, 2)

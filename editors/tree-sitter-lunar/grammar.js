@@ -251,7 +251,8 @@ module.exports = grammar({
       seq('@', field('name', $._identifier_like), optional(field('arguments', $.arguments))),
 
     decorated_declaration: ($) =>
-      seq(repeat1($.decorator), choice($.function_declaration, $.class_declaration)),
+      // (a decorated local is a local function; the compiler refuses others)
+      seq(repeat1($.decorator), choice($.function_declaration, $.class_declaration, $.variable_declaration)),
 
     class_declaration: ($) =>
       seq(

@@ -1234,6 +1234,10 @@
         {
           "type": "function_declaration",
           "named": true
+        },
+        {
+          "type": "variable_declaration",
+          "named": true
         }
       ]
     }

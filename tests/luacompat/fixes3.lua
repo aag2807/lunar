@@ -33,3 +33,10 @@ local r29 = { class = (flag and 16 or 7), name = (flag and "a" or "b") }
 r29.class = 19
 r29.name = "c"
 print(r29.class, r29.name)
+print(_ENV.print ~= nil)
+local function sandbox()
+    local _ENV = { print = print }
+    print("in sandbox")
+end
+sandbox()
+for _, v in ipairs({ 1, nil, 4 }) do print(v + 1) end

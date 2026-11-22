@@ -4359,11 +4359,13 @@ func (c *Checker) iterationTypes(iterator ast.Expression, iterType Type) (Type, 
 		}
 	}
 
+	// ipairs stops at the first nil and pairs skips nils, so the value
+	// is never nil inside the loop ({1, nil, 4} is (number | nil)[]).
 	switch typ := collection.(type) {
 	case *ArrayType:
-		return Number, typ.ElementType
+		return Number, WithoutNil(typ.ElementType)
 	case *TableType:
-		return typ.KeyType, typ.ValueType
+		return typ.KeyType, WithoutNil(typ.ValueType)
 	}
 
 	return Any, Any
@@ -4581,8 +4583,11 @@ func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target as
 					allowAssignment := false
 					if c.inConstructor && c.currentClass != nil {
 						// Check if we're assigning to self
+						// ...to a field of this class itself: a parent's readonly
+						// field is set by the parent's constructor.
 						if leftIdent, ok := dotExpr.Left.(*ast.Identifier); ok {
-							if leftIdent.Value == "self" && c.currentClass == classType {
+							_, own := classType.Properties[propName]
+							if leftIdent.Value == "self" && c.currentClass == classType && own && classType.ReadonlyProps[propName] {
 								allowAssignment = true
 							}
 						}
@@ -4712,6 +4717,20 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 	// The names after extends and implements are uses of those types.
 	if node.Extends != nil {
 		c.referenceTypeName(node.Extends)
+	}
+	// A field a subclass declares again keeps the parent's type: code
+	// written for the parent reads it.
+	if classType.Parent != nil {
+		for _, prop := range node.Properties {
+			if prop.Name == nil {
+				continue
+			}
+			own, okOwn := classType.Properties[prop.Name.Value]
+			inherited, okParent := classType.Parent.GetProperty(prop.Name.Value)
+			if okOwn && okParent && !own.IsAssignableTo(inherited) {
+				c.addError(fmt.Sprintf("'%s' is '%s' here but '%s' in '%s', which '%s' extends", prop.Name.Value, own.String(), inherited.String(), classType.Parent.Name, classType.Name), prop.Name.Token)
+			}
+		}
 	}
 	for _, impl := range node.Implements {
 		c.referenceTypeName(impl)
@@ -6176,6 +6195,8 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 		return &OptionalType{BaseType: c.checkCallWithType(node, funcType)}
 	}
 
+	defer c.checkTableInsert(node)
+
 	// e?.hit(1): the method of an optional receiver is called when the
 	// receiver is there, and the call yields nil otherwise.
 	if opt, ok := funcType.(*OptionalType); ok && inOptionalChain(node.Function) {
@@ -6184,6 +6205,30 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 		}
 	}
 	return c.checkCallWithType(node, funcType)
+}
+
+// checkTableInsert holds table.insert(list, value) and
+// table.insert(list, pos, value) to the list's element type, which the
+// library's declaration (any) cannot say.
+func (c *Checker) checkTableInsert(node *ast.CallExpression) {
+	dot, ok := node.Function.(*ast.DotExpression)
+	if !ok || exprText(dot) != "table.insert" || len(node.Arguments) < 2 || len(node.Arguments) > 3 {
+		return
+	}
+	if lib, ok := dot.Left.(*ast.Identifier); !ok || c.env.lookupSym(lib.Value) != nil && !strings.HasSuffix(c.env.lookupSym(lib.Value).Decl.File, ".d.lunar") {
+		return // a table of the script's own
+	}
+	arr, ok := c.typeOf(node.Arguments[0]).(*ArrayType)
+	if !ok || arr.EmptyLiteral {
+		return
+	}
+	value := node.Arguments[len(node.Arguments)-1]
+	if c.reportLiteralFields(value, arr.ElementType) {
+		return
+	}
+	if vt := c.typeOf(value); !vt.IsAssignableTo(arr.ElementType) {
+		c.addError(fmt.Sprintf("Cannot insert type '%s' into '%s'", vt.String(), arr.String()), node.Token)
+	}
 }
 
 // inOptionalChain says whether a member chain has a ?. or ?[ link.

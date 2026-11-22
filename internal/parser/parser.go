@@ -4273,6 +4273,19 @@ func (p *Parser) parseDecoratedStatement() ast.Statement {
 			fn.Decorators = decorators
 		}
 		return fn
+	case lexer.LOCAL:
+		// @deco local function f(): f = deco(f) assigns the local.
+		if p.peekTokenIs(lexer.FUNCTION) {
+			p.nextToken()
+			fn := p.parseFunctionDeclaration()
+			if fn != nil {
+				fn.IsLocal = true
+				fn.Decorators = decorators
+			}
+			return fn
+		}
+		p.addError("decorators apply to functions and classes; a local variable cannot have one", p.curToken)
+		return nil
 	default:
 		p.addError(fmt.Sprintf("decorators can only be applied to classes and functions, got %s", p.curToken.Type), p.curToken)
 		return nil

@@ -17,6 +17,12 @@ func (s *Server) occurrenceAt(uri string, pos Position) (types.Occurrence, bool)
 	offset := s.offsetAt(path, pos)
 	if m := s.modules[path]; m != nil {
 		if occ, ok := m.Index.At(path, offset); ok {
+			// While the file does not parse its index is from an older text:
+			// an answer stands only if that token is still where it was
+			// (typing further down), not when text before it moved.
+			if s.broken[path] && !s.tokenStillThere(path, occ.Tok) {
+				return types.Occurrence{}, false
+			}
 			return occ, true
 		}
 	}
@@ -355,4 +361,17 @@ func (s *Server) relName(path string) string {
 		}
 	}
 	return filepath.Base(path)
+}
+
+// tokenStillThere says whether the open text of path still has tok's
+// literal at tok's offset.
+func (s *Server) tokenStillThere(path string, tok lexer.Token) bool {
+	text, open := s.docs[path]
+	if !open {
+		return true
+	}
+	if tok.Offset < 0 || tok.End > len(text) || tok.Offset >= tok.End {
+		return false
+	}
+	return text[tok.Offset:tok.End] == tok.Literal
 }

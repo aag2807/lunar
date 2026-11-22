@@ -111,3 +111,41 @@ func TestUnfinishedStatementsNeitherPanicNorHang(t *testing.T) {
 		}
 	}
 }
+
+// A declaration file being typed passes through the same half-written
+// states; checking it must not panic either.
+func TestHalfWrittenDeclarationsNeitherPanicNorHang(t *testing.T) {
+	for _, decl := range []string{
+		"declare const", "declare local", "declare interface", "declare enum", "declare type",
+		"declare function", "declare class", "declare namespace", "declare const x:", "declare type T =",
+		"declare interface I\n    x:", "declare class C\n    get", "declare enum E\n    A =",
+	} {
+		dir := t.TempDir()
+		api := filepath.Join(dir, "api.d.lunar")
+		os.WriteFile(api, []byte(decl+"\n"), 0o644)
+		main := filepath.Join(dir, "main.lunar")
+		done := make(chan error, 1)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					done <- fmt.Errorf("panic: %v\n%s", r, lunarFrames(debug.Stack()))
+				}
+			}()
+			p, diags := Open(Options{Dir: dir, Files: []string{main}, Overlay: map[string]string{main: "print(1)\n"}})
+			if diags.HasErrors() {
+				done <- fmt.Errorf("open: %s", diags[0].Message)
+				return
+			}
+			p.Check()
+			done <- nil
+		}()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("%q: %v", decl, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Errorf("%q: hang", decl)
+		}
+	}
+}

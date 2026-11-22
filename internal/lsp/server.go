@@ -409,6 +409,7 @@ func (s *Server) analyze() {
 
 	var diags diag.List
 	covered := map[string]bool{}
+	fresh := map[string]*project.Module{}
 	analyse := func(r run, owns func(path string) bool) {
 		p, openDiags := project.Open(r.opts)
 		if openDiags.HasErrors() {
@@ -437,9 +438,12 @@ func (s *Server) analyze() {
 			covered[m.Path] = true
 			if m.Broken {
 				s.broken[m.Path] = true
-			} else if m.Index != nil {
 				// A module that does not parse keeps its last good index.
-				s.modules[m.Path] = m
+				if old := s.modules[m.Path]; old != nil {
+					fresh[m.Path] = old
+				}
+			} else if m.Index != nil {
+				fresh[m.Path] = m
 			}
 		}
 		for _, d := range checkDiags {
@@ -476,6 +480,9 @@ func (s *Server) analyze() {
 		analyse(run{"", project.Options{Dir: dir, Files: files, Overlay: overlay}}, func(path string) bool { return own[path] })
 	}
 
+	// Only the modules some project still has: a deleted or moved file
+	// leaves the index (rename used to edit it, recreating it).
+	s.modules = fresh
 	s.publish(diags)
 }
 

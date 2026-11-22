@@ -1,0 +1,4 @@
+-- Non-ASCII text in a template stays as written.
+local x = 1
+local s = `é🎮 ${x} ñ`
+assert(s == "é🎮 1 ñ")

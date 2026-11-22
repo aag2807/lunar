@@ -337,15 +337,15 @@ func (p *Parser) parseTemplateLiteral() ast.Expression {
 
 	// Parse the template string and extract parts and expressions
 	raw := token.Literal
-	var currentPart string
+	var currentPart strings.Builder
 	i := 0
 
 	for i < len(raw) {
 		// Look for ${ pattern
 		if i < len(raw)-1 && raw[i] == '$' && raw[i+1] == '{' {
 			// Add the current part
-			template.Parts = append(template.Parts, currentPart)
-			currentPart = ""
+			template.Parts = append(template.Parts, currentPart.String())
+			currentPart.Reset()
 
 			// Find the matching }
 			i += 2 // skip ${
@@ -363,11 +363,22 @@ func (p *Parser) parseTemplateLiteral() ast.Expression {
 				}
 			}
 
-			// Parse the expression
+			// Parse the expression, then place its tokens where it is in
+			// the file (it was lexed on its own, from line 1 of no file),
+			// so errors, hover and rename point inside the template.
 			exprStr := raw[exprStart:i]
-			exprLexer := lexer.New(exprStr)
+			exprLexer := lexer.NewFile(token.File, exprStr)
 			exprParser := New(exprLexer)
 			expr := exprParser.parseExpression(LOWEST)
+			line, col := token.Line, token.Column+1 // just past the backtick
+			for _, ch := range []byte(raw[:exprStart]) {
+				if ch == '\n' {
+					line, col = line+1, 1
+				} else {
+					col++
+				}
+			}
+			placeTokens(reflect.ValueOf(expr), token.Offset+1+exprStart, line, col)
 
 			if len(exprParser.Errors()) > 0 {
 				for _, err := range exprParser.Errors() {
@@ -379,15 +390,69 @@ func (p *Parser) parseTemplateLiteral() ast.Expression {
 			template.Expressions = append(template.Expressions, expr)
 			i++ // skip the closing }
 		} else {
-			currentPart += string(raw[i])
+			// Bytes, not characters: string(raw[i]) turned each byte of a
+			// UTF-8 character into a character of its own.
+			currentPart.WriteByte(raw[i])
 			i++
 		}
 	}
 
 	// Add the final part
-	template.Parts = append(template.Parts, currentPart)
+	template.Parts = append(template.Parts, currentPart.String())
 
 	return template
+}
+
+// placeTokens moves every token in a node parsed from part of a line (a
+// template's ${...}) to where that part is: offset, line and column of its
+// first character.
+func placeTokens(v reflect.Value, offset, line, col int) {
+	placeTokensOnce(v, offset, line, col, map[uintptr]bool{})
+}
+
+// placeTokensOnce visits each node once: a table's fields are reached both
+// through its pairs and its entries.
+func placeTokensOnce(v reflect.Value, offset, line, col int, seen map[uintptr]bool) {
+	switch v.Kind() {
+	case reflect.Interface:
+		if !v.IsNil() {
+			placeTokensOnce(v.Elem(), offset, line, col, seen)
+		}
+	case reflect.Ptr:
+		if v.IsNil() || seen[v.Pointer()] {
+			return
+		}
+		seen[v.Pointer()] = true
+		placeTokensOnce(v.Elem(), offset, line, col, seen)
+	case reflect.Struct:
+		if tok, ok := v.Addr().Interface().(*lexer.Token); ok {
+			if tok.Line == 1 {
+				tok.Column += col - 1
+			}
+			if tok.EndLine == 1 {
+				tok.EndColumn += col - 1
+			}
+			tok.Line += line - 1
+			tok.EndLine += line - 1
+			tok.Offset += offset
+			tok.End += offset
+			return
+		}
+		for i := 0; i < v.NumField(); i++ {
+			if v.Type().Field(i).IsExported() {
+				placeTokensOnce(v.Field(i), offset, line, col, seen)
+			}
+		}
+	case reflect.Slice:
+		for i := 0; i < v.Len(); i++ {
+			placeTokensOnce(v.Index(i), offset, line, col, seen)
+		}
+	case reflect.Map:
+		for _, k := range v.MapKeys() {
+			placeTokensOnce(k, offset, line, col, seen)
+			placeTokensOnce(v.MapIndex(k), offset, line, col, seen)
+		}
+	}
 }
 
 func (p *Parser) parseBooleanLiteral() ast.Expression {
@@ -3887,6 +3952,10 @@ func (p *Parser) parseDeclareStatement() *ast.DeclareStatement {
 		return nil
 	}
 
+	// A declaration that did not parse leaves nothing to declare.
+	if isNilNode(declareStmt.Declaration) {
+		return nil
+	}
 	return declareStmt
 }
 

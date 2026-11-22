@@ -7110,6 +7110,9 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 		return
 	}
 
+	if isNilNode(node.Declaration) {
+		return
+	}
 	// For ambient declarations, we only register types, not check implementations
 	switch decl := node.Declaration.(type) {
 	case *ast.VariableDeclaration:

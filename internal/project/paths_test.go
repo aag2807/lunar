@@ -144,3 +144,67 @@ func TestConcurrentBuildsKeepEveryOutput(t *testing.T) {
 		}
 	}
 }
+
+// An outDir that holds rootDir would put outputs among the scripts:
+// src/src/util.lunar overwrote the hand-written src/util.lua.
+func TestOutDirHoldingRootDirIsRefused(t *testing.T) {
+	root := tree(t, map[string]string{
+		"lunar.config.json": `{"rootDir": "src", "outDir": "."}`,
+		"src/main.lunar":    "print(1)\n",
+	})
+	_, diags := Open(Options{Dir: root})
+	if !diags.HasErrors() || !strings.Contains(diags[0].Message, "outDir") {
+		t.Errorf("diagnostics: %v", messagesOf(diags))
+	}
+}
+
+// Two modules Lua finds under one require name: a.lua and a/init.lua.
+func TestTwoModulesWithOneRequireName(t *testing.T) {
+	root := tree(t, map[string]string{
+		"lunar.config.json": `{"outDir": "../build"}`,
+		"a.lunar":           "export const WHO = \"a\"\n",
+		"a/init.lunar":      "export const WHO = \"init\"\n",
+		"main.lunar":        "import { WHO } from \"./a/init\"\nprint(WHO)\n",
+	})
+	_, diags := open(t, Options{Dir: root}).Check()
+	if !diags.HasErrors() || !strings.Contains(messagesOf(diags)[0], `require("a")`) {
+		t.Errorf("diagnostics: %v", messagesOf(diags))
+	}
+}
+
+// A config saved with a byte-order mark (Windows Notepad) is read.
+func TestConfigWithByteOrderMark(t *testing.T) {
+	root := tree(t, map[string]string{
+		"lunar.config.json": "\xef\xbb\xbf{\"outDir\": \"../build\"}",
+		"main.lunar":        "print(1)\n",
+	})
+	build(t, root)
+}
+
+// lunar build with no config anywhere fails at once, instead of
+// compiling the whole working folder (from / it read /etc).
+func TestBuildNeedsAConfig(t *testing.T) {
+	root := tree(t, map[string]string{"main.lunar": "print(1)\n"})
+	_, diags := Open(Options{Dir: root, RequireConfig: true})
+	if !diags.HasErrors() || diags[0].Code != "config" || !strings.Contains(diags[0].Message, ConfigName) {
+		t.Errorf("diagnostics: %v", messagesOf(diags))
+	}
+}
+
+// A folder that cannot be read is an I/O failure (exit 3), not a config
+// mistake (exit 2).
+func TestUnreadableFolderIsAnIOError(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("needs file permissions")
+	}
+	root := tree(t, map[string]string{
+		"lunar.config.json": `{"outDir": "../build"}`,
+		"locked/a.lunar":    "print(1)\n",
+	})
+	os.Chmod(filepath.Join(root, "locked"), 0)
+	defer os.Chmod(filepath.Join(root, "locked"), 0o755)
+	_, diags := Open(Options{Dir: root})
+	if !diags.HasErrors() || diags[0].Code != "io" {
+		t.Errorf("diagnostics: %+v", diags)
+	}
+}

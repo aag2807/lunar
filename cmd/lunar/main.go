@@ -141,7 +141,15 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 		if len(positional) > 0 {
 			return rep.usage("lunar build takes no file arguments; it compiles the whole project")
 		}
+		// A flag of the other mode was silently ignored: lunar build
+		// --config built the project found upward instead.
+		for _, f := range []string{"o", "config"} {
+			if flagSet(flags, f) {
+				return rep.usage(fmt.Sprintf("-%s is for compiling one file; lunar build takes --project and --out", f))
+			}
+		}
 		opts.ConfigPath, opts.OutDir = *projectFile, *outDir
+		opts.RequireConfig = true
 		once = func() int { return rep.build(opts) }
 	} else {
 		if len(positional) < 1 {
@@ -151,6 +159,11 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 			return rep.usage(fmt.Sprintf("one input file at a time (got %s); use lunar build for a project", strings.Join(positional, ", ")))
 		}
 		input := positional[0]
+		for _, f := range []string{"out", "project"} {
+			if flagSet(flags, f) {
+				return rep.usage(fmt.Sprintf("--%s is for lunar build; one file takes -o and --config", f))
+			}
+		}
 		if _, err := os.Stat(input); err != nil {
 			return rep.usage(fmt.Sprintf("input file '%s' does not exist", input))
 		}
@@ -162,6 +175,14 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 		if inInfo, err := os.Stat(input); err == nil {
 			if outInfo, err := os.Stat(output); err == nil && os.SameFile(inInfo, outInfo) {
 				return rep.usage(fmt.Sprintf("-o %s is the input file itself; the Lua would overwrite the source", output))
+			}
+		}
+		// The Lua and the JSON would mix on stdout.
+		if rep.json {
+			if outInfo, err := os.Stat(output); err == nil {
+				if stdoutInfo, err := os.Stdout.Stat(); err == nil && os.SameFile(outInfo, stdoutInfo) {
+					return rep.usage("-o names stdout, where --json writes its diagnostics; write the Lua to a file")
+				}
 			}
 		}
 		opts.ConfigPath, opts.Files = *configFile, []string{input}
@@ -249,7 +270,7 @@ func (r *reporter) compileFile(opts project.Options, input, output string) int {
 		// When the Lua itself went to a device or pipe (-o /dev/stdout),
 		// the message goes to stderr so it does not mix with it.
 		msg := r.stdout
-		if info, err := os.Stat(output); err == nil && !info.Mode().IsRegular() {
+		if info, err := os.Stat(output); err == nil && !info.Mode().IsRegular() || isStdout(output) {
 			msg = r.stderr
 		}
 		fmt.Fprintf(msg, "Successfully compiled %s -> %s\n", input, output)
@@ -262,15 +283,43 @@ func (r *reporter) compileFile(opts project.Options, input, output string) int {
 
 // writeSingle writes a one-file build's Lua (and map) to output, staging it
 // next to the target and renaming it over, so a reader never sees half.
+// isStdout says whether path names this process's standard output, as
+// -o /dev/stdout does, a terminal, pipe or file alike.
+func isStdout(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	out, err := os.Stdout.Stat()
+	return err == nil && os.SameFile(info, out)
+}
+
 func writeSingle(outs []project.Output, output string) error {
-	// A device or a pipe (/dev/null, /dev/stdout) is written to directly:
-	// there is no file to stage a replacement next to, and no source map.
-	if info, err := os.Stat(output); err == nil && !info.Mode().IsRegular() && !info.IsDir() {
+	// Standard output itself: written through it, so nothing printed
+	// after (or before) lands on top of the Lua.
+	if isStdout(output) {
+		for _, o := range outs {
+			if strings.HasSuffix(o.Rel, ".lua") {
+				if _, err := os.Stdout.Write(o.Content); err != nil {
+					return fmt.Errorf("writing %s: %w", output, err)
+				}
+			}
+		}
+		return nil
+	}
+	// A device or a pipe (/dev/null, /dev/stdout), or a link to one, is
+	// written to directly: there is no file to stage a replacement next
+	// to (/dev/stdout redirected to a file is a link in /dev), and no
+	// source map.
+	info, err := os.Stat(output)
+	link, lerr := os.Lstat(output)
+	isLink := lerr == nil && link.Mode()&os.ModeSymlink != 0 && err == nil && !info.IsDir()
+	if err == nil && (!info.Mode().IsRegular() && !info.IsDir() || isLink && strings.HasPrefix(filepath.ToSlash(output), "/dev/")) {
 		for _, o := range outs {
 			if !strings.HasSuffix(o.Rel, ".lua") {
 				continue
 			}
-			f, err := os.OpenFile(output, os.O_WRONLY, 0)
+			f, err := os.OpenFile(output, os.O_WRONLY|os.O_TRUNC, 0)
 			if err != nil {
 				return fmt.Errorf("writing %s: %w", output, err)
 			}
@@ -483,6 +532,10 @@ func snapshot(opts project.Options) string {
 		return "config error: " + diags[0].Message
 	}
 	files := append(append(append([]string{}, p.Sources...), p.LuaFiles...), p.DeclFiles...)
+	// A config edit (target, sourceMap, dataFiles) rebuilds too.
+	if cfg := p.ConfigFile(); cfg != "" {
+		files = append(files, cfg)
+	}
 	// Modules reached only through imports are not in Sources; watching the
 	// whole root covers them.
 	filepath.WalkDir(p.Root, func(path string, d os.DirEntry, err error) error {

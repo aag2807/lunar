@@ -63,6 +63,10 @@ type Program struct {
 	contextKey string
 	declDiags  diag.List
 	byPath     map[string]*Module
+	// declStatements are the declaration files, parsed once: every
+	// module's checker reads them (it writes only into expressions, which
+	// declarations do not have, and the same values each time).
+	declStatements []ast.Statement
 }
 
 // Check parses and checks the declarations and every module, following
@@ -102,10 +106,10 @@ func (p *Project) CheckReusing(prev *Program) (*Program, diag.List) {
 
 	var declDiags diag.List
 	var declIndex *types.Index
+	var declStatements []ast.Statement
 	if prev != nil {
-		declDiags, declIndex = prev.declDiags, prev.DeclIndex
+		declDiags, declIndex, declStatements = prev.declDiags, prev.DeclIndex, prev.declStatements
 	} else {
-		var declStatements []ast.Statement
 		for i, path := range p.DeclFiles {
 			statements, parseDiags := parseSource(path, declSources[i])
 			declDiags = append(declDiags, parseDiags...)
@@ -120,6 +124,7 @@ func (p *Project) CheckReusing(prev *Program) (*Program, diag.List) {
 
 	// Load every module reachable from the sources.
 	byPath := map[string]*Module{}
+	byName := map[string]*Module{}
 	var order []*Module
 	var load func(path string, emit bool) *Module
 	load = func(path string, emit bool) *Module {
@@ -156,6 +161,14 @@ func (p *Project) CheckReusing(prev *Program) (*Program, diag.List) {
 		if nameErr != nil {
 			diags = append(diags, diag.Diagnostic{File: path, Line: 1, Column: 1, EndLine: 1, EndColumn: 1,
 				Severity: diag.Error, Code: "module-name", Message: nameErr.Error()})
+		}
+		// a.lunar and a/init.lunar are both require("a"), and Lua loads
+		// whichever its path finds first.
+		if other, taken := byName[name]; taken && nameErr == nil {
+			diags = append(diags, diag.Diagnostic{File: path, Line: 1, Column: 1, EndLine: 1, EndColumn: 1,
+				Severity: diag.Error, Code: "module-name", Message: fmt.Sprintf("%s and %s are both require(\"%s\"), and Lua loads only one of them; rename one", m.Rel, other.Rel, name)})
+		} else if nameErr == nil {
+			byName[name] = m
 		}
 
 		for _, stmt := range statements {
@@ -215,7 +228,7 @@ func (p *Project) CheckReusing(prev *Program) (*Program, diag.List) {
 			diags = append(diags, m.Diags...)
 			continue
 		}
-		m.Diags = p.checkModule(m, checker, declSources)
+		m.Diags = p.checkModule(m, checker, declStatements)
 		diags = append(diags, m.Diags...)
 		m.checked = true
 	}
@@ -223,7 +236,7 @@ func (p *Project) CheckReusing(prev *Program) (*Program, diag.List) {
 	diags = append(diags, p.unmatchedDataFiles(sorted)...)
 	diags.Sort()
 	return &Program{Project: p, Modules: sorted, DeclIndex: declIndex,
-		contextKey: contextKey, declDiags: declDiags, byPath: byPath}, diags
+		contextKey: contextKey, declDiags: declDiags, byPath: byPath, declStatements: declStatements}, diags
 }
 
 // module is the earlier check's module at path, if any.
@@ -254,7 +267,7 @@ func reusable(m, pm *Module) bool {
 // checkModule checks one module with the declarations, recording its
 // exports and index. A checker panic is turned into an internal error on
 // the module rather than taking the process down.
-func (p *Project) checkModule(m *Module, checker *types.Checker, declSources []string) (diags diag.List) {
+func (p *Project) checkModule(m *Module, checker *types.Checker, declStatements []ast.Statement) (diags diag.List) {
 	defer func() {
 		if r := recover(); r != nil {
 			diags = append(diags, diag.Diagnostic{File: m.Path, Line: 1, Column: 1, EndLine: 1, EndColumn: 1,
@@ -263,13 +276,8 @@ func (p *Project) checkModule(m *Module, checker *types.Checker, declSources []s
 		}
 	}()
 
-	// The declarations again, freshly parsed: the checker annotates the
-	// trees it checks, so modules do not share them.
-	var statements []ast.Statement
-	for i, path := range p.DeclFiles {
-		decls, _ := parseSource(path, declSources[i])
-		statements = append(statements, decls...)
-	}
+	statements := make([]ast.Statement, 0, len(declStatements)+len(m.Statements))
+	statements = append(statements, declStatements...)
 	statements = append(statements, m.Statements...)
 
 	diags = append(diags, moduleDiags(checker.Check(statements), m.Path)...)

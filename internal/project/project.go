@@ -7,6 +7,7 @@ package project
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -49,6 +50,8 @@ func LoadConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Notepad saves UTF-8 with a byte-order mark.
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
 	// encoding/json matches keys without regard to case, which would let
 	// "rootdir" stand for "rootDir"; check the spelling exactly first.
 	var raw map[string]json.RawMessage
@@ -114,6 +117,10 @@ type Options struct {
 	Files []string
 	// Overlay holds unsaved editor buffers by absolute path.
 	Overlay map[string]string
+	// RequireConfig refuses to go on without a lunar.config.json (or an
+	// OutDir): lunar build compiles a project, not whatever folder it is
+	// run in.
+	RequireConfig bool
 }
 
 // Project is what Open found: where everything is and how to compile it.
@@ -139,6 +146,31 @@ type Project struct {
 var supportedTargets = map[string]bool{"lua53": true, "lua54": true}
 
 // configError is a diagnostic about the configuration, not about a script.
+// ioError is a failure to read the project's files: exit 3, not a
+// mistake in the config.
+func ioError(err error) diag.List {
+	return diag.List{{Severity: diag.Error, Code: "io", Message: err.Error()}}
+}
+
+// ConfigFile is the project's lunar.config.json, or "" without one.
+func (p *Project) ConfigFile() string { return p.configPath }
+
+// sameFolder says whether two paths name one folder, through symlinks too.
+func sameFolder(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	ia, errA := os.Stat(a)
+	ib, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(ia, ib)
+}
+
+// within says whether path is inside folder (folder itself excluded).
+func within(path, folder string) bool {
+	rel, err := filepath.Rel(folder, path)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
 func configError(format string, args ...any) diag.List {
 	return diag.List{{Severity: diag.Error, Code: "config", Message: fmt.Sprintf(format, args...)}}
 }
@@ -162,6 +194,9 @@ func Open(opts Options) (*Project, diag.List) {
 	configPath, found := opts.ConfigPath, opts.ConfigPath != ""
 	if !found {
 		configPath, found = FindConfig(start)
+	}
+	if !found && opts.RequireConfig && opts.OutDir == "" {
+		return nil, configError("no %s in %s or a folder above it: lunar build needs one, giving rootDir and outDir (or pass --out)", ConfigName, start)
 	}
 	if found {
 		if cfg, err = LoadConfig(configPath); err != nil {
@@ -215,8 +250,13 @@ func Open(opts Options) (*Project, diag.List) {
 	}
 	// The next build would read the Lua it wrote back in as hand-written
 	// scripts. (Single-file compiles write next to the source instead.)
-	if p.OutDir != "" && len(opts.Files) == 0 && filepath.Clean(p.OutDir) == filepath.Clean(p.Root) {
+	if p.OutDir != "" && len(opts.Files) == 0 && sameFolder(p.OutDir, p.Root) {
 		return nil, configError("outDir is the same folder as rootDir (%s); put the Lua in a folder of its own, such as \"../build\"", p.Root)
+	}
+	// Outputs mirror the scripts' layout under outDir: one holding rootDir
+	// puts them among the scripts (src/src/util.lunar wrote src/util.lua).
+	if p.OutDir != "" && len(opts.Files) == 0 && within(p.Root, p.OutDir) {
+		return nil, configError("outDir (%s) holds rootDir (%s), so outputs would land among the scripts; put the Lua in a folder beside it, such as \"../build\"", p.OutDir, p.Root)
 	}
 
 	// Declarations: everything under the root, plus the configured and
@@ -242,7 +282,10 @@ func Open(opts Options) (*Project, diag.List) {
 			files, err = p.scan(path, ".d.lunar")
 		}
 		if err != nil && i > 0 {
-			return nil, configError("declaration path '%s' does not exist", path)
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil, configError("declaration path '%s' does not exist", path)
+			}
+			return nil, ioError(err)
 		}
 		for _, f := range files {
 			if !seen[f] {
@@ -269,7 +312,7 @@ func Open(opts Options) (*Project, diag.List) {
 
 	all, err := p.scan(p.Root, ".lunar")
 	if err != nil {
-		return nil, configError("%v", err)
+		return nil, ioError(err)
 	}
 	for _, f := range all {
 		if !strings.HasSuffix(f, ".d.lunar") {
@@ -278,7 +321,7 @@ func Open(opts Options) (*Project, diag.List) {
 	}
 	if p.CopyLua {
 		if p.LuaFiles, err = p.scan(p.Root, ".lua"); err != nil {
-			return nil, configError("%v", err)
+			return nil, ioError(err)
 		}
 	}
 	return p, nil

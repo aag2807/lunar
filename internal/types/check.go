@@ -616,6 +616,12 @@ func (c *Checker) gotosIn(stmts []ast.Statement) []*ast.GotoStatement {
 	}
 	var unresolved []*ast.GotoStatement
 	for i, stmt := range stmts {
+		// Declarations and types hold no code, so no goto: walking them
+		// cost as much as checking a large engine API.
+		switch stmt.(type) {
+		case *ast.DeclareStatement, *ast.InterfaceDeclaration, *ast.TypeDeclaration, *ast.EnumDeclaration, *ast.ImportStatement:
+			continue
+		}
 		var found []*ast.GotoStatement
 		if g, ok := stmt.(*ast.GotoStatement); ok {
 			found = []*ast.GotoStatement{g}

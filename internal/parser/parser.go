@@ -2898,7 +2898,18 @@ func (p *Parser) parseTableLiteral() ast.Expression {
 
 	p.nextToken() // move past '{'
 
+	var lastOffset1 int
+	var lastType1 lexer.TokenType
+	guardStarted1 := false
 	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
+		// An iteration that consumed nothing (a half-typed member the
+		// branch below could not parse) would run forever: skip the token.
+		if guardOffset, guardType := p.curToken.Offset, p.curToken.Type; guardOffset == lastOffset1 && guardType == lastType1 && guardStarted1 {
+			p.addError(fmt.Sprintf("unexpected '%s' here", p.curToken.Literal), p.curToken)
+			p.nextToken()
+			continue
+		}
+		guardStarted1, lastOffset1, lastType1 = true, p.curToken.Offset, p.curToken.Type
 		// Try to parse as key-value pair first - allows context-aware keywords
 		// Check for [key] = value syntax
 		if p.curTokenIs(lexer.LBRACKET) {
@@ -3031,7 +3042,18 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 	p.nextToken() // move past class header
 
 	// Parse class body
+	var lastOffset2 int
+	var lastType2 lexer.TokenType
+	guardStarted2 := false
 	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+		// An iteration that consumed nothing (a half-typed member the
+		// branch below could not parse) would run forever: skip the token.
+		if guardOffset, guardType := p.curToken.Offset, p.curToken.Type; guardOffset == lastOffset2 && guardType == lastType2 && guardStarted2 {
+			p.addError(fmt.Sprintf("unexpected '%s' here", p.curToken.Literal), p.curToken)
+			p.nextToken()
+			continue
+		}
+		guardStarted2, lastOffset2, lastType2 = true, p.curToken.Offset, p.curToken.Type
 		// Check for index signature first (before modifiers)
 		if p.curTokenIs(lexer.LBRACKET) {
 			// Index signature: [key: KeyType]: ValueType
@@ -3418,7 +3440,18 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 	p.nextToken() // move past interface header
 
 	// Parse interface body - allows context-aware keywords
+	var lastOffset3 int
+	var lastType3 lexer.TokenType
+	guardStarted3 := false
 	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+		// An iteration that consumed nothing (a half-typed member the
+		// branch below could not parse) would run forever: skip the token.
+		if guardOffset, guardType := p.curToken.Offset, p.curToken.Type; guardOffset == lastOffset3 && guardType == lastType3 && guardStarted3 {
+			p.addError(fmt.Sprintf("unexpected '%s' here", p.curToken.Literal), p.curToken)
+			p.nextToken()
+			continue
+		}
+		guardStarted3, lastOffset3, lastType3 = true, p.curToken.Offset, p.curToken.Type
 		if p.curTokenIs(lexer.LBRACKET) {
 			// Index signature: [key: KeyType]: ValueType
 			indexSig := p.parseIndexSignature()
@@ -3437,6 +3470,9 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 		} else if p.curTokenIs(lexer.STATIC) {
 			// Handle static keyword
 			p.nextToken() // move past 'static'
+			if !p.curTokenIsIdentOrContextual() {
+				p.addError("expected a member after 'static'", p.curToken)
+			}
 			if p.curTokenIsIdentOrContextual() {
 				if p.peekTokenIs(lexer.COLON) || p.peekTokenIs(lexer.QUESTION) {
 					// Static property
@@ -3449,6 +3485,7 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 					method.IsStatic = true
 					iface.Methods = append(iface.Methods, method)
 				} else {
+					p.addError(fmt.Sprintf("unexpected '%s' in an interface", p.curToken.Literal), p.curToken)
 					p.nextToken()
 				}
 			}
@@ -3462,9 +3499,11 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 				method := p.parseInterfaceMethod()
 				iface.Methods = append(iface.Methods, method)
 			} else {
+				p.addError(fmt.Sprintf("unexpected '%s' in an interface", p.curToken.Literal), p.curToken)
 				p.nextToken()
 			}
 		} else {
+			p.addError(fmt.Sprintf("unexpected '%s' in an interface", p.curToken.Literal), p.curToken)
 			p.nextToken()
 		}
 	}
@@ -3552,7 +3591,18 @@ func (p *Parser) parseEnumDeclaration() *ast.EnumDeclaration {
 	p.nextToken() // move past enum name
 
 	// Parse enum members - allows context-aware keywords
+	var lastOffset4 int
+	var lastType4 lexer.TokenType
+	guardStarted4 := false
 	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+		// An iteration that consumed nothing (a half-typed member the
+		// branch below could not parse) would run forever: skip the token.
+		if guardOffset, guardType := p.curToken.Offset, p.curToken.Type; guardOffset == lastOffset4 && guardType == lastType4 && guardStarted4 {
+			p.addError(fmt.Sprintf("unexpected '%s' here", p.curToken.Literal), p.curToken)
+			p.nextToken()
+			continue
+		}
+		guardStarted4, lastOffset4, lastType4 = true, p.curToken.Offset, p.curToken.Type
 		if p.curTokenIsIdentOrContextual() {
 			member := &ast.EnumMember{
 				Token: p.curToken,
@@ -3603,7 +3653,18 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 	} else {
 		// Object shape: type Name ... end
 		// Parse properties similar to interface (no braces needed)
+		var lastOffset5 int
+		var lastType5 lexer.TokenType
+		guardStarted5 := false
 		for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+			// An iteration that consumed nothing (a half-typed member the
+			// branch below could not parse) would run forever: skip the token.
+			if guardOffset, guardType := p.curToken.Offset, p.curToken.Type; guardOffset == lastOffset5 && guardType == lastType5 && guardStarted5 {
+				p.addError(fmt.Sprintf("unexpected '%s' here", p.curToken.Literal), p.curToken)
+				p.nextToken()
+				continue
+			}
+			guardStarted5, lastOffset5, lastType5 = true, p.curToken.Offset, p.curToken.Type
 			if p.curTokenIsIdentOrContextual() {
 				prop := &ast.PropertyDeclaration{
 					Token: p.curToken,
@@ -3669,7 +3730,18 @@ func (p *Parser) parseImportStatement() *ast.ImportStatement {
 		// Named imports: import { name1, name2 } from "module"
 		p.nextToken() // move past '{'
 
+		var lastOffset6 int
+		var lastType6 lexer.TokenType
+		guardStarted6 := false
 		for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
+			// An iteration that consumed nothing (a half-typed member the
+			// branch below could not parse) would run forever: skip the token.
+			if guardOffset, guardType := p.curToken.Offset, p.curToken.Type; guardOffset == lastOffset6 && guardType == lastType6 && guardStarted6 {
+				p.addError(fmt.Sprintf("unexpected '%s' here", p.curToken.Literal), p.curToken)
+				p.nextToken()
+				continue
+			}
+			guardStarted6, lastOffset6, lastType6 = true, p.curToken.Offset, p.curToken.Type
 			if !p.curTokenIs(lexer.IDENT) {
 				p.peekError(lexer.IDENT)
 				return nil
@@ -3730,7 +3802,18 @@ func (p *Parser) parseNamespaceDeclaration() *ast.NamespaceDeclaration {
 	p.nextToken() // move past name
 
 	// Parse namespace body until 'end'
+	var lastOffset7 int
+	var lastType7 lexer.TokenType
+	guardStarted7 := false
 	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+		// An iteration that consumed nothing (a half-typed member the
+		// branch below could not parse) would run forever: skip the token.
+		if guardOffset, guardType := p.curToken.Offset, p.curToken.Type; guardOffset == lastOffset7 && guardType == lastType7 && guardStarted7 {
+			p.addError(fmt.Sprintf("unexpected '%s' here", p.curToken.Literal), p.curToken)
+			p.nextToken()
+			continue
+		}
+		guardStarted7, lastOffset7, lastType7 = true, p.curToken.Offset, p.curToken.Type
 		stmt := p.parseStatement()
 		if !isNilNode(stmt) {
 			ns.Statements = append(ns.Statements, stmt)
@@ -3943,7 +4026,18 @@ func (p *Parser) parseMatchExpression() ast.Expression {
 
 	// Parse match cases
 	// Each case starts with |
+	var lastOffset8 int
+	var lastType8 lexer.TokenType
+	guardStarted8 := false
 	for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+		// An iteration that consumed nothing (a half-typed member the
+		// branch below could not parse) would run forever: skip the token.
+		if guardOffset, guardType := p.curToken.Offset, p.curToken.Type; guardOffset == lastOffset8 && guardType == lastType8 && guardStarted8 {
+			p.addError(fmt.Sprintf("unexpected '%s' here", p.curToken.Literal), p.curToken)
+			p.nextToken()
+			continue
+		}
+		guardStarted8, lastOffset8, lastType8 = true, p.curToken.Offset, p.curToken.Type
 		// Expect | for case
 		if !p.curTokenIs(lexer.PIPE) {
 			p.addError(fmt.Sprintf("expected '|' or 'end' in match expression, got %s", p.curToken.Type), p.curToken)

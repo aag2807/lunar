@@ -1,0 +1,22 @@
+-- Exported generic functions, T inferred through T[], generic classes.
+export function id<T>(x: T): T
+    return x
+end
+local function first<T>(xs: T[]): T?
+    return xs[1]
+end
+local names: string[] = { "a", "b" }
+local f = first(names)
+assert(id(3) == 3 and f == "a")
+
+class Box<T>
+    value: T
+    constructor(value: T)
+        self.value = value
+    end
+    get(): T
+        return self.value
+    end
+end
+local b = Box(4)
+assert(b.get() == 4)

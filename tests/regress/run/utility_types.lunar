@@ -1,0 +1,9 @@
+interface User
+    id: number
+    name: string
+    email: string?
+end
+local patch: Partial<User> = {}
+local scores: Record<string, number> = { a = 1, b = 2 }
+local frozen: Readonly<User> = { id = 1, name = "x" }
+assert(patch.id == nil and scores.a == 1 and frozen.name == "x")

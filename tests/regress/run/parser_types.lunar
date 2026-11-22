@@ -1,0 +1,14 @@
+-- An index signature after a field, parenthesised types, readonly
+-- constructor parameters.
+interface Bag
+    name: string
+    [key: string]: any
+end
+local mixed: (string | number)[] = { "a", 1 }
+local maybe: ((n: number) => number)? = nil
+class Point
+    constructor(readonly z: number)
+    end
+end
+local bag: Bag = { name = "b" }
+assert(#mixed == 2 and maybe == nil and Point(3).z == 3 and bag.name == "b")

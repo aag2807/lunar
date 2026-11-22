@@ -1214,7 +1214,7 @@ func (p *Parser) parseType() ast.Expression {
 	switch p.curToken.Type {
 	case lexer.LPAREN:
 		// Could be tuple type or function type
-		return p.parseTupleOrFunctionType()
+		return p.parseTypeSuffix(p.parseTupleOrFunctionType())
 	case lexer.FUNCTION:
 		// function(params): Return
 		return p.parseKeywordFunctionType()
@@ -1402,7 +1402,7 @@ func (p *Parser) parseTemplateLiteralType() ast.Expression {
 func (p *Parser) parseSimpleType() ast.Expression {
 	switch p.curToken.Type {
 	case lexer.LPAREN:
-		return p.parseTupleOrFunctionType()
+		return p.parseTypeSuffix(p.parseTupleOrFunctionType())
 	case lexer.FUNCTION:
 		return p.parseKeywordFunctionType()
 	case lexer.TABLE:
@@ -1448,21 +1448,25 @@ func (p *Parser) parseKeywordFunctionType() ast.Expression {
 }
 
 func (p *Parser) parseTypeSuffix(baseType ast.Expression) ast.Expression {
+	if isNilNode(baseType) {
+		return nil
+	}
 	currentType := baseType
 
 	// First pass: handle high-precedence suffixes (arrays, generics, optional)
 	// These bind tighter than union types
 	for {
 		switch {
-		case p.peekTokenIs(lexer.LBRACKET):
-			// Could be array type T[] or indexed access type T[K]
+		case p.peekTokenIs(lexer.LBRACKET) && p.peekToken.Line == p.curToken.Line:
+			// Could be array type T[] or indexed access type T[K]. A '[' on
+			// the next line starts something else (an index signature).
 			p.nextToken() // consume '['
 			p.nextToken() // move to content or ']'
 
 			if p.curTokenIs(lexer.RBRACKET) {
 				// Empty brackets: T[] is array type
 				currentType = &ast.ArrayType{
-					Token:       baseType.(*ast.Identifier).Token,
+					Token:       p.curToken,
 					ElementType: currentType,
 				}
 			} else {
@@ -1642,7 +1646,7 @@ func (p *Parser) parseSimpleTypeWithSuffixes(skipOptional bool) ast.Expression {
 
 	switch p.curToken.Type {
 	case lexer.LPAREN:
-		return p.parseTupleOrFunctionType()
+		return p.parseTypeSuffix(p.parseTupleOrFunctionType())
 	case lexer.FUNCTION:
 		return p.parseKeywordFunctionType()
 	case lexer.TABLE:
@@ -1797,7 +1801,7 @@ func (p *Parser) parseNonUnionIntersectionType(skipOptional bool) ast.Expression
 	switch p.curToken.Type {
 	case lexer.LPAREN:
 		// Could be tuple type or function type
-		return p.parseTupleOrFunctionType()
+		return p.parseTypeSuffix(p.parseTupleOrFunctionType())
 	case lexer.FUNCTION:
 		// function(params): Return, e.g. `string | function(s: string): string`
 		return p.parseKeywordFunctionType()
@@ -1994,7 +1998,11 @@ func (p *Parser) parseTupleOrFunctionType() ast.Expression {
 					})
 				}
 			} else {
-				// It's a tuple type
+				// (T) is T, grouped: (string | number)[]. Several types are
+				// a tuple.
+				if len(types) == 1 {
+					return types[0]
+				}
 				return &ast.TupleType{
 					Token: parenToken,
 					Types: types,

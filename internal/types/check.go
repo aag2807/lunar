@@ -1047,7 +1047,7 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 			ctorOptional[i] = paramIsOptional(param, params[i])
 
 			// Handle constructor parameter properties
-			if param.Visibility != "" {
+			if param.Visibility != "" || param.IsReadonly {
 				propName := param.Name.Value
 				propType := params[i]
 
@@ -2144,9 +2144,44 @@ func (c *Checker) omitType(t Type, keys Type) Type {
 	return c.pickType(t, remainingKeys)
 }
 
+// allProperties are an interface's properties, those of the interfaces
+// it extends included.
+func allProperties(t *InterfaceType) map[string]Type {
+	props := map[string]Type{}
+	for _, parent := range t.Extends {
+		for name, p := range allProperties(parent) {
+			props[name] = p
+		}
+	}
+	for name, p := range t.Properties {
+		props[name] = p
+	}
+	return props
+}
+
+// optionalProperty says whether t or an interface it extends lets name be
+// left out.
+func optionalProperty(t *InterfaceType, name string) bool {
+	if t.OptionalProps[name] {
+		return true
+	}
+	for _, parent := range t.Extends {
+		if optionalProperty(parent, name) {
+			return true
+		}
+	}
+	return false
+}
+
 // recordType implements Record<K, V> utility type
 // Constructs a type with a set of properties K of type V
 func (c *Checker) recordType(keys Type, valueType Type) Type {
+	// Record<string, V> is a table from any string to V; only a union of
+	// literal keys lists its fields.
+	switch keys.(type) {
+	case *StringType, *NumberType, *AnyType:
+		return &TableType{KeyType: keys, ValueType: valueType}
+	}
 	record := &InterfaceType{
 		Name:        "Record",
 		Properties:  make(map[string]Type),
@@ -2177,8 +2212,14 @@ func (c *Checker) readonlyType(t Type) Type {
 			Extends:     []*InterfaceType{},
 		}
 
-		for name, propType := range objType.Properties {
+		readonly.OptionalProps = map[string]bool{}
+		readonly.ReadonlyProps = map[string]bool{}
+		for name, propType := range allProperties(objType) {
 			readonly.Properties[name] = propType
+			readonly.ReadonlyProps[name] = true
+			if optionalProperty(objType, name) {
+				readonly.OptionalProps[name] = true
+			}
 			if objType.StaticProps != nil && objType.StaticProps[name] {
 				readonly.StaticProps[name] = true
 			}
@@ -2221,9 +2262,11 @@ func (c *Checker) partialType(t Type) Type {
 			StaticProps: make(map[string]bool),
 		}
 
-		// Make all properties optional (T | nil)
-		for name, propType := range objType.Properties {
-			partial.Properties[name] = &UnionType{Types: []Type{propType, Nil}}
+		// Make all properties optional (T | nil), inherited ones included
+		partial.OptionalProps = map[string]bool{}
+		for name, propType := range allProperties(objType) {
+			partial.Properties[name] = withNil(propType)
+			partial.OptionalProps[name] = true
 			if objType.StaticProps != nil && objType.StaticProps[name] {
 				partial.StaticProps[name] = true
 			}
@@ -4444,6 +4487,74 @@ func WithoutNil(t Type) Type {
 	return t
 }
 
+// eraseTypeParams is fn with its unbound type parameters taken as any.
+func eraseTypeParams(fn *FunctionType) *FunctionType {
+	erased := *fn
+	erased.Parameters = make([]Type, len(fn.Parameters))
+	for i, p := range fn.Parameters {
+		erased.Parameters[i] = eraseTypeParam(p)
+	}
+	return &erased
+}
+
+func eraseTypeParam(t Type) Type {
+	switch typ := t.(type) {
+	case *GenericParamType:
+		return Any
+	case *ArrayType:
+		return &ArrayType{ElementType: eraseTypeParam(typ.ElementType)}
+	case *OptionalType:
+		return &OptionalType{BaseType: eraseTypeParam(typ.BaseType)}
+	case *UnionType:
+		members := make([]Type, len(typ.Types))
+		for i, m := range typ.Types {
+			members[i] = eraseTypeParam(m)
+		}
+		return &UnionType{Types: members}
+	}
+	return t
+}
+
+// inferTypeArgs matches a parameter's type against an argument's and binds
+// the type parameters it finds there that are not bound yet.
+func inferTypeArgs(param, arg Type, names []string, args []Type, inferred []bool) {
+	if arg == nil {
+		return
+	}
+	switch p := param.(type) {
+	case *GenericParamType:
+		for j, name := range names {
+			if name == p.Name && !inferred[j] {
+				args[j], inferred[j] = widenLiteralType(arg), true
+			}
+		}
+	case *ArrayType:
+		if a, ok := arg.(*ArrayType); ok {
+			inferTypeArgs(p.ElementType, a.ElementType, names, args, inferred)
+		}
+	case *TableType:
+		if a, ok := arg.(*TableType); ok {
+			inferTypeArgs(p.KeyType, a.KeyType, names, args, inferred)
+			inferTypeArgs(p.ValueType, a.ValueType, names, args, inferred)
+		}
+	case *OptionalType:
+		inferTypeArgs(p.BaseType, WithoutNil(arg), names, args, inferred)
+	case *UnionType:
+		if base, ok := removeNil(p); ok {
+			inferTypeArgs(base, WithoutNil(arg), names, args, inferred)
+		}
+	case *FunctionType:
+		if a, ok := arg.(*FunctionType); ok {
+			for i := range p.Parameters {
+				if i < len(a.Parameters) {
+					inferTypeArgs(p.Parameters[i], a.Parameters[i], names, args, inferred)
+				}
+			}
+			inferTypeArgs(p.ReturnType, a.ReturnType, names, args, inferred)
+		}
+	}
+}
+
 // withoutFirstParameter is fn as called with ':', which supplies the first
 // argument itself.
 func withoutFirstParameter(fn *FunctionType) *FunctionType {
@@ -5121,6 +5232,11 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 
 		// Check for constructor (or allow default constructor with no args)
 		ctor := classType.EffectiveConstructor()
+		// Box(4) on a generic class: its type parameters are not given, so
+		// they take what the arguments are.
+		if ctor != nil && len(classType.GenericParams) > 0 {
+			ctor = eraseTypeParams(ctor)
+		}
 		if ctor == nil {
 			// No explicit constructor - allow instantiation with zero arguments only
 			if len(node.Arguments) > 0 {
@@ -5253,22 +5369,13 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 		inferred := make([]bool, len(fnType.GenericParams))
 
 		for i, arg := range node.Arguments {
-			argType := c.checkExpression(arg)
-			paramType := fnType.Parameters[i]
-
-			// If the parameter type is a GenericParamType, infer from the argument
-			if genericParam, ok := paramType.(*GenericParamType); ok {
-				// Find which generic parameter this is
-				for j, gpName := range fnType.GenericParams {
-					if genericParam.Name == gpName {
-						if !inferred[j] {
-							typeArgs[j] = argType
-							inferred[j] = true
-						}
-						break
-					}
-				}
+			if i >= len(fnType.Parameters) {
+				break
 			}
+			argType := c.checkExpression(arg)
+			// T is found wherever it appears in the parameter's type:
+			// x: T, xs: T[], f: (T) -> U, t: table<K, V>, v: T?.
+			inferTypeArgs(fnType.Parameters[i], argType, fnType.GenericParams, typeArgs, inferred)
 		}
 
 		// Check if all type parameters were inferred
@@ -6400,8 +6507,14 @@ func (c *Checker) checkExportStatement(node *ast.ExportStatement) {
 		}
 
 	case *ast.FunctionDeclaration:
-		// Export functions
-		funcType := c.getFunctionType(stmt)
+		// Export functions, with the type checking gave them (a generic
+		// one's type parameters are only in scope there).
+		var funcType Type
+		if t, ok := c.env.Get(stmt.Name.Value); ok {
+			funcType = t
+		} else {
+			funcType = c.getFunctionType(stmt)
+		}
 		c.exports[stmt.Name.Value] = funcType
 
 	case *ast.ClassDeclaration:

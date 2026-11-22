@@ -1,11 +1,6 @@
 package codegen
 
-import (
-	"lunar/internal/lexer"
-	"lunar/internal/parser"
-	"strings"
-	"testing"
-)
+import "testing"
 
 // '^' is exponentiation in Lua. Compiling it as XOR silently produced wrong
 // numbers on 5.3/5.4 and bit.bxor on 5.1, so the same source meant two
@@ -22,25 +17,6 @@ func TestTildeIsBitwiseXor(t *testing.T) {
 	output := generate(t, `local x: number = 12 ~ 10`)
 
 	assertContains(t, output, "12 ~ 10")
-}
-
-func TestTildeXorOnLegacyTargets(t *testing.T) {
-	for target, want := range map[string]string{
-		"lua51": "bit.bxor(12, 10)",
-		"lua52": "bit32.bxor(12, 10)",
-	} {
-		l := lexer.New(`local x: number = 12 ~ 10`)
-		p := parser.New(l)
-		statements := p.Parse()
-		if len(p.Errors()) > 0 {
-			t.Fatalf("parser errors: %v", p.Errors())
-		}
-		output := NewWithTarget(target).Generate(statements)
-
-		if !strings.Contains(output, want) {
-			t.Errorf("target %s: expected %q\ngot:\n%s", target, want, output)
-		}
-	}
 }
 
 // A literal receiver has to be parenthesised or the Lua is a syntax error.

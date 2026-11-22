@@ -20,7 +20,7 @@ type Generator struct {
 	classParents     map[string]string // Track parent class names for super
 	currentClassName string            // Current class being generated
 	exports          []string          // Track exported names for module generation
-	target           string            // Target Lua version: lua51, lua52, lua53, lua54, luajit
+	target           string            // Target Lua version: lua53 or lua54
 }
 
 // newGenerator is the one constructor every public variant goes through, so
@@ -50,11 +50,6 @@ func New() *Generator {
 // NewWithTarget creates a new code generator with specified target
 func NewWithTarget(target string) *Generator {
 	return newGenerator(target, nil, "")
-}
-
-// IsLuaJIT returns true if targeting LuaJIT or Lua 5.1
-func (g *Generator) IsLuaJIT() bool {
-	return g.target == "luajit" || g.target == "lua51"
 }
 
 // NewWithSourceMap creates a new code generator with source map support
@@ -1302,21 +1297,12 @@ func (g *Generator) generatePrefixExpression(node *ast.PrefixExpression) string 
 		operator = "not"
 	}
 
-	// Handle bitwise NOT (~) for Lua 5.1/5.2/LuaJIT compatibility
+	// Bitwise not is written next to its operand: ~x, ~(a | b).
 	if operator == "~" {
-		if g.target == "lua53" || g.target == "lua54" {
-			// Lua 5.3+ supports ~ natively
-			if needsUnaryParens(node.Right) {
-				return fmt.Sprintf("~(%s)", right)
-			}
-			return fmt.Sprintf("~%s", right)
-		} else if g.target == "lua52" {
-			// Lua 5.2 uses bit32 library
-			return fmt.Sprintf("bit32.bnot(%s)", right)
-		} else {
-			// LuaJIT and Lua 5.1 use bit library
-			return fmt.Sprintf("bit.bnot(%s)", right)
+		if needsUnaryParens(node.Right) {
+			return fmt.Sprintf("~(%s)", right)
 		}
+		return fmt.Sprintf("~%s", right)
 	}
 
 	// The operand needs parentheses unless it binds tighter than a unary

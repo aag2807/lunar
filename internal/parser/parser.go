@@ -75,6 +75,14 @@ type infixParseFn func(ast.Expression) ast.Expression
 type Parser struct {
 	l *lexer.Lexer
 
+	// pending is a token read ahead of peekToken, when >> is split into
+	// two > tokens to close nested generics.
+	pending *lexer.Token
+
+	// classDepth counts the class bodies being parsed, where super names
+	// the parent class.
+	classDepth int
+
 	// stopAtPipe is set while a match arm's body is parsed, where a bare '|'
 	// begins the next arm; brackets and blocks clear it (clearStopAtPipe).
 	stopAtPipe bool
@@ -144,8 +152,14 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.LBRACE, p.parseTableLiteral)
 	p.registerPrefix(lexer.FUNCTION, p.parseFunctionExpression)
 	p.registerPrefix(lexer.ELLIPSIS, p.parseSpreadExpression)
-	p.registerPrefix(lexer.AWAIT, p.parseAwaitExpression)
-	p.registerPrefix(lexer.MATCH, p.parseMatchExpression)
+	p.registerPrefix(lexer.AWAIT, p.parseAwaitOrName)
+	p.registerPrefix(lexer.MATCH, p.parseMatchOrName)
+	// Every other keyword of Lunar's own is a name in an expression.
+	for _, t := range lexer.SoftKeywordTypes() {
+		if _, taken := p.prefixParseFns[t]; !taken {
+			p.registerPrefix(t, p.parseIdentifier)
+		}
+	}
 
 	//register infix operators
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
@@ -192,6 +206,10 @@ func New(l *lexer.Lexer) *Parser {
 
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
+	if p.pending != nil {
+		p.peekToken, p.pending = *p.pending, nil
+		return
+	}
 	p.peekToken = p.l.NextToken()
 }
 
@@ -205,13 +223,44 @@ func (p *Parser) expectPeekGT() bool {
 	// Handle >> as two > tokens for nested generics like Box<Box<T>>
 	if p.peekTokenIs(lexer.RIGHT_SHIFT) {
 		p.nextToken() // move to >>
-		// Split >> into two > tokens
-		p.curToken = lexer.Token{Type: lexer.GT, Literal: ">", Line: p.curToken.Line, Column: p.curToken.Column}
-		p.peekToken = lexer.Token{Type: lexer.GT, Literal: ">", Line: p.curToken.Line, Column: p.curToken.Column + 1}
+		// Split >> into two > tokens, keeping the token after it for later
+		after := p.peekToken
+		p.pending = &after
+		shift := p.curToken
+		p.curToken = lexer.Token{Type: lexer.GT, Literal: ">", File: shift.File, Line: shift.Line, Column: shift.Column,
+			Offset: shift.Offset, End: shift.Offset + 1, EndLine: shift.Line, EndColumn: shift.Column + 1}
+		p.peekToken = lexer.Token{Type: lexer.GT, Literal: ">", File: shift.File, Line: shift.Line, Column: shift.Column + 1,
+			Offset: shift.Offset + 1, End: shift.Offset + 2, EndLine: shift.Line, EndColumn: shift.Column + 2}
 		return true
 	}
 
 	p.peekError(lexer.GT)
+	return false
+}
+
+// startsDeclaration says whether the keyword in curToken begins one of
+// Lunar's declarations here, judging by the token after it.
+func (p *Parser) startsDeclaration() bool {
+	name := p.peekTokenIsIdentOrContextual()
+	switch p.curToken.Type {
+	case lexer.CLASS, lexer.INTERFACE, lexer.ENUM, lexer.NAMESPACE, lexer.TYPE:
+		return name
+	case lexer.CONST:
+		return name || p.peekTokenIs(lexer.LBRACE) || p.peekTokenIs(lexer.LPAREN)
+	case lexer.ABSTRACT:
+		return p.peekTokenIs(lexer.CLASS)
+	case lexer.ASYNC:
+		return p.peekTokenIs(lexer.FUNCTION)
+	case lexer.IMPORT:
+		return p.peekTokenIs(lexer.LBRACE) || p.peekTokenIs(lexer.ASTERISK)
+	case lexer.EXPORT, lexer.DECLARE:
+		switch p.peekToken.Type {
+		case lexer.FUNCTION, lexer.LOCAL, lexer.CONST, lexer.CLASS, lexer.INTERFACE, lexer.ENUM,
+			lexer.TYPE, lexer.NAMESPACE, lexer.ABSTRACT, lexer.DECLARE, lexer.ASYNC:
+			return true
+		}
+		return false
+	}
 	return false
 }
 
@@ -223,9 +272,34 @@ func (p *Parser) parseIdentifier() ast.Expression {
 }
 
 func (p *Parser) parseSuperExpression() ast.Expression {
+	// Outside a class, super is an ordinary name.
+	if p.classDepth == 0 {
+		return p.parseIdentifier()
+	}
 	return &ast.SuperExpression{
 		Token: p.curToken,
 	}
+}
+
+// parseMatchOrName parses `match x with ...`, or the name match when what
+// follows is not a match expression (match = 1, s:match(...), match(x)).
+func (p *Parser) parseMatchOrName() ast.Expression {
+	state := p.SaveState()
+	errorsBefore := len(p.errors)
+	if m := p.parseMatchExpression(); !isNilNode(m) && len(p.errors) == errorsBefore {
+		return m
+	}
+	p.RestoreState(state)
+	return p.parseIdentifier()
+}
+
+// parseAwaitOrName parses `await x`, which is refused later, or the name
+// await anywhere else.
+func (p *Parser) parseAwaitOrName() ast.Expression {
+	if p.peekTokenIsIdentOrContextual() {
+		return p.parseAwaitExpression()
+	}
+	return p.parseIdentifier()
 }
 
 func (p *Parser) parseNumberLiteral() ast.Expression {
@@ -1014,7 +1088,7 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 		p.nextToken() // consume (, now on first identifier
 
 		// Parse first identifier
-		if !p.curTokenIs(lexer.IDENT) {
+		if !p.curTokenIsIdentOrContextual() {
 			p.addError("expected identifier in tuple destructuring", p.curToken)
 			return nil
 		}
@@ -1034,7 +1108,7 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 			p.nextToken() // consume previous token/type
 			p.nextToken() // consume comma, now on next identifier
 
-			if !p.curTokenIs(lexer.IDENT) {
+			if !p.curTokenIsIdentOrContextual() {
 				p.addError(fmt.Sprintf("expected identifier after comma in tuple, got %s", p.curToken.Type), p.curToken)
 				return nil
 			}
@@ -1076,7 +1150,7 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 			p.nextToken() // consume previous token/type
 			p.nextToken() // consume comma, now on next identifier
 
-			if !p.curTokenIs(lexer.IDENT) {
+			if !p.curTokenIsIdentOrContextual() {
 				p.addError(fmt.Sprintf("expected identifier after comma, got %s", p.curToken.Type), p.curToken)
 				return nil
 			}
@@ -1963,8 +2037,10 @@ func (p *Parser) peekTokenIs(t lexer.TokenType) bool {
 
 // Context-aware keyword helpers
 // These keywords can be used as type names OR as identifiers depending on context
+// isContextualKeyword reports whether a keyword token may be a name: every
+// keyword of Lunar's own, since in Lua they are all ordinary names.
 func (p *Parser) isContextualKeyword(t lexer.TokenType) bool {
-	return t == lexer.STRING_TYPE || t == lexer.TABLE || t == lexer.TYPE || t == lexer.GET || t == lexer.SET
+	return lexer.IsSoftKeyword(t)
 }
 
 func (p *Parser) curTokenIsIdentOrContextual() bool {
@@ -1981,6 +2057,7 @@ type ParserState struct {
 	peekToken  lexer.Token
 	lexerState lexer.LexerState
 	errorCount int
+	pending    *lexer.Token
 }
 
 // SaveState saves the current parser state for lookahead
@@ -1990,6 +2067,7 @@ func (p *Parser) SaveState() ParserState {
 		peekToken:  p.peekToken,
 		lexerState: p.l.SaveState(),
 		errorCount: len(p.errors),
+		pending:    p.pending,
 	}
 }
 
@@ -1997,6 +2075,7 @@ func (p *Parser) SaveState() ParserState {
 func (p *Parser) RestoreState(state ParserState) {
 	p.curToken = state.curToken
 	p.peekToken = state.peekToken
+	p.pending = state.pending
 	p.l.RestoreState(state.lexerState)
 	// A look-ahead that is abandoned leaves no errors behind.
 	if state.errorCount < len(p.errors) {
@@ -2085,13 +2164,29 @@ func (p *Parser) parseIdentifierOrContextual() *ast.Identifier {
 	return nil
 }
 
+// peekStartsMember says whether the token after a word shows the word is a
+// member's name: name: T, name = v, name?: T, name(...), name<T>(...).
+func (p *Parser) peekStartsMember() bool {
+	switch p.peekToken.Type {
+	case lexer.COLON, lexer.ASSIGN, lexer.QUESTION, lexer.LPAREN, lexer.LT:
+		return true
+	}
+	return false
+}
+
 func (p *Parser) parseParameter() *ast.Parameter {
 	param := &ast.Parameter{
 		Token: p.curToken,
 	}
 
-	// Check for visibility modifiers (for constructor parameter properties)
-	switch p.curToken.Type {
+	// Check for visibility modifiers (for constructor parameter properties).
+	// A modifier word followed by no name is the parameter's own name, as in
+	// Lua: function f(public, private).
+	modifier := p.curToken.Type
+	if !p.peekTokenIsIdentOrContextual() {
+		modifier = lexer.IDENT
+	}
+	switch modifier {
 	case lexer.PUBLIC, lexer.PRIVATE, lexer.PROTECTED:
 		param.Visibility = p.curToken.Literal
 		p.nextToken()
@@ -2363,6 +2458,7 @@ func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 
 func (p *Parser) parseExpressionStatement() ast.Statement {
 	// Try to parse as expression first
+	start := p.curToken
 	expr := p.parseExpression(LOWEST)
 
 	// Lua allows several assignment targets: a, b = b, a
@@ -2406,7 +2502,15 @@ func (p *Parser) parseExpressionStatement() ast.Statement {
 		}
 	}
 
-	// Otherwise, it's just an expression statement
+	// Otherwise it is an expression on its own, which Lua allows only for
+	// a call (Lunar adds match, and await, which is refused later).
+	switch expr.(type) {
+	case *ast.CallExpression, *ast.MatchExpression, *ast.AwaitExpression:
+	default:
+		if !isNilNode(expr) {
+			p.addError(fmt.Sprintf("'%s' is not a statement: Lua runs only calls and assignments", start.Literal), start)
+		}
+	}
 	return &ast.ExpressionStatement{
 		Token:      p.curToken,
 		Expression: expr,
@@ -2435,6 +2539,11 @@ func (p *Parser) parseStatement() ast.Statement {
 }
 
 func (p *Parser) parseStatementNode() ast.Statement {
+	// A word like class, import or const begins a declaration only when
+	// what follows fits one; otherwise it is a name, as in Lua.
+	if lexer.IsSoftKeyword(p.curToken.Type) && !p.startsDeclaration() {
+		return p.parseExpressionStatement()
+	}
 	switch p.curToken.Type {
 	case lexer.SEMICOLON:
 		// Lua's empty statement.
@@ -2758,6 +2867,8 @@ func (p *Parser) parseAbstractClassDeclaration() *ast.ClassDeclaration {
 }
 
 func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
+	p.classDepth++
+	defer func() { p.classDepth-- }()
 	class := &ast.ClassDeclaration{
 		Token:      p.curToken,
 		Properties: []*ast.PropertyDeclaration{},
@@ -2829,9 +2940,11 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 		isReadonly := false
 		visibility := "public" // default visibility
 
-		// Parse modifiers
-		for p.curToken.Type == lexer.PUBLIC || p.curToken.Type == lexer.PRIVATE || p.curToken.Type == lexer.PROTECTED ||
-			p.curToken.Type == lexer.STATIC || p.curToken.Type == lexer.ABSTRACT || p.curToken.Type == lexer.READONLY {
+		// Parse modifiers. A modifier word followed by ':', '=', '?', '(' or
+		// '<' is the member's own name instead: static: boolean, public().
+		for (p.curToken.Type == lexer.PUBLIC || p.curToken.Type == lexer.PRIVATE || p.curToken.Type == lexer.PROTECTED ||
+			p.curToken.Type == lexer.STATIC || p.curToken.Type == lexer.ABSTRACT || p.curToken.Type == lexer.READONLY) &&
+			!p.peekStartsMember() {
 			switch p.curToken.Type {
 			case lexer.PUBLIC, lexer.PRIVATE, lexer.PROTECTED:
 				visibility = p.curToken.Literal
@@ -2845,8 +2958,15 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 			p.nextToken()
 		}
 
-		// Now parse the actual member
-		switch p.curToken.Type {
+		// Now parse the actual member. Any word of Lunar's own names a member
+		// when a member follows it (from: number, match(x)); get, set and
+		// constructor keep their meaning, as before.
+		memberType := p.curToken.Type
+		if lexer.IsSoftKeyword(memberType) && memberType != lexer.CONSTRUCTOR && memberType != lexer.GET &&
+			memberType != lexer.SET && p.peekStartsMember() {
+			memberType = lexer.IDENT
+		}
+		switch memberType {
 		case lexer.CONSTRUCTOR:
 			class.Constructor = p.parseConstructorDeclaration()
 			p.nextToken()
@@ -3571,6 +3691,13 @@ func (p *Parser) parseGenericParameters() []*ast.Identifier {
 
 		if p.curTokenIs(lexer.COMMA) {
 			p.nextToken() // move past comma to next parameter
+		} else if !p.curTokenIs(lexer.GT) {
+			if p.curTokenIs(lexer.EXTENDS) {
+				p.addError("constraints on type parameters (T extends X) are not supported; write <T>", p.curToken)
+			} else {
+				p.addError(fmt.Sprintf("expected ',' or '>' after a type parameter, got '%s'", p.curToken.Literal), p.curToken)
+			}
+			return nil
 		}
 	}
 

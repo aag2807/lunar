@@ -4123,6 +4123,11 @@ func (c *Checker) checkExpressionKind(expr ast.Expression) Type {
 // checkIdentifier checks an identifier and returns its type
 func (c *Checker) checkIdentifier(node *ast.Identifier) Type {
 	typ, ok := c.env.Get(node.Value)
+	// super outside a class is an ordinary name, so normally undefined.
+	if !ok && node.Value == "super" {
+		c.addError("'super' can only be used inside a class", node.Token)
+		return Any
+	}
 	if ok && c.ambient[node.Value] == typ {
 		c.globalUses = append(c.globalUses, node.Token)
 	}

@@ -1,5 +1,7 @@
 package lexer
 
+import "sort"
+
 type TokenType string
 
 const (
@@ -233,6 +235,35 @@ var luaReserved = map[string]bool{
 // IsLuaReserved reports whether a word is reserved by Lua itself.
 func IsLuaReserved(word string) bool {
 	return luaReserved[word]
+}
+
+// softKeywords are Lunar's own keywords: words that are ordinary names in
+// Lua (from, match, class, get, number, ...), as opposed to Lua's reserved
+// words.
+var softKeywords = func() map[TokenType]bool {
+	m := map[TokenType]bool{}
+	for word, t := range keywords {
+		if !luaReserved[word] {
+			m[t] = true
+		}
+	}
+	return m
+}()
+
+// SoftKeywordTypes lists the soft keywords, in a fixed order.
+func SoftKeywordTypes() []TokenType {
+	types := make([]TokenType, 0, len(softKeywords))
+	for t := range softKeywords {
+		types = append(types, t)
+	}
+	sort.Slice(types, func(i, j int) bool { return types[i] < types[j] })
+	return types
+}
+
+// IsSoftKeyword reports whether t is one of Lunar's own keywords, which
+// stay names wherever Lunar's syntax cannot begin.
+func IsSoftKeyword(t TokenType) bool {
+	return softKeywords[t]
 }
 
 // IsKeyword reports whether a word is a Lunar keyword.

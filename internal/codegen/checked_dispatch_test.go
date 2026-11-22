@@ -147,3 +147,39 @@ print(e.hit(1), f.hit(1))
 	assertContains(t, out, "Game.Enemy.new(4)")
 	assertContains(t, out, "e:hit(1)")
 }
+
+// Closing nested generics with >> used to swallow the token after it, so
+// the value of `local n: Box<Box<number>> = other` was lost.
+func TestNestedGenericAnnotationKeepsTheValue(t *testing.T) {
+	out := generate(t, "local other: any = 1\nlocal n: Box<Box<number>> = other\n")
+	assertContains(t, out, "local n = other")
+}
+
+// Lunar's own keywords are names in Lua, and so in Lunar wherever a
+// declaration of its own cannot begin: fields, members, parameters.
+func TestLunarKeywordsAsNames(t *testing.T) {
+	out := generateChecked(t, `interface Move
+    from: number
+    match: string?
+end
+local m: Move = { from = 1 }
+class Path
+    from: number = 1
+    static: boolean = false
+    match(x: number): number
+        return x + self.from
+    end
+    get(k: number): number
+        return k
+    end
+end
+local function g(public, private, class)
+    return public + private + class
+end
+local p = Path()
+print(m.from, p.match(2), p.get(3), g(1, 2, 3))
+`)
+	assertContains(t, out, "p:match(2)")
+	assertContains(t, out, "p:get(3)")
+	assertContains(t, out, "function g(public, private, class)")
+}

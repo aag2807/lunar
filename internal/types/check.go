@@ -3507,6 +3507,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 
 		// Add self to scope
 		c.env.Set("self", classType)
+		c.env.defineSym("self", selfSymbol(node.Name.Token, classType))
 
 		// Add parameters to scope
 		for _, param := range node.Constructor.Parameters {
@@ -3556,6 +3557,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 
 		// Add self to scope
 		c.env.Set("self", classType)
+		c.env.defineSym("self", selfSymbol(node.Name.Token, classType))
 
 		// Add parameters to scope
 		for _, param := range method.Parameters {
@@ -3602,6 +3604,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 
 		// Add self to scope
 		c.env.Set("self", classType)
+		c.env.defineSym("self", selfSymbol(node.Name.Token, classType))
 
 		// Check getter body
 		c.checkBlockStatement(getter.Body)
@@ -3629,6 +3632,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 
 		// Add self to scope
 		c.env.Set("self", classType)
+		c.env.defineSym("self", selfSymbol(node.Name.Token, classType))
 
 		// Add setter parameter to scope
 		if setter.Parameter != nil {

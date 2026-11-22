@@ -1,0 +1,9 @@
+export class Enemy
+    hp: number
+    constructor(hp: number)
+        self.hp = hp
+    end
+    hit(n: number): void
+        self.hp = self.hp - n
+    end
+end

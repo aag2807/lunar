@@ -1,0 +1,6 @@
+import { Enemy } from "./actors/enemy"
+
+local e: Enemy = Enemy(10)
+e.hit(3)
+print(e.hp)
+local id: number = spawn("imp")

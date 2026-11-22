@@ -45,15 +45,17 @@ type Symbol struct {
 	ScopeEnd int
 }
 
-// Key identifies a symbol across checkers: its declaring file and offset.
+// Key identifies a symbol across checkers: its declaring file and offset,
+// and its name, since `self` is placed at its class's name.
 type Key struct {
 	File   string
 	Offset int
+	Name   string
 }
 
 // Key returns the symbol's identity.
 func (s *Symbol) Key() Key {
-	return Key{File: s.Decl.File, Offset: s.Decl.Offset}
+	return Key{File: s.Decl.File, Offset: s.Decl.Offset, Name: s.Name}
 }
 
 // Ambient reports whether the symbol comes from the standard library or a
@@ -179,4 +181,11 @@ func memberSymbol(t Type, name string) *Symbol {
 		}
 	}
 	return nil
+}
+
+// selfSymbol is what `self` refers to inside a class: the class, named at
+// its declaration. It is not a definition of its own, so it is not listed
+// among the index's symbols, but uses of `self` resolve to it.
+func selfSymbol(classTok lexer.Token, classType *ClassType) *Symbol {
+	return &Symbol{Name: "self", Kind: SymVariable, Type: classType, Decl: classTok, ScopeEnd: -1}
 }

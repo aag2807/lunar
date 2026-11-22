@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"lunar/internal/diag"
+	"lunar/internal/lsp"
 	"lunar/internal/project"
 	"lunar/internal/version"
 )
@@ -51,6 +52,15 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 			code = rep.failure("internal", fmt.Sprintf("internal compiler error: %v\n%s", r, debug.Stack()))
 		}
 	}()
+
+	// lunar lsp: the language server, on stdin and stdout.
+	if len(args) > 0 && args[0] == "lsp" {
+		if err := lsp.NewServer().Run(); err != nil {
+			fmt.Fprintf(stderr, "lunar lsp: %v\n", err)
+			return exitInternal
+		}
+		return exitOK
+	}
 
 	buildMode := len(args) > 0 && args[0] == "build"
 	if buildMode {
@@ -418,6 +428,7 @@ func printHelp(w io.Writer) {
 Usage:
   lunar build [options]          Compile the whole project into its outDir
   lunar [options] <input.lunar>  Compile one file (and check what it imports)
+  lunar lsp                      Run the language server on stdin/stdout
 
 Options:
   --target <version>    Target Lua version: lua53 (default) or lua54

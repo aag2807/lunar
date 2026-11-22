@@ -1,0 +1,1 @@
+declare function spawn(kind: string, count?: number): number

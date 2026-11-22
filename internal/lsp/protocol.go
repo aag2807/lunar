@@ -1,5 +1,7 @@
 package lsp
 
+import "encoding/json"
+
 // LSP Protocol types based on the Language Server Protocol specification
 
 // Message represents a JSON-RPC message
@@ -23,6 +25,23 @@ type ResponseMessage struct {
 	Error  *ResponseError `json:"error,omitempty"`
 }
 
+// MarshalJSON writes "result" whenever there is no error, null included:
+// JSON-RPC requires one of the two, and "shutdown" answers with null.
+func (r ResponseMessage) MarshalJSON() ([]byte, error) {
+	if r.Error != nil {
+		return json.Marshal(struct {
+			JSONRPC string         `json:"jsonrpc"`
+			ID      interface{}    `json:"id"`
+			Error   *ResponseError `json:"error"`
+		}{r.JSONRPC, r.ID, r.Error})
+	}
+	return json.Marshal(struct {
+		JSONRPC string      `json:"jsonrpc"`
+		ID      interface{} `json:"id"`
+		Result  interface{} `json:"result"`
+	}{r.JSONRPC, r.ID, r.Result})
+}
+
 // NotificationMessage represents a JSON-RPC notification
 type NotificationMessage struct {
 	Message
@@ -42,6 +61,7 @@ const (
 	ParseError           = -32700
 	InvalidRequest       = -32600
 	MethodNotFound       = -32601
+	RequestFailed        = -32803
 	InvalidParams        = -32602
 	InternalError        = -32603
 	ServerNotInitialized = -32002
@@ -53,8 +73,26 @@ const (
 type InitializeParams struct {
 	ProcessID             *int               `json:"processId"`
 	RootURI               string             `json:"rootUri"`
+	WorkspaceFolders      []WorkspaceFolder  `json:"workspaceFolders,omitempty"`
 	Capabilities          ClientCapabilities `json:"capabilities"`
 	InitializationOptions interface{}        `json:"initializationOptions,omitempty"`
+}
+
+// WorkspaceFolder is one folder the client has open.
+type WorkspaceFolder struct {
+	URI  string `json:"uri"`
+	Name string `json:"name"`
+}
+
+// RenameOptions advertises rename, with prepareRename.
+type RenameOptions struct {
+	PrepareProvider bool `json:"prepareProvider"`
+}
+
+// PrepareRenameResult is the range to rename and its current text.
+type PrepareRenameResult struct {
+	Range       Range  `json:"range"`
+	Placeholder string `json:"placeholder"`
 }
 
 // ClientCapabilities represents client capabilities
@@ -129,7 +167,7 @@ type ServerCapabilities struct {
 	DocumentSymbolProvider     bool                     `json:"documentSymbolProvider,omitempty"`
 	WorkspaceSymbolProvider    bool                     `json:"workspaceSymbolProvider,omitempty"`
 	DocumentFormattingProvider bool                     `json:"documentFormattingProvider,omitempty"`
-	RenameProvider             bool                     `json:"renameProvider,omitempty"`
+	RenameProvider             interface{}              `json:"renameProvider,omitempty"`
 	CodeActionProvider         *CodeActionOptions       `json:"codeActionProvider,omitempty"`
 	InlayHintProvider          *InlayHintOptions        `json:"inlayHintProvider,omitempty"`
 	SemanticTokensProvider     *SemanticTokensOptions   `json:"semanticTokensProvider,omitempty"`

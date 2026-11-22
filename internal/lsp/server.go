@@ -1,3 +1,6 @@
+// Package lsp is Lunar's language server. It analyses the workspace with
+// the same project pipeline as `lunar build`, so the editor and the compiler
+// never disagree, and answers questions from the checker's symbol index.
 package lsp
 
 import (
@@ -7,276 +10,392 @@ import (
 	"io"
 	"log"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
+
+	"lunar/internal/diag"
+	"lunar/internal/project"
+	"lunar/internal/source"
+	"lunar/internal/version"
 )
 
-// Server represents the LSP server
+// Server is one language server session.
 type Server struct {
-	initialized  bool
-	shutdown     bool
-	documents    *DocumentManager
-	diagnostics  *DiagnosticsEngine
-	declarations *DeclarationManager
-	rootURI      string
-	logger       *log.Logger
-	reader       *bufio.Reader
-	writer       io.Writer
+	reader  *bufio.Reader
+	writer  io.Writer
+	writeMu sync.Mutex
+	logger  *log.Logger
+
+	// mu guards everything below; the message loop and the debounce timer
+	// both take it.
+	mu          sync.Mutex
+	initialized bool
+	shutdown    bool
+	root        string
+	docs        map[string]string // open buffers by absolute path
+	debounce    time.Duration
+	timer       *time.Timer
+	dirty       bool
+
+	prog      *project.Program
+	modules   map[string]*project.Module // last module without syntax errors, by path
+	published map[string]bool            // files whose diagnostics were last non-empty
+	files     map[string]*source.File    // text of files positions were mapped in
 }
 
-// NewServer creates a new LSP server
+// NewServer creates a server speaking on stdin and stdout.
 func NewServer() *Server {
 	return &Server{
-		documents:    NewDocumentManager(),
-		diagnostics:  NewDiagnosticsEngine(),
-		declarations: NewDeclarationManager(),
-		logger:       log.New(os.Stderr, "[lunar-lsp] ", log.LstdFlags),
-		reader:       bufio.NewReader(os.Stdin),
-		writer:       os.Stdout,
+		reader:    bufio.NewReader(os.Stdin),
+		writer:    os.Stdout,
+		logger:    log.New(os.Stderr, "[lunar-lsp] ", log.LstdFlags),
+		docs:      map[string]string{},
+		debounce:  150 * time.Millisecond,
+		modules:   map[string]*project.Module{},
+		published: map[string]bool{},
 	}
 }
 
-// Run starts the LSP server main loop
+// Run serves requests until the client disconnects or asks to exit.
 func (s *Server) Run() error {
-	s.logger.Println("Lunar LSP server starting...")
-
 	for {
 		msg, err := s.readMessage()
 		if err != nil {
 			if err == io.EOF {
-				s.logger.Println("Connection closed")
 				return nil
 			}
-			s.logger.Printf("Error reading message: %v", err)
-			continue
+			return err
 		}
-
 		if err := s.handleMessage(msg); err != nil {
-			s.logger.Printf("Error handling message: %v", err)
+			s.logger.Printf("error handling message: %v", err)
 		}
-
-		if s.shutdown {
-			s.logger.Println("Server shutting down...")
+		s.mu.Lock()
+		done := s.shutdown
+		s.mu.Unlock()
+		if done {
 			return nil
 		}
 	}
 }
 
-// readMessage reads a JSON-RPC message from stdin
 func (s *Server) readMessage() (json.RawMessage, error) {
-	// Read headers
-	var contentLength int
+	contentLength := 0
 	for {
 		line, err := s.reader.ReadString('\n')
 		if err != nil {
 			return nil, err
 		}
-
 		line = strings.TrimSpace(line)
 		if line == "" {
-			break // End of headers
+			break
 		}
-
 		if strings.HasPrefix(line, "Content-Length:") {
-			lengthStr := strings.TrimSpace(strings.TrimPrefix(line, "Content-Length:"))
-			contentLength, err = strconv.Atoi(lengthStr)
-			if err != nil {
+			if contentLength, err = strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "Content-Length:"))); err != nil {
 				return nil, fmt.Errorf("invalid Content-Length: %v", err)
 			}
 		}
 	}
-
 	if contentLength == 0 {
 		return nil, fmt.Errorf("missing Content-Length header")
 	}
-
-	// Read content
 	content := make([]byte, contentLength)
-	_, err := io.ReadFull(s.reader, content)
-	if err != nil {
+	if _, err := io.ReadFull(s.reader, content); err != nil {
 		return nil, err
 	}
-
 	return json.RawMessage(content), nil
 }
 
-// sendResponse sends a JSON-RPC response
-func (s *Server) sendResponse(id interface{}, result interface{}) error {
-	response := ResponseMessage{
-		Message: Message{JSONRPC: "2.0"},
-		ID:      id,
-		Result:  result,
-	}
-	return s.sendMessage(response)
-}
-
-// sendError sends a JSON-RPC error response
-func (s *Server) sendError(id interface{}, code int, message string) error {
-	response := ResponseMessage{
-		Message: Message{JSONRPC: "2.0"},
-		ID:      id,
-		Error: &ResponseError{
-			Code:    code,
-			Message: message,
-		},
-	}
-	return s.sendMessage(response)
-}
-
-// sendNotification sends a JSON-RPC notification
-func (s *Server) sendNotification(method string, params interface{}) error {
-	notification := NotificationMessage{
-		Message: Message{JSONRPC: "2.0"},
-		Method:  method,
-		Params:  params,
-	}
-	return s.sendMessage(notification)
-}
-
-// sendMessage sends a JSON-RPC message to stdout
 func (s *Server) sendMessage(msg interface{}) error {
 	content, err := json.Marshal(msg)
 	if err != nil {
 		return err
 	}
-
-	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(content))
-	if _, err := s.writer.Write([]byte(header)); err != nil {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if _, err := fmt.Fprintf(s.writer, "Content-Length: %d\r\n\r\n", len(content)); err != nil {
 		return err
 	}
-	if _, err := s.writer.Write(content); err != nil {
-		return err
-	}
-
-	return nil
+	_, err = s.writer.Write(content)
+	return err
 }
 
-// handleMessage handles an incoming JSON-RPC message
-func (s *Server) handleMessage(content json.RawMessage) error {
-	// Parse the base message to get method
-	var baseMsg struct {
-		ID     interface{} `json:"id"`
-		Method string      `json:"method"`
-	}
+func (s *Server) sendResponse(id interface{}, result interface{}) error {
+	return s.sendMessage(ResponseMessage{Message: Message{JSONRPC: "2.0"}, ID: id, Result: result})
+}
 
-	if err := json.Unmarshal(content, &baseMsg); err != nil {
+func (s *Server) sendError(id interface{}, code int, message string) error {
+	return s.sendMessage(ResponseMessage{Message: Message{JSONRPC: "2.0"}, ID: id, Error: &ResponseError{Code: code, Message: message}})
+}
+
+func (s *Server) sendNotification(method string, params interface{}) error {
+	return s.sendMessage(NotificationMessage{Message: Message{JSONRPC: "2.0"}, Method: method, Params: params})
+}
+
+// request is a decoded JSON-RPC message.
+type request struct {
+	ID     interface{}     `json:"id"`
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params"`
+}
+
+func (s *Server) handleMessage(content json.RawMessage) error {
+	var req request
+	if err := json.Unmarshal(content, &req); err != nil {
 		return err
 	}
 
-	// Check if server is initialized for non-initialize requests
-	if !s.initialized && baseMsg.Method != "initialize" && baseMsg.Method != "exit" {
-		if baseMsg.ID != nil {
-			return s.sendError(baseMsg.ID, ServerNotInitialized, "Server not initialized")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.initialized && req.Method != "initialize" && req.Method != "exit" {
+		if req.ID != nil {
+			return s.sendError(req.ID, ServerNotInitialized, "server not initialized")
 		}
 		return nil
 	}
 
-	// Route to appropriate handler
-	switch baseMsg.Method {
-	// Lifecycle
+	switch req.Method {
 	case "initialize":
 		return s.handleInitialize(content)
 	case "initialized":
-		return s.handleInitialized()
+		s.initialized = true
+		return nil
 	case "shutdown":
-		return s.handleShutdown(baseMsg.ID)
+		s.shutdown = true
+		return s.sendResponse(req.ID, nil)
 	case "exit":
-		return s.handleExit()
-
-	// Document synchronization
+		s.shutdown = true
+		return nil
 	case "textDocument/didOpen":
-		return s.handleDidOpen(content)
-	case "textDocument/didChange":
-		return s.handleDidChange(content)
-	case "textDocument/didClose":
-		return s.handleDidClose(content)
-	case "textDocument/didSave":
-		return s.handleDidSave(content)
-
-	// Workspace notifications
-	case "workspace/didChangeWatchedFiles":
-		return s.handleDidChangeWatchedFiles(content)
-
-	// Language features
-	case "textDocument/hover":
-		return s.handleHover(content, baseMsg.ID)
-	case "textDocument/definition":
-		return s.handleDefinition(content, baseMsg.ID)
-	case "textDocument/completion":
-		return s.handleCompletion(content, baseMsg.ID)
-	case "textDocument/signatureHelp":
-		return s.handleSignatureHelp(content, baseMsg.ID)
-	case "textDocument/documentSymbol":
-		return s.handleDocumentSymbol(content, baseMsg.ID)
-	case "workspace/symbol":
-		return s.handleWorkspaceSymbol(content, baseMsg.ID)
-	case "textDocument/references":
-		return s.handleReferences(content, baseMsg.ID)
-	case "textDocument/rename":
-		return s.handleRename(content, baseMsg.ID)
-	case "textDocument/codeAction":
-		return s.handleCodeAction(content, baseMsg.ID)
-	case "textDocument/inlayHint":
-		return s.handleInlayHint(content, baseMsg.ID)
-	case "textDocument/semanticTokens/full":
-		return s.handleSemanticTokens(content, baseMsg.ID)
-
-	default:
-		s.logger.Printf("Unhandled method: %s", baseMsg.Method)
-		if baseMsg.ID != nil {
-			return s.sendError(baseMsg.ID, MethodNotFound, fmt.Sprintf("Method not found: %s", baseMsg.Method))
+		var p DidOpenTextDocumentParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return err
 		}
+		s.docs[uriToPath(p.TextDocument.URI)] = p.TextDocument.Text
+		s.changed()
+		return nil
+	case "textDocument/didChange":
+		var p DidChangeTextDocumentParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return err
+		}
+		if n := len(p.ContentChanges); n > 0 {
+			// Full sync: the last change is the whole new text.
+			s.docs[uriToPath(p.TextDocument.URI)] = p.ContentChanges[n-1].Text
+		}
+		s.changed()
+		return nil
+	case "textDocument/didClose":
+		var p DidCloseTextDocumentParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return err
+		}
+		delete(s.docs, uriToPath(p.TextDocument.URI))
+		s.changed()
+		return nil
+	case "textDocument/didSave", "workspace/didChangeWatchedFiles":
+		s.changed()
+		return nil
 	}
 
-	return nil
+	if req.ID == nil {
+		return nil // an unhandled notification
+	}
+
+	// Answer from the current text, not from before the last keystroke.
+	s.flush()
+
+	var result interface{}
+	var err error
+	switch req.Method {
+	case "textDocument/definition":
+		result, err = withPosition(req.Params, s.definition)
+	case "textDocument/references":
+		var p ReferenceParams
+		if err = json.Unmarshal(req.Params, &p); err == nil {
+			result = s.references(p.TextDocument.URI, p.Position, p.Context.IncludeDeclaration)
+		}
+	case "textDocument/hover":
+		result, err = withPosition(req.Params, s.hover)
+	case "textDocument/prepareRename":
+		result, err = withPosition(req.Params, s.prepareRename)
+	case "textDocument/rename":
+		var p RenameParams
+		if err = json.Unmarshal(req.Params, &p); err == nil {
+			result, err = s.rename(p.TextDocument.URI, p.Position, p.NewName)
+		}
+	case "textDocument/completion":
+		result, err = withPosition(req.Params, s.completion)
+	case "textDocument/signatureHelp":
+		result, err = withPosition(req.Params, s.signatureHelp)
+	case "textDocument/documentSymbol":
+		var p DocumentSymbolParams
+		if err = json.Unmarshal(req.Params, &p); err == nil {
+			result = s.documentSymbols(p.TextDocument.URI)
+		}
+	case "workspace/symbol":
+		var p WorkspaceSymbolParams
+		if err = json.Unmarshal(req.Params, &p); err == nil {
+			result = s.workspaceSymbols(p.Query)
+		}
+	default:
+		return s.sendError(req.ID, MethodNotFound, "method not supported: "+req.Method)
+	}
+	if err != nil {
+		return s.sendError(req.ID, RequestFailed, err.Error())
+	}
+	return s.sendResponse(req.ID, result)
 }
 
-// publishDiagnostics publishes diagnostics for a document
-func (s *Server) publishDiagnostics(uri string) {
-	content := s.documents.GetContent(uri)
-	if content == "" {
+// withPosition decodes TextDocumentPositionParams for a handler.
+func withPosition(raw json.RawMessage, handler func(uri string, pos Position) (interface{}, error)) (interface{}, error) {
+	var p TextDocumentPositionParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, err
+	}
+	return handler(p.TextDocument.URI, p.Position)
+}
+
+func (s *Server) handleInitialize(content json.RawMessage) error {
+	var req struct {
+		ID     interface{}      `json:"id"`
+		Params InitializeParams `json:"params"`
+	}
+	if err := json.Unmarshal(content, &req); err != nil {
+		return s.sendError(req.ID, InvalidParams, err.Error())
+	}
+	switch {
+	case len(req.Params.WorkspaceFolders) > 0:
+		s.root = uriToPath(req.Params.WorkspaceFolders[0].URI)
+	case req.Params.RootURI != "":
+		s.root = uriToPath(req.Params.RootURI)
+	}
+	s.dirty = true
+	// Requests may follow as soon as the client has this response.
+	s.initialized = true
+
+	return s.sendResponse(req.ID, InitializeResult{
+		ServerInfo: &ServerInfo{Name: "lunar", Version: version.Version},
+		Capabilities: ServerCapabilities{
+			TextDocumentSync:        &TextDocumentSyncOptions{OpenClose: true, Change: SyncFull, Save: &SaveOptions{IncludeText: false}},
+			HoverProvider:           true,
+			CompletionProvider:      &CompletionOptions{TriggerCharacters: []string{".", ":"}},
+			SignatureHelpProvider:   &SignatureHelpOptions{TriggerCharacters: []string{"(", ","}},
+			DefinitionProvider:      true,
+			ReferencesProvider:      true,
+			DocumentSymbolProvider:  true,
+			WorkspaceSymbolProvider: true,
+			RenameProvider:          RenameOptions{PrepareProvider: true},
+		},
+	})
+}
+
+// changed schedules a re-analysis. Typing produces a burst of changes, so
+// it waits for a pause; any request in the meantime analyses first.
+func (s *Server) changed() {
+	s.dirty = true
+	if s.debounce <= 0 {
+		s.flush()
 		return
 	}
+	if s.timer != nil {
+		s.timer.Stop()
+	}
+	s.timer = time.AfterFunc(s.debounce, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.flush()
+	})
+}
 
-	diagnostics := s.diagnostics.Analyze(uri, content)
+// flush re-analyses if anything changed since the last analysis. The
+// caller holds s.mu.
+func (s *Server) flush() {
+	if !s.dirty {
+		return
+	}
+	s.dirty = false
+	s.analyze()
+}
 
-	params := PublishDiagnosticsParams{
-		URI:         uri,
-		Diagnostics: diagnostics,
+// analyze checks the workspace and publishes diagnostics for every file,
+// clearing those that have none now. The caller holds s.mu.
+func (s *Server) analyze() {
+	opts := project.Options{Dir: s.root, Overlay: map[string]string{}}
+	for path, text := range s.docs {
+		opts.Overlay[path] = text
+	}
+	if s.root == "" {
+		// No workspace folder: analyse the open files on their own.
+		for path := range s.docs {
+			opts.Files = append(opts.Files, path)
+		}
+		if len(opts.Files) == 0 {
+			return
+		}
 	}
 
-	if err := s.sendNotification("textDocument/publishDiagnostics", params); err != nil {
-		s.logger.Printf("Error publishing diagnostics: %v", err)
+	s.files = map[string]*source.File{}
+	p, diags := project.Open(opts)
+	if diags.HasErrors() {
+		s.logger.Printf("cannot open the project: %s", diags[0].Message)
+		s.publish(diags)
+		return
+	}
+	prog, diags := p.Check()
+	s.prog = prog
+
+	// A module whose text does not parse keeps serving its last good index.
+	broken := map[string]bool{}
+	for _, d := range diags {
+		if d.Code == "syntax" {
+			broken[d.File] = true
+		}
+	}
+	for _, m := range prog.Modules {
+		if !broken[m.Path] && m.Index != nil {
+			s.modules[m.Path] = m
+		}
+	}
+	s.publish(diags)
+}
+
+// publish sends the diagnostics for every file that has some, and an empty
+// list for every file that had some before.
+func (s *Server) publish(diags diag.List) {
+	byFile := map[string][]Diagnostic{}
+	for _, d := range diags {
+		if d.File == "" || strings.HasPrefix(d.File, "<") {
+			continue
+		}
+		byFile[d.File] = append(byFile[d.File], Diagnostic{
+			Range:    s.rangeOf(d.File, d.Line, d.Column, d.EndLine, d.EndColumn),
+			Severity: diagnosticSeverity(d.Severity),
+			Code:     d.Code,
+			Source:   "lunar",
+			Message:  d.Message,
+		})
+	}
+	for file := range s.published {
+		if _, still := byFile[file]; !still {
+			s.sendNotification("textDocument/publishDiagnostics", PublishDiagnosticsParams{URI: pathToURI(file), Diagnostics: []Diagnostic{}})
+			delete(s.published, file)
+		}
+	}
+	for file, list := range byFile {
+		s.sendNotification("textDocument/publishDiagnostics", PublishDiagnosticsParams{URI: pathToURI(file), Diagnostics: list})
+		s.published[file] = true
 	}
 }
 
-// getStdlibPathForLSP gets the stdlib path for the LSP type checker
-func getStdlibPathForLSP() string {
-	// Get the executable path
-	exePath, err := os.Executable()
-	if err != nil {
-		return ""
+func diagnosticSeverity(sev diag.Severity) DiagnosticSeverity {
+	switch sev {
+	case diag.Warning:
+		return SeverityWarning
+	case diag.Info:
+		return SeverityInformation
 	}
-
-	// Get the directory containing the executable
-	exeDir := filepath.Dir(exePath)
-
-	// Check if stdlib exists in the same directory as the executable
-	stdlibPath := filepath.Join(exeDir, "stdlib")
-	if _, err := os.Stat(stdlibPath); err == nil {
-		return stdlibPath
-	}
-
-	// Check one level up (for development builds)
-	stdlibPath = filepath.Join(exeDir, "..", "stdlib")
-	if _, err := os.Stat(stdlibPath); err == nil {
-		absPath, err := filepath.Abs(stdlibPath)
-		if err == nil {
-			return absPath
-		}
-		return stdlibPath
-	}
-
-	return ""
+	return SeverityError
 }

@@ -1439,7 +1439,8 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 	// Check if this is a method call on an object (DotExpression)
 	// In Lunar: object.method() should compile to Lua: object:method() or object.method()
 	// depending on whether it's an instance method or static method
-	if dotExpr, ok := node.Function.(*ast.DotExpression); ok {
+	// m.Enemy(3) constructs; it is not a call of a member named Enemy.
+	if dotExpr, ok := node.Function.(*ast.DotExpression); ok && !node.ConstructorCall {
 		// Right side should be an identifier (the property/method name)
 		var property string
 		if rightIdent, ok := dotExpr.Right.(*ast.Identifier); ok {

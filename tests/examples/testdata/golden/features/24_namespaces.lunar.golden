@@ -5,6 +5,30 @@ function Geometry.area(w, h)
 end
 
 
+local Game = {}
+
+local Orc = {}
+Orc.__index = Orc
+
+function Orc.new(hp)
+    local self = setmetatable({}, Orc)
+    self.hp = nil
+    self.hp = hp
+    return self
+end
+
+function Orc:hit(n)
+    self.hp = self.hp - n
+    return self.hp
+end
+
+Game.Orc = Orc
+
+
+local orc = Game.Orc.new(5)
+
 print(Geometry.area(3, 4))
 
 assert(Geometry.area(3, 4) == 12)
+
+assert(orc:hit(2) == 3 and Game.Orc.new(1):hit(1) == 0)

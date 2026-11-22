@@ -124,3 +124,26 @@ print(x.hit(3))
 `)
 	assertContains(t, out, "x:hit(3)")
 }
+
+// A class exported from a namespace is a class like any other.
+func TestNamespaceClassConstructsAndUsesSelf(t *testing.T) {
+	out := generateChecked(t, `namespace Game
+    export class Enemy
+        hp: number
+        constructor(hp: number)
+            self.hp = hp
+        end
+        hit(n: number): number
+            self.hp = self.hp - n
+            return self.hp
+        end
+    end
+end
+local e = Game.Enemy(3)
+local f = Game.Enemy.new(4)
+print(e.hit(1), f.hit(1))
+`)
+	assertContains(t, out, "Game.Enemy.new(3)")
+	assertContains(t, out, "Game.Enemy.new(4)")
+	assertContains(t, out, "e:hit(1)")
+}

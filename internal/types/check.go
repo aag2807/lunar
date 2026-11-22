@@ -4785,9 +4785,16 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 	case *ClassType:
 		// The class's own name on the left means the class itself rather than
 		// an instance; one type stands for both.
+		// So does a namespace or module member of that name: Game.Enemy,
+		// m.Enemy.
 		viaClassName := false
-		if ident, ok := node.Left.(*ast.Identifier); ok && ident.Value == typ.Name {
-			viaClassName = true
+		switch left := node.Left.(type) {
+		case *ast.Identifier:
+			viaClassName = left.Value == typ.Name
+		case *ast.DotExpression:
+			if right, ok := left.Right.(*ast.Identifier); ok {
+				viaClassName = right.Value == typ.Name
+			}
 		}
 
 		// ClassName.new(...) is the constructor every Lunar class gets.
@@ -5405,6 +5412,11 @@ func (c *Checker) registerNamespace(node *ast.NamespaceDeclaration) {
 
 	// Register all declarations in the namespace with prefixed names
 	for _, stmt := range node.Statements {
+		// `export` inside a namespace marks what the namespace's table
+		// holds; the declaration is registered the same either way.
+		if exp, ok := stmt.(*ast.ExportStatement); ok {
+			stmt = exp.Statement
+		}
 		switch s := stmt.(type) {
 		case *ast.ClassDeclaration:
 			c.registerClass(s)

@@ -275,3 +275,38 @@ func TestImportedNamesResolveToTheirDefinition(t *testing.T) {
 		}
 	}
 }
+
+// A class reached through `import * as m` constructs like one imported by
+// name.
+func TestNamespaceImportedClassConstructs(t *testing.T) {
+	root := tree(t, map[string]string{
+		"lunar.config.json": `{"outDir": "../build"}`,
+		"enemy.lunar": `export class Enemy
+    hp: number
+    constructor(hp: number)
+        self.hp = hp
+    end
+    hit(n: number): number
+        self.hp = self.hp - n
+        return self.hp
+    end
+end
+`,
+		"main.lunar": `import * as m from "./enemy"
+local e = m.Enemy(3)
+local f = m.Enemy.new(4)
+print(e.hit(1), f.hit(1))
+`,
+	})
+	prog := checkClean(t, open(t, Options{Dir: root}))
+	outs, diags := prog.Emit()
+	if len(diags) > 0 {
+		t.Fatalf("emit: %v", messagesOf(diags))
+	}
+	main := string(outputNamed(t, outs, "main.lua"))
+	for _, want := range []string{"m.Enemy.new(3)", "m.Enemy.new(4)", "e:hit(1)", "f:hit(1)"} {
+		if !strings.Contains(main, want) {
+			t.Errorf("main.lua lacks %q:\n%s", want, main)
+		}
+	}
+}

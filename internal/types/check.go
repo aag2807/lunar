@@ -243,6 +243,9 @@ type Checker struct {
 	// treated as an overload of itself.
 	hoisted map[string]*FunctionType
 
+	// exprTypes records the type computed for each expression checked.
+	exprTypes map[ast.Expression]Type
+
 	// chunkReturns are the return statements of the chunk itself, outside
 	// any function.
 	chunkReturns []*ast.ReturnStatement
@@ -635,7 +638,7 @@ func (c *Checker) fillEnumShell(t *EnumType) *EnumType {
 
 // didYouMean returns " Did you mean 'x'?" for the closest candidate, or "".
 func didYouMean(name string, candidates []string) string {
-	if similar := findSimilarNames(name, candidates, 2, 1); len(similar) > 0 {
+	if similar := findSimilarNames(name, candidates, suggestionDistance(name), 1); len(similar) > 0 {
 		return fmt.Sprintf(" Did you mean '%s'?", similar[0])
 	}
 	return ""
@@ -2257,8 +2260,11 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 		// Determine final type and check assignability
 		var finalType Type
 		if declaredType != nil {
-			// Type is declared - check if value is assignable
-			if !valueType.IsAssignableTo(declaredType) {
+			// Type is declared - check if value is assignable. A table
+			// literal is checked field by field, naming the field at fault.
+			if i < len(node.Values) && c.reportLiteralFields(node.Values[i], declaredType) {
+				// reported
+			} else if !valueType.IsAssignableTo(declaredType) {
 				c.addError(
 					fmt.Sprintf("Cannot assign type '%s' to variable '%s' of type '%s'",
 						valueType.String(), name.Value, declaredType.String()),
@@ -2591,6 +2597,9 @@ func (c *Checker) checkReturnStatement(node *ast.ReturnStatement) {
 	// Handle single return value
 	if len(node.ReturnValues) == 1 {
 		returnType := c.checkExpression(node.ReturnValues[0])
+		if c.reportLiteralFields(node.ReturnValues[0], c.currentFunctionReturnType) {
+			return
+		}
 		if !returnType.IsAssignableTo(c.currentFunctionReturnType) {
 			c.addError(
 				fmt.Sprintf("Cannot return type '%s' from function with return type '%s'",
@@ -3267,6 +3276,14 @@ func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target as
 		return
 	}
 
+	if len(node.Targets) == len(node.Values) {
+		for i, t := range node.Targets {
+			if t == target && c.reportLiteralFields(node.Values[i], targetType) {
+				return
+			}
+		}
+	}
+
 	if !valueType.IsAssignableTo(targetType) {
 		c.addError(
 			fmt.Sprintf("Cannot assign type '%s' to type '%s'",
@@ -3668,7 +3685,17 @@ func (c *Checker) checkExpression(expr ast.Expression) Type {
 	if expr == nil {
 		return Void
 	}
+	t := c.checkExpressionKind(expr)
+	if c.exprTypes == nil {
+		c.exprTypes = make(map[ast.Expression]Type)
+	}
+	c.exprTypes[expr] = t
+	return t
+}
 
+// checkExpressionKind computes an expression's type; checkExpression records
+// the result so later checks can ask for it without checking twice.
+func (c *Checker) checkExpressionKind(expr ast.Expression) Type {
 	switch node := expr.(type) {
 	case *ast.Identifier:
 		return c.checkIdentifier(node)
@@ -4118,6 +4145,9 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 		// Check argument types
 		for i, arg := range node.Arguments {
 			argType := c.checkExpression(arg)
+			if c.reportLiteralFields(arg, fnType.Parameters[i]) {
+				continue
+			}
 			if !argType.IsAssignableTo(fnType.Parameters[i]) {
 				c.addError(
 					fmt.Sprintf("Argument %d: cannot pass type '%s' to parameter of type '%s'",
@@ -4319,6 +4349,9 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 				continue
 			}
 
+			if c.reportLiteralFields(arg, paramType) {
+				continue
+			}
 			if !argType.IsAssignableTo(paramType) {
 				c.addError(
 					fmt.Sprintf("Argument %d: cannot pass type '%s' to parameter of type '%s'",

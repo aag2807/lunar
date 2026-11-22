@@ -116,9 +116,12 @@ local p: Point = { x = 10, y = 20, z = 30 }
 	checker := NewChecker()
 	errors := checker.Check(statements)
 
-	// Extra properties are allowed (structural subtyping)
-	if len(errors) > 0 {
-		t.Errorf("Expected no type errors (extra properties allowed), got %d:", len(errors))
+	// A field the type does not have is reported on a literal written for
+	// that type: it is almost always a misspelling, and for an optional
+	// field nothing else would catch it. A value that is not a fresh
+	// literal is still checked structurally.
+	if len(errors) != 1 || errors[0].Message != "'z' is not a field of 'Point'" {
+		t.Errorf("Expected one error naming the extra field 'z', got %d:", len(errors))
 		for _, err := range errors {
 			t.Errorf("  %s", err.Message)
 		}

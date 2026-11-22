@@ -991,6 +991,43 @@ func (t *InterfaceType) requiredProperties() map[string]Type {
 	return required
 }
 
+// methodType looks a method up on the interface or what it extends.
+func (t *InterfaceType) methodType(name string) (*FunctionType, bool) {
+	if m, ok := t.Methods[name]; ok {
+		return m, true
+	}
+	for _, parent := range t.Extends {
+		if parent == nil {
+			continue
+		}
+		if m, ok := parent.methodType(name); ok {
+			return m, true
+		}
+	}
+	return nil, false
+}
+
+// requiredMethods returns every method the interface requires, inherited
+// ones included.
+func (t *InterfaceType) requiredMethods() map[string]*FunctionType {
+	out := map[string]*FunctionType{}
+	var collect func(*InterfaceType, map[*InterfaceType]bool)
+	collect = func(it *InterfaceType, seen map[*InterfaceType]bool) {
+		if it == nil || seen[it] {
+			return
+		}
+		seen[it] = true
+		for _, parent := range it.Extends {
+			collect(parent, seen)
+		}
+		for name, m := range it.Methods {
+			out[name] = m
+		}
+	}
+	collect(t, map[*InterfaceType]bool{})
+	return out
+}
+
 // propertyType looks a property up on the interface or what it extends.
 func (t *InterfaceType) propertyType(name string) (Type, bool) {
 	if typ, ok := t.Properties[name]; ok {

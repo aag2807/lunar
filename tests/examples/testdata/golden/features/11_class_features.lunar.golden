@@ -1,4 +1,6 @@
-local Account = {}
+local Account, Point, Savings, Plain
+
+Account = {}
 Account.__index = Account
 Account.__getters = {}
 Account.__setters = {}
@@ -40,7 +42,7 @@ Account.__newindex = function(self, key, value)
 end
 
 
-local Point = {}
+Point = {}
 Point.__index = Point
 
 function Point.__init(self, x, y)
@@ -66,7 +68,7 @@ local p = Point.new(2, 3)
 
 print(p.x, p.y, p:sum())
 
-local Savings = {}
+Savings = {}
 setmetatable(Savings, {__index = Account})
 Savings.__index = Savings
 Savings.__getters = setmetatable({}, {__index = Account.__getters})
@@ -103,7 +105,7 @@ Savings.__newindex = function(self, key, value)
 end
 
 
-local Plain = {}
+Plain = {}
 setmetatable(Plain, {__index = Account})
 Plain.__index = Plain
 

@@ -1,4 +1,6 @@
-local Animal = {}
+local Animal, Dog, Puppy
+
+Animal = {}
 Animal.__index = Animal
 
 function Animal.__init(self, name, legs)
@@ -24,7 +26,7 @@ function Animal.kingdom()
 end
 
 
-local Dog = {}
+Dog = {}
 setmetatable(Dog, {__index = Animal})
 Dog.__index = Dog
 
@@ -74,7 +76,7 @@ print(a:speak(), d:speak())
 
 print(Animal.kingdom())
 
-local Puppy = {}
+Puppy = {}
 setmetatable(Puppy, {__index = Dog})
 Puppy.__index = Puppy
 

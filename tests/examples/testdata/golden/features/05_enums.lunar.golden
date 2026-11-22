@@ -1,15 +1,17 @@
-local Color = {
+local Color, Status, Rank
+
+Color = {
     Red = 0,
     Green = 1,
     Blue = 2,
 }
 
-local Status = {
+Status = {
     Active = 1,
     Inactive = 0,
 }
 
-local Rank = {
+Rank = {
     Grunt = 0,
     Elite = 10,
     Boss = 11,

@@ -1,4 +1,6 @@
-local Circle = {}
+local Circle, Square
+
+Circle = {}
 Circle.__index = Circle
 
 function Circle.__init(self, radius)
@@ -19,7 +21,7 @@ function Circle:name()
 end
 
 
-local Square = {}
+Square = {}
 Square.__index = Square
 
 function Square.__init(self, side)

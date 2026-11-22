@@ -1,4 +1,6 @@
-local Point = {}
+local Point
+
+Point = {}
 Point.__index = Point
 
 function Point.__init(self, x, y)

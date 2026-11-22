@@ -18,9 +18,12 @@ type Generator struct {
 	currentColumn    int
 	sourceFile       string
 	classParents     map[string]string // Track parent class names for super
-	currentClassName string            // Current class being generated
-	exports          []string          // Track exported names for module generation
-	target           string            // Target Lua version: lua53 or lua54
+	// forwardDeclared are the top-level classes and enums declared local at
+	// the start of the chunk, which their declarations then assign.
+	forwardDeclared  map[string]bool
+	currentClassName string   // Current class being generated
+	exports          []string // Track exported names for module generation
+	target           string   // Target Lua version: lua53 or lua54
 }
 
 // newGenerator is the one constructor every public variant goes through, so
@@ -109,7 +112,24 @@ func (g *Generator) Generate(statements []ast.Statement) string {
 	// Exported functions are module members, not globals. Declaring them all
 	// local up front keeps forward references working: `function a()` then
 	// assigns the local, and a body can call one defined further down.
-	if names := exportedFunctionNames(statements); len(names) > 0 {
+	// So are the file's classes and enums: a function above a class may
+	// name it, and runs after it is set up.
+	names := exportedFunctionNames(statements)
+	g.forwardDeclared = map[string]bool{}
+	for _, stmt := range statements {
+		if exp, ok := stmt.(*ast.ExportStatement); ok {
+			stmt = exp.Statement
+		}
+		switch n := stmt.(type) {
+		case *ast.ClassDeclaration:
+			names = append(names, n.Name.Value)
+			g.forwardDeclared[n.Name.Value] = true
+		case *ast.EnumDeclaration:
+			names = append(names, n.Name.Value)
+			g.forwardDeclared[n.Name.Value] = true
+		}
+	}
+	if len(names) > 0 {
 		decl := "local " + strings.Join(names, ", ") + "\n\n"
 		g.write(decl)
 		output.WriteString(decl)
@@ -667,6 +687,15 @@ func (g *Generator) generateAssignmentStatement(node *ast.AssignmentStatement) s
 	return output.String()
 }
 
+// localUnlessForward is "local " for a class or enum that was not declared
+// at the start of the chunk.
+func (g *Generator) localUnlessForward(name string) string {
+	if g.indent == 0 && g.forwardDeclared[name] {
+		return ""
+	}
+	return "local "
+}
+
 // isSuperCall reports whether a statement is a call of super(...).
 func isSuperCall(stmt ast.Statement) bool {
 	es, ok := stmt.(*ast.ExpressionStatement)
@@ -747,7 +776,7 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 
 	// Create class table
 	output.WriteString(g.generateIndent())
-	output.WriteString(fmt.Sprintf("local %s = {}\n", className))
+	output.WriteString(fmt.Sprintf("%s%s = {}\n", g.localUnlessForward(className), className))
 
 	// Set up inheritance if there's a parent class
 	if node.Extends != nil {
@@ -1008,7 +1037,7 @@ func (g *Generator) generateEnumDeclaration(node *ast.EnumDeclaration) string {
 	enumName := node.Name.Value
 
 	output.WriteString(g.generateIndent())
-	output.WriteString(fmt.Sprintf("local %s = {\n", enumName))
+	output.WriteString(fmt.Sprintf("%s%s = {\n", g.localUnlessForward(enumName), enumName))
 
 	implicit := map[*ast.EnumMember]float64{}
 	values, _, _ := node.ImplicitValues()

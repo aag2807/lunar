@@ -1,0 +1,21 @@
+-- Code may name a class or an enum declared further down the file, as long
+-- as it runs after the declaration.
+class Factory
+    make(): Product
+        return Product("p")
+    end
+end
+class Product
+    constructor(public name: string)
+    end
+end
+assert(Factory().make().name == "p")
+
+local function paint(): Color
+    return Color.Green
+end
+enum Color
+    Red
+    Green
+end
+assert(paint() == Color.Green)

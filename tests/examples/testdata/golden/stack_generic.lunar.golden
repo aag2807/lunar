@@ -1,4 +1,6 @@
-local Stack = {}
+local Stack
+
+Stack = {}
 Stack.__index = Stack
 
 function Stack.__init(self)

@@ -1,4 +1,6 @@
-local Ball = {}
+local Ball
+
+Ball = {}
 Ball.__index = Ball
 
 function Ball.__init(self, x, y)

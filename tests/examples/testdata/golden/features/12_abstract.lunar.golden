@@ -1,4 +1,6 @@
-local Vehicle = {}
+local Vehicle, Car
+
+Vehicle = {}
 Vehicle.__index = Vehicle
 
 function Vehicle.__init(self, wheels)
@@ -15,7 +17,7 @@ function Vehicle:describe()
 end
 
 
-local Car = {}
+Car = {}
 setmetatable(Car, {__index = Vehicle})
 Car.__index = Car
 

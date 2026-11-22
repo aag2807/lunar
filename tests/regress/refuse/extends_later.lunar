@@ -1,0 +1,7 @@
+-- A class's parent is needed when the class is set up, so it has to be
+-- declared first.
+class B extends A
+end
+class A
+end
+-- error: 'A' has to be declared before 'B'

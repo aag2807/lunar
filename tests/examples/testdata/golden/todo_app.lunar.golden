@@ -1,10 +1,12 @@
-local Priority = {
+local Priority, TodoList
+
+Priority = {
     Low = 1,
     Medium = 2,
     High = 3,
 }
 
-local TodoList = {}
+TodoList = {}
 TodoList.__index = TodoList
 
 function TodoList.__init(self)

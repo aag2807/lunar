@@ -3847,6 +3847,14 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		return
 	}
 
+	// The parent is needed when the class is set up, so a parent declared
+	// further down the same file is still nil then.
+	if parentName := classNameOf(node.Extends); parentName != "" {
+		if sym := c.typeSyms[parentName]; sym != nil && sym.Decl.File == node.Token.File && sym.Decl.Offset > node.Token.Offset {
+			c.addError(fmt.Sprintf("'%s' has to be declared before '%s', which extends it", parentName, node.Name.Value), node.Extends.(*ast.Identifier).Token)
+		}
+	}
+
 	// Check decorators
 	for _, decorator := range node.Decorators {
 		c.checkDecorator(decorator)

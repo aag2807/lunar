@@ -4296,7 +4296,8 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 		}
 
 		// Check for constructor (or allow default constructor with no args)
-		if classType.Constructor == nil {
+		ctor := classType.EffectiveConstructor()
+		if ctor == nil {
 			// No explicit constructor - allow instantiation with zero arguments only
 			if len(node.Arguments) > 0 {
 				c.addError(
@@ -4307,7 +4308,7 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 			return classType
 		}
 
-		fnType := classType.Constructor
+		fnType := ctor
 
 		// Check if any argument is a spread expression
 		hasSpread := false
@@ -4743,7 +4744,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 			if typ.IsAbstract {
 				c.addError(fmt.Sprintf("Cannot instantiate abstract class '%s'", typ.Name), rightIdent.Token)
 			}
-			ctor := typ.Constructor
+			ctor := typ.EffectiveConstructor()
 			if ctor == nil {
 				ctor = &FunctionType{Parameters: []Type{}, ReturnType: typ}
 			}

@@ -70,6 +70,43 @@ print(a:speak(), d:speak())
 
 print(Animal.kingdom())
 
+local Puppy = {}
+setmetatable(Puppy, {__index = Dog})
+Puppy.__index = Puppy
+
+function Puppy.new(...)
+    local self = setmetatable({}, Puppy)
+    do local __parent = Dog.new(...); for __k, __v in pairs(__parent) do self[__k] = __v end end
+    return self
+end
+
+function Puppy:speak()
+    return "Yip"
+end
+
+if Dog.__getters ~= nil then
+    Puppy.__getters = setmetatable({}, {__index = Dog.__getters})
+    Puppy.__setters = setmetatable({}, {__index = Dog.__setters})
+    Puppy.__index = function(self, key)
+        local get = Puppy.__getters[key]
+        if get ~= nil then
+            return get(self)
+        end
+        return Puppy[key]
+    end
+    Puppy.__newindex = function(self, key, value)
+        local set = Puppy.__setters[key]
+        if set ~= nil then
+            set(self, value)
+            return
+        end
+        rawset(self, key, value)
+    end
+end
+
+
+local pup = Puppy.new("Bolt")
+
 assert(a:describe() == "generic has 2 legs")
 
 assert(d:describe() == "Rex has 4 legs")
@@ -77,3 +114,5 @@ assert(d:describe() == "Rex has 4 legs")
 assert(a:speak() == "..." and d:speak() == "Woof")
 
 assert(Animal.kingdom() == "Animalia")
+
+assert(pup:describe() == "Bolt has 4 legs" and pup:speak() == "Yip")

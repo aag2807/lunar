@@ -740,13 +740,17 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 		output.WriteString(g.generateIndent())
 		output.WriteString(fmt.Sprintf("function %s.new(", className))
 
-		// If there's a constructor, use its parameters
+		// If there's a constructor, use its parameters. A subclass without
+		// one takes whatever its parent's takes.
+		inheritsConstructor := node.Constructor == nil && parentName != ""
 		if node.Constructor != nil {
 			params := make([]string, len(node.Constructor.Parameters))
 			for i, param := range node.Constructor.Parameters {
 				params[i] = param.Name.Value
 			}
 			output.WriteString(strings.Join(params, ", "))
+		} else if inheritsConstructor {
+			output.WriteString("...")
 		}
 		output.WriteString(")\n")
 
@@ -767,6 +771,13 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 					output.WriteString(fmt.Sprintf("self.%s = nil\n", prop.Name.Value))
 				}
 			}
+		}
+
+		// Run the parent's constructor and keep the fields it set, as an
+		// explicit super(...) does.
+		if inheritsConstructor {
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("do local __parent = %s.new(...); for __k, __v in pairs(__parent) do self[__k] = __v end end\n", parentName))
 		}
 
 		// Initialize constructor parameter properties (if there's a constructor)

@@ -39,8 +39,18 @@ print(d.describe())
 print(a.speak(), d.speak())
 print(Animal.kingdom())
 
+-- A subclass without a constructor of its own inherits its parent's.
+class Puppy extends Dog
+    speak(): string
+        return "Yip"
+    end
+end
+
+local pup: Puppy = Puppy("Bolt")
+
 -- Checked results: a wrong answer fails the run, not just a crash.
 assert(a.describe() == "generic has 2 legs")
 assert(d.describe() == "Rex has 4 legs")
 assert(a.speak() == "..." and d.speak() == "Woof")
 assert(Animal.kingdom() == "Animalia")
+assert(pup.describe() == "Bolt has 4 legs" and pup.speak() == "Yip")

@@ -296,7 +296,7 @@ scan:
 	case *types.FunctionType:
 		fn = typ
 	case *types.ClassType:
-		fn = typ.Constructor
+		fn = typ.EffectiveConstructor()
 		if fn == nil {
 			fn = &types.FunctionType{ReturnType: typ}
 		}

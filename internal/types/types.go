@@ -876,6 +876,23 @@ func (t *ClassType) GetMethod(name string) (*FunctionType, bool) {
 	return nil, false
 }
 
+// EffectiveConstructor is the constructor a class is built with: its own,
+// or, for a subclass without one, the nearest ancestor's, returning the
+// subclass. Nil means a constructor that takes no arguments.
+func (t *ClassType) EffectiveConstructor() *FunctionType {
+	if t.Constructor != nil {
+		return t.Constructor
+	}
+	for p := t.Parent; p != nil; p = p.Parent {
+		if p.Constructor != nil {
+			inherited := *p.Constructor
+			inherited.ReturnType = t
+			return &inherited
+		}
+	}
+	return nil
+}
+
 // GetGetter returns a property getter, checking the inheritance chain.
 func (t *ClassType) GetGetter(name string) (*FunctionType, bool) {
 	if fn, ok := t.Getters[name]; ok {

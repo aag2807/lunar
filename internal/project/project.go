@@ -216,7 +216,16 @@ func Open(opts Options) (*Project, diag.List) {
 	}
 	seen := map[string]bool{}
 	for i, path := range declPaths {
-		files, err := p.scan(path, ".d.lunar")
+		var files []string
+		var err error
+		if i == 0 && !found && len(opts.Files) > 0 {
+			// No project: a lone file sees the declarations beside it,
+			// not everything below its folder.
+			files, err = filepath.Glob(filepath.Join(path, "*.d.lunar"))
+			sort.Strings(files)
+		} else {
+			files, err = p.scan(path, ".d.lunar")
+		}
 		if err != nil && i > 0 {
 			return nil, configError("declaration path '%s' does not exist", path)
 		}
@@ -233,6 +242,10 @@ func Open(opts Options) (*Project, diag.List) {
 			abs, err := filepath.Abs(f)
 			if err != nil {
 				return nil, configError("%v", err)
+			}
+			if rel, err := filepath.Rel(p.Root, abs); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return nil, configError("%s is outside rootDir (%s) of %s; move it under rootDir, or compile the project with lunar build",
+					filepath.Base(abs), p.Root, configPath)
 			}
 			p.Sources = append(p.Sources, abs)
 		}

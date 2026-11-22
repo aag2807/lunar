@@ -327,3 +327,31 @@ func TestOutDirMayNotBeTheRoot(t *testing.T) {
 		}
 	}
 }
+
+// With no config, a single file sees the declarations in its own folder,
+// not every *.d.lunar anywhere below it (a home folder, a downloads
+// folder), whose errors would break the compile.
+func TestSingleFileWithoutConfigReadsItsFolderOnly(t *testing.T) {
+	root := tree(t, map[string]string{
+		"main.lunar":               "local n: number = spawn()\n",
+		"api.d.lunar":              "declare function spawn(): number\n",
+		"deep/junk/broken.d.lunar": "declare function (\n",
+	})
+	p := open(t, Options{Files: []string{filepath.Join(root, "main.lunar")}})
+	if _, diags := p.Check(); len(diags) != 0 {
+		t.Errorf("got %v", messagesOf(diags))
+	}
+}
+
+// A file outside the rootDir of the config found above it is said to be.
+func TestSingleFileOutsideRootDir(t *testing.T) {
+	root := tree(t, map[string]string{
+		"lunar.config.json":  `{"rootDir": "scripts", "outDir": "../build"}`,
+		"scripts/main.lunar": "print(1)\n",
+		"tools/x.lunar":      "print(2)\n",
+	})
+	_, diags := Open(Options{Files: []string{filepath.Join(root, "tools", "x.lunar")}})
+	if len(diags) != 1 || diags[0].Code != "config" || !strings.Contains(diags[0].Message, "is outside rootDir") {
+		t.Errorf("got %v", messagesOf(diags))
+	}
+}

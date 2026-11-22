@@ -68,3 +68,17 @@ func TestConfigErrorIsShown(t *testing.T) {
 		t.Error("no window/showMessage about the config")
 	}
 }
+
+// A script outside its project's rootDir is told so in the editor.
+func TestFileOutsideRootDirIsToldSo(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"lunar.config.json":  `{"rootDir": "scripts", "outDir": "../build"}`,
+		"scripts/main.lunar": "print(1)\n",
+		"tools/x.lunar":      "print(2)\n",
+	})
+	c := newClientAt(t, root)
+	c.open("tools/x.lunar")
+	if d, _ := c.diagnosticsFor("tools/x.lunar"); len(d) != 1 || !strings.Contains(d[0].Message, "is outside rootDir") {
+		t.Errorf("tools/x.lunar: %+v", d)
+	}
+}

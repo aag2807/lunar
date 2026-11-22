@@ -393,6 +393,17 @@ func (s *Server) analyze() {
 	analyse := func(r run, owns func(path string) bool) {
 		p, openDiags := project.Open(r.opts)
 		if openDiags.HasErrors() {
+			if r.key == "" && len(r.opts.Files) > 0 {
+				// A file on its own (outside its project's rootDir, say):
+				// the problem is shown on the file.
+				for _, f := range r.opts.Files {
+					for _, d := range openDiags {
+						d.File, d.Line, d.Column, d.EndLine, d.EndColumn = f, 1, 1, 1, 1
+						diags = append(diags, d)
+					}
+				}
+				return
+			}
 			diags = append(diags, s.configProblem(r.key, openDiags)...)
 			return
 		}

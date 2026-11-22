@@ -57,20 +57,23 @@ function classify(x)
     return (function()
   local __match_value = x
   if (function()
+      if not (true) then return false end
       local n = __match_value
-      return true and (n > 100)
+      return (n > 100)
     end)() then
     local n = __match_value
     return "large"
   elseif (function()
+      if not (true) then return false end
       local n = __match_value
-      return true and (n > 10)
+      return (n > 10)
     end)() then
     local n = __match_value
     return "medium"
   elseif (function()
+      if not (true) then return false end
       local n = __match_value
-      return true and (n > 0)
+      return (n > 0)
     end)() then
     local n = __match_value
     return "small"
@@ -99,20 +102,23 @@ function fizzBuzz(n)
     return (function()
   local __match_value = n
   if (function()
+      if not (true) then return false end
       local x = __match_value
-      return true and (x % 15 == 0)
+      return (x % 15 == 0)
     end)() then
     local x = __match_value
     return "FizzBuzz"
   elseif (function()
+      if not (true) then return false end
       local x = __match_value
-      return true and (x % 3 == 0)
+      return (x % 3 == 0)
     end)() then
     local x = __match_value
     return "Fizz"
   elseif (function()
+      if not (true) then return false end
       local x = __match_value
-      return true and (x % 5 == 0)
+      return (x % 5 == 0)
     end)() then
     local x = __match_value
     return "Buzz"
@@ -317,22 +323,25 @@ function handleResponse(response)
     return (function()
   local __match_value = response.status
   if (function()
+      if not (true) then return false end
       local code = __match_value
-      return true and (code >= 200 and code < 300)
+      return (code >= 200 and code < 300)
     end)() then
     local code = __match_value
     return "Success: " .. response.body
   elseif __match_value == 404 then
     return "Not found"
   elseif (function()
+      if not (true) then return false end
       local code = __match_value
-      return true and (code >= 400 and code < 500)
+      return (code >= 400 and code < 500)
     end)() then
     local code = __match_value
     return "Client error: " .. tostring(code)
   elseif (function()
+      if not (true) then return false end
       local code = __match_value
-      return true and (code >= 500)
+      return (code >= 500)
     end)() then
     local code = __match_value
     return "Server error: " .. tostring(code)

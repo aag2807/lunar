@@ -18,6 +18,9 @@ type Generator struct {
 	currentColumn    int
 	sourceFile       string
 	classParents     map[string]string // Track parent class names for super
+	// varargs says, for each function being generated, whether it takes
+	// '...'; empty means the main chunk.
+	varargs []bool
 	// forwardDeclared are the top-level classes and enums declared local at
 	// the start of the chunk, which their declarations then assign.
 	forwardDeclared  map[string]bool
@@ -416,6 +419,7 @@ func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) s
 	paramList, restParam := g.renderParameters(node.Parameters)
 	output.WriteString(paramList)
 	output.WriteString(")\n")
+	defer g.enterFunction(strings.Contains(paramList, "..."))()
 
 	// Body
 	g.indent++
@@ -696,6 +700,64 @@ func (g *Generator) localUnlessForward(name string) string {
 	return "local "
 }
 
+// spreadArguments renders call arguments with a spread that is not the
+// only one: every element of each spread is passed, in order, wherever it
+// stands. ({table.unpack(a), 9} would keep one element of a: a call in
+// the middle of a constructor gives one value.)
+func (g *Generator) spreadArguments(args []ast.Expression) string {
+	var b strings.Builder
+	b.WriteString("(function() local __t, __n = {}, 0; ")
+	for _, arg := range args {
+		if spread, ok := arg.(*ast.SpreadExpression); ok {
+			b.WriteString(fmt.Sprintf("local __s = %s; for __i = 1, #__s do __n = __n + 1; __t[__n] = __s[__i] end; ", g.generateExpression(spread.Value)))
+		} else {
+			b.WriteString(fmt.Sprintf("__n = __n + 1; __t[__n] = %s; ", g.generateExpression(arg)))
+		}
+	}
+	b.WriteString("return table.unpack(__t, 1, __n) end)()")
+	return g.iife(b.String())
+}
+
+// enterFunction records that a function whose parameters take '...' (or
+// not) is being generated, and returns what leaves it.
+func (g *Generator) enterFunction(vararg bool) func() {
+	g.varargs = append(g.varargs, vararg)
+	return func() { g.varargs = g.varargs[:len(g.varargs)-1] }
+}
+
+// inVararg says whether '...' can be used where code is being generated:
+// in a function that takes it, or in the main chunk, which always does.
+func (g *Generator) inVararg() bool {
+	return len(g.varargs) == 0 || g.varargs[len(g.varargs)-1]
+}
+
+// iifeOpen and iifeClose bracket code the generator wraps in a function
+// it calls at once. Inside a vararg function they pass '...' through, so
+// the wrapped code can use the enclosing function's varargs.
+func (g *Generator) iifeOpen() string {
+	if g.inVararg() {
+		return "(function(...)"
+	}
+	return "(function()"
+}
+
+func (g *Generator) iifeClose() string {
+	if g.inVararg() {
+		return "end)(...)"
+	}
+	return "end)()"
+}
+
+// iife turns a generated "(function() ... end)()" into the form iifeOpen
+// and iifeClose give: only its own outer brackets, not those of anything
+// already generated inside it.
+func (g *Generator) iife(code string) string {
+	if !g.inVararg() || !strings.HasPrefix(code, "(function()") || !strings.HasSuffix(code, "end)()") {
+		return code
+	}
+	return "(function(...)" + strings.TrimPrefix(code, "(function()")[:len(code)-len("(function()")-len("end)()")] + "end)(...)"
+}
+
 // isSuperCall reports whether a statement is a call of super(...).
 func isSuperCall(stmt ast.Statement) bool {
 	es, ok := stmt.(*ast.ExpressionStatement)
@@ -930,6 +992,7 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 		methodParams, methodRest := g.renderParameters(method.Parameters)
 		output.WriteString(methodParams)
 		output.WriteString(")\n")
+		leave := g.enterFunction(strings.Contains(methodParams, "..."))
 
 		g.indent++
 		if methodRest != nil {
@@ -941,6 +1004,7 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 				output.WriteString(g.generateStatement(stmt))
 			}
 		}
+		leave()
 		g.indent--
 
 		output.WriteString(g.generateIndent())
@@ -1216,7 +1280,7 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 	// Example: {...obj1, key = val, ...obj2}
 	if len(node.Pairs) > 0 && hasSpread {
 		var output strings.Builder
-		output.WriteString("(function() local __temp = {}; ")
+		output.WriteString(g.iifeOpen() + " local __temp = {}; ")
 
 		// In source order, a later field or spread overrides an earlier one.
 		if entries != nil {
@@ -1237,7 +1301,7 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 					}
 				}
 			}
-			output.WriteString("return __temp end)()")
+			output.WriteString("return __temp " + g.iifeClose())
 			return output.String()
 		}
 
@@ -1261,14 +1325,14 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 			}
 		}
 
-		output.WriteString("return __temp end)()")
+		output.WriteString("return __temp " + g.iifeClose())
 		return output.String()
 	}
 
 	// If there are spread expressions in array-only context, treat as array spread
 	if hasSpread && len(node.Pairs) == 0 {
 		var output strings.Builder
-		output.WriteString("(function() local __temp = {}; ")
+		output.WriteString(g.iifeOpen() + " local __temp = {}; ")
 
 		for _, val := range node.Values {
 			if spread, ok := val.(*ast.SpreadExpression); ok {
@@ -1280,7 +1344,7 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 			}
 		}
 
-		output.WriteString("return __temp end)()")
+		output.WriteString("return __temp " + g.iifeClose())
 		return output.String()
 	}
 
@@ -1463,7 +1527,7 @@ func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
 	// Handle nullish coalescing operator (??)
 	if operator == "??" {
 		// Generate: (function() local __temp = left; if __temp ~= nil then return __temp else return right end end)()
-		return fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp else return %s end end)()", left, right)
+		return g.iife(fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp else return %s end end)()", left, right))
 	}
 
 	// '//' and the bitwise operators are Lua 5.3's own, so they go through
@@ -1539,8 +1603,8 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 		for i, arg := range node.Arguments {
 			args[i] = g.generateExpression(arg)
 		}
-		return fmt.Sprintf("(function() local __fn = %s; if __fn ~= nil then return __fn(%s) else return nil end end)()",
-			function, strings.Join(args, ", "))
+		return g.iife(fmt.Sprintf("(function() local __fn = %s; if __fn ~= nil then return __fn(%s) else return nil end end)()",
+			function, strings.Join(args, ", ")))
 	}
 
 	// Check if this is a method call on an object (DotExpression)
@@ -1592,20 +1656,7 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 			}
 
 			// Complex case: mixed regular and spread arguments
-			var tableBuilder strings.Builder
-			tableBuilder.WriteString("{")
-			for i, arg := range node.Arguments {
-				if i > 0 {
-					tableBuilder.WriteString(", ")
-				}
-				if spread, ok := arg.(*ast.SpreadExpression); ok {
-					tableBuilder.WriteString(fmt.Sprintf("table.unpack(%s)", g.generateExpression(spread.Value)))
-				} else {
-					tableBuilder.WriteString(g.generateExpression(arg))
-				}
-			}
-			tableBuilder.WriteString("}")
-			return fmt.Sprintf("%s%s%s(table.unpack(%s))", object, methodOp, property, tableBuilder.String())
+			return fmt.Sprintf("%s%s%s(%s)", object, methodOp, property, g.spreadArguments(node.Arguments))
 		}
 
 		// No spread arguments - normal method call
@@ -1646,22 +1697,7 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 		}
 
 		// Complex case: mixed regular and spread arguments
-		// Build a table with all args and unpack it
-		var tableBuilder strings.Builder
-		tableBuilder.WriteString("{")
-		for i, arg := range node.Arguments {
-			if i > 0 {
-				tableBuilder.WriteString(", ")
-			}
-			if spread, ok := arg.(*ast.SpreadExpression); ok {
-				// Use table.unpack to spread the array
-				tableBuilder.WriteString(fmt.Sprintf("table.unpack(%s)", g.generateExpression(spread.Value)))
-			} else {
-				tableBuilder.WriteString(g.generateExpression(arg))
-			}
-		}
-		tableBuilder.WriteString("}")
-		return fmt.Sprintf("%s(table.unpack(%s))", function, tableBuilder.String())
+		return fmt.Sprintf("%s(%s)", function, g.spreadArguments(node.Arguments))
 	}
 
 	// No spread arguments - normal case
@@ -1735,7 +1771,7 @@ func (g *Generator) generateDotExpression(node *ast.DotExpression) string {
 	if node.IsOptional {
 		// Generate safe navigation: (function() if left ~= nil then return left.right else return nil end end)()
 		// For efficiency, use a simpler pattern when left is a simple identifier
-		return fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp.%s else return nil end end)()", left, right)
+		return g.iife(fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp.%s else return nil end end)()", left, right))
 	}
 
 	// Method call syntax (obj:method) is preserved verbatim; the parser only
@@ -1755,7 +1791,7 @@ func (g *Generator) generateIndexExpression(node *ast.IndexExpression) string {
 	// Optional index access (?[]) evaluates the receiver once and yields nil
 	// instead of erroring when it is nil.
 	if node.IsOptional {
-		return fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp[%s] else return nil end end)()", left, index)
+		return g.iife(fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp[%s] else return nil end end)()", left, index))
 	}
 
 	return fmt.Sprintf("%s[%s]", left, index)
@@ -1771,6 +1807,7 @@ func (g *Generator) generateFunctionExpression(node *ast.FunctionExpression) str
 	paramList, restParam := g.renderParameters(node.Parameters)
 	output.WriteString(paramList)
 	output.WriteString(")\n")
+	defer g.enterFunction(strings.Contains(paramList, "..."))()
 
 	// Body
 	g.indent++
@@ -2012,7 +2049,7 @@ func (g *Generator) generateMatchExpression(node *ast.MatchExpression) string {
 	var output strings.Builder
 
 	// Start an immediately invoked function that returns the matched result
-	output.WriteString("(function()")
+	output.WriteString(g.iifeOpen())
 	output.WriteString("\n")
 
 	// Store the matched value in a local variable
@@ -2034,18 +2071,18 @@ func (g *Generator) generateMatchExpression(node *ast.MatchExpression) string {
 		// If there are bindings and a guard, we need to declare bindings before the guard
 		// To do this, we wrap the condition in a separate scope
 		if len(bindings) > 0 && matchCase.Guard != nil {
-			output.WriteString("(function()\n")
-			// Add pattern bindings first
+			// The pattern is checked before its bindings read the value:
+			// { x: x } on a number must not index it.
+			output.WriteString(g.iifeOpen() + "\n")
+			output.WriteString("      if not (" + condition + ") then return false end\n")
 			for _, binding := range bindings {
 				output.WriteString("      ")
 				output.WriteString(binding)
 				output.WriteString("\n")
 			}
-			output.WriteString("      return ")
-			output.WriteString(condition)
-			output.WriteString(" and (")
+			output.WriteString("      return (")
 			output.WriteString(g.generateExpression(matchCase.Guard))
-			output.WriteString(")\n    end)() then\n")
+			output.WriteString(")\n    " + g.iifeClose() + " then\n")
 		} else {
 			output.WriteString(condition)
 
@@ -2081,7 +2118,7 @@ func (g *Generator) generateMatchExpression(node *ast.MatchExpression) string {
 	output.WriteString("  error('Pattern match failed: no case matched')\n")
 
 	// End the function and invoke it
-	output.WriteString("end)()")
+	output.WriteString(g.iifeClose())
 
 	return output.String()
 }

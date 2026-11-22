@@ -1,0 +1,39 @@
+-- '...' inside ??, ?. and match (which compile to inner functions) is
+-- the enclosing function's.
+local function orDefault(...: any): any
+    return (select(1, ...)) ?? "d"
+end
+assert(orDefault(nil) == "d" and orDefault(3) == 3)
+
+local function field(...: any): any
+    return (select(1, ...))?.x
+end
+assert(field({ x = 7 }) == 7 and field(nil) == nil)
+
+local function count(...: any): string
+    return match select("#", ...) with
+        | 0 -> "none"
+        | n when n > 1 -> "many"
+        | _ -> "one"
+    end
+end
+assert(count() == "none" and count(1) == "one" and count(1, 2) == "many")
+
+-- A spread before other arguments passes every element.
+local function n(...: any): number
+    return select("#", ...)
+end
+local base = { 1, 2, 3 }
+assert(n(...base, 9) == 4)
+assert(n(0, ...base, ...base) == 7)
+
+-- A table pattern with a guard checks the value is a table before binding.
+local function sign(v: any): string
+    return match v with
+        | { x: x } when x > 0 -> "pos"
+        | { pos: { x: x } } when x < 0 -> "neg"
+        | _ -> "other"
+    end
+end
+assert(sign(5) == "other" and sign({ x = 2 }) == "pos" and sign({}) == "other")
+assert(sign({ pos = { x = -1 } }) == "neg" and sign({ pos = 3 }) == "other")

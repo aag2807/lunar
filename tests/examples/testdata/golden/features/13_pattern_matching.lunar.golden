@@ -21,20 +21,23 @@ function grade(score)
   if __match_value == 100 then
     return "perfect"
   elseif (function()
+      if not (true) then return false end
       local s = __match_value
-      return true and (s >= 90)
+      return (s >= 90)
     end)() then
     local s = __match_value
     return "A"
   elseif (function()
+      if not (true) then return false end
       local s = __match_value
-      return true and (s >= 80)
+      return (s >= 80)
     end)() then
     local s = __match_value
     return "B"
   elseif (function()
+      if not (true) then return false end
       local s = __match_value
-      return true and (s >= 70)
+      return (s >= 70)
     end)() then
     local s = __match_value
     return "C"

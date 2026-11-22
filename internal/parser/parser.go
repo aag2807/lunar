@@ -894,6 +894,30 @@ func (p *Parser) genericBaseToken(base ast.Expression) lexer.Token {
 	return exprToken(base, p.curToken)
 }
 
+// constDestructures says whether `const (` starts a destructuring
+// declaration: names in parentheses, then '='.
+func (p *Parser) constDestructures() bool {
+	state := p.SaveState()
+	defer p.RestoreState(state)
+	p.nextToken() // '('
+	for {
+		p.nextToken()
+		if !p.curTokenIsIdentOrContextual() {
+			return false
+		}
+		if p.peekStartsAnnotation() { // const (a: number, ...)
+			return true
+		}
+		p.nextToken()
+		if p.curTokenIs(lexer.RPAREN) {
+			return p.peekTokenIs(lexer.ASSIGN)
+		}
+		if !p.curTokenIs(lexer.COMMA) {
+			return false
+		}
+	}
+}
+
 // peekStartsAnnotation says whether a ':' in peek position starts a type
 // annotation: `local x` then a `::label::` on the next line is a label.
 func (p *Parser) peekStartsAnnotation() bool {
@@ -2835,6 +2859,11 @@ func (p *Parser) parseStatementNode() ast.Statement {
 				fn.IsLocal = true
 			}
 			return fn
+		}
+		// const is a name in Lua: const(1) is a call, unless it is
+		// destructuring, const (a, b) = ...
+		if p.curTokenIs(lexer.CONST) && p.peekTokenIs(lexer.LPAREN) && !p.constDestructures() {
+			return p.parseExpressionStatement()
 		}
 		return p.parseVariableDeclaration()
 	case lexer.IF:

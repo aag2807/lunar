@@ -40,3 +40,6 @@ local function sandbox()
 end
 sandbox()
 for _, v in ipairs({ 1, nil, 4 }) do print(v + 1) end
+local function const(x) return x end
+const(1)
+print(const(2))

@@ -46,7 +46,7 @@ that CI compiles and **runs** under Lua 5.3 and 5.4, asserting its own results
   union and literal types, type guards (`value is string`), `as` assertions
 - Generics on functions and classes (erased at runtime)
 - Utility types: `Pick`, `Omit`, `Partial`, `Readonly`, `Record`
-- Optional chaining `?.`, `?.[]`, `?.()` and nullish coalescing `??`
+- Optional chaining `?.`, `?[`, `?.()` and nullish coalescing `??`
 - `match … with` pattern matching with guards and table patterns
 - Array and table spread (`{...a, 4}`, `{...defaults, ...overrides}`)
 - Template strings (`` `Hello, ${name}!` ``)

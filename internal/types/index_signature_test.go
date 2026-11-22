@@ -512,3 +512,28 @@ local numDict: NumberDict
 		t.Errorf("Expected NumberDict value type to be number, got %v", numDictType.IndexSignature.ValueType)
 	}
 }
+
+// With a string index signature, any name reads and writes as the value
+// type, through '.' as through '[]'.
+func TestIndexSignatureAllowsAnyFieldName(t *testing.T) {
+	for _, err := range checkSource(t, `
+interface Scores
+    [key: string]: number
+end
+local s: Scores = { a = 1 }
+local n: number = s.anything + s["x"]
+s.c = 3
+`) {
+		t.Errorf("unexpected type error: %s", err.Message)
+	}
+	errs := checkSource(t, `
+interface Scores
+    [key: string]: number
+end
+local s: Scores = { a = 1 }
+s.c = "three"
+`)
+	if len(errs) != 1 {
+		t.Errorf("assigning a string to a number field: %v", messages(errs))
+	}
+}

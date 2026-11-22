@@ -4932,6 +4932,12 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		if methodType, ok := typ.GetMethod(propertyName); ok {
 			return method(typ.String(), methodType)
 		}
+		// A string index signature covers every other name.
+		if sig := typ.IndexSignature; sig != nil && sig.ValueType != nil {
+			if _, isString := sig.KeyType.(*StringType); isString {
+				return resolved(ast.DispatchPlain, sig.ValueType)
+			}
+		}
 		c.addError(
 			fmt.Sprintf("Type '%s' has no property or method '%s'", typ.String(), propertyName),
 			node.Token,

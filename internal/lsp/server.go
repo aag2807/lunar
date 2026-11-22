@@ -241,6 +241,9 @@ func (s *Server) handleMessage(content json.RawMessage) error {
 			return err
 		}
 		path := uriToPath(p.TextDocument.URI)
+		if strings.HasPrefix(p.TextDocument.URI, "untitled:") {
+			os.MkdirAll(untitledDir(), 0o755)
+		}
 		s.docs[path] = p.TextDocument.Text
 		s.clientURIs[path] = p.TextDocument.URI
 		s.changed()

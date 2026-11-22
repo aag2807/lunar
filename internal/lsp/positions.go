@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -23,6 +24,11 @@ func uriToPath(uri string) string { return uriToPathOn(runtime.GOOS, uri) }
 // (file://wsl$/Ubuntu/home/...) is a \\host\share path. The authority is
 // taken apart by hand: Go's url.Parse refuses the escaped host wsl%24.
 func uriToPathOn(goos, uri string) string {
+	// A new buffer not saved yet (untitled:Untitled-1) is checked as a
+	// file of its own in a folder no project owns.
+	if name, ok := strings.CutPrefix(uri, "untitled:"); ok {
+		return filepath.Join(untitledDir(), untitledName.ReplaceAllString(name, "_")+".lunar")
+	}
 	rest, ok := strings.CutPrefix(uri, "file://")
 	if !ok {
 		return uri
@@ -141,3 +147,11 @@ func (s *Server) offsetAt(path string, pos Position) int {
 	line := pos.Line + 1
 	return f.Offset(line, f.ByteColumnFromUTF16(line, pos.Character))
 }
+
+// untitledName is what may not appear in the file name of an untitled
+// buffer.
+var untitledName = regexp.MustCompile(`[^A-Za-z0-9_-]`)
+
+// untitledDir is where untitled buffers are placed for checking; it exists
+// once one has been opened.
+func untitledDir() string { return filepath.Join(os.TempDir(), "lunar-untitled") }

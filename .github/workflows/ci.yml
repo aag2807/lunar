@@ -55,3 +55,78 @@ jobs:
 
       - name: go test
         run: go test ./...
+
+  grammar:
+    name: tree-sitter grammar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install the tree-sitter CLI
+        run: npm install -g tree-sitter-cli@0.27.1
+
+      # Regenerates the parser (src/ must not change), runs the corpus
+      # tests, and parses every .lunar file in the repository.
+      - name: Check the grammar
+        run: editors/tree-sitter-lunar/check.sh
+
+      - name: Zed's highlights are the grammar's
+        run: cmp editors/zed/languages/lunar/highlights.scm editors/tree-sitter-lunar/queries/highlights.scm
+
+  neovim:
+    name: neovim plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Neovim and the tree-sitter CLI
+        run: |
+          curl -fsSL -o nvim.tar.gz https://github.com/neovim/neovim/releases/download/v0.12.6/nvim-linux-x86_64.tar.gz
+          tar xzf nvim.tar.gz
+          echo "$PWD/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
+          npm install -g tree-sitter-cli@0.27.1
+
+      # Headless: highlighting, the server attaching, go to definition
+      # across files, and diagnostics.
+      - name: Smoke test
+        run: editors/nvim/test/run.sh
+
+  zed:
+    name: zed extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build for wasm32-wasip2
+        working-directory: editors/zed
+        run: |
+          rustup target add wasm32-wasip2
+          cargo build --release --target wasm32-wasip2
+
+  vscode:
+    name: vscode extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Package the VSIX
+        working-directory: editors/vscode
+        run: |
+          npm install
+          npm run package

@@ -10,8 +10,18 @@ under Lua 5.3 and 5.4.
 
 All of Lua's syntax works: `local`, `local function`, `if`/`elseif`/`else`,
 `while`, numeric and generic `for`, `repeat … until`, `do … end`, `break`,
-varargs, closures, multiple assignment and returns, `;`, every numeral (`0xFF`,
-`1e-9`, `.5`), long strings and comments, and method calls with `:`.
+`goto` and `::labels::`, varargs, closures, multiple assignment and returns,
+`;`, every numeral (`0xFF`, `1e-9`, `.5`), long strings and comments, method
+calls with `:`, calls with a table or a string and no parentheses
+(`spawn { kind = "imp" }`, `require "ai"`), Lua 5.4's `<const>` and `<close>`
+(with target `lua54`), and Lua's operator precedence. A plain Lua file is a
+Lunar file: the files in [`tests/luacompat/`](../tests/luacompat/) are
+compiled unchanged and must print what they print under Lua.
+
+Only Lua's own reserved words are reserved. The words Lunar adds (`class`,
+`match`, `from`, `import`, `get`, `set`, `number`, ...) are names wherever a
+declaration of Lunar's cannot begin: `local from = 1`, `t.class`,
+`s:match("%d")`, `function f(public)`.
 
 ```lunar
 local function sum(...: number): number
@@ -27,6 +37,12 @@ a, b = b, a
 local mask = 0xFF & 0x0F
 local s = ("one two"):upper()
 print(sum(1, 2, 3), a, b, mask, s)
+
+local from = { x = 1 }
+for _, p in ipairs { from, { x = 2 } } do
+    if p.x == 2 then goto done end
+end
+::done::
 ```
 
 Conditions test truthiness as in Lua: everything but `nil` and `false` is true,

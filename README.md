@@ -37,6 +37,11 @@ that CI compiles and **runs** under Lua 5.3 and 5.4, asserting its own results
 
 - Lua itself: locals, `local function`, `if`/`while`/numeric and generic `for`,
   `repeat … until`, varargs, closures, `pcall`/`error`, method calls with `:`
+- Plain Lua unchanged: the files in [`tests/luacompat/`](tests/luacompat/)
+  compile with no diagnostics and print what they print under Lua: Lua's
+  operator precedence, `f{...}`/`f"..."` calls, `goto` and labels,
+  `<const>`/`<close>`, `;` in tables, and Lunar's own words (`from`, `match`,
+  `class`, ...) as names
 - Type annotations on variables, parameters and returns; optional parameters
   (`b: number?` or `b?: number`); multiple returns (`(number, string)`)
 - Classes: fields, `private`/`protected`, methods, `static` methods and fields,
@@ -44,7 +49,7 @@ that CI compiles and **runs** under Lua 5.3 and 5.4, asserting its own results
   properties (`constructor(public x: number)`)
 - Interfaces (`implements`, structural checks for tables), enums, type aliases,
   union and literal types, type guards (`value is string`), `as` assertions
-- Generics on functions and classes (erased at runtime)
+- Generics on functions, classes and interfaces (erased at runtime)
 - Utility types: `Pick`, `Omit`, `Partial`, `Readonly`, `Record`
 - Optional chaining `?.`, `?[`, `?.()` and nullish coalescing `??`
 - `match … with` pattern matching with guards and table patterns

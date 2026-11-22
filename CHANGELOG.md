@@ -53,6 +53,17 @@ their changelog described features that did not work.
 
 ### Language
 
+- Plain Lua compiles unchanged, checked by running a corpus of Lua files
+  both ways: Lua's operator precedence (`..` below `+`, `^` right
+  associative and above unary minus, the bitwise levels); `f{...}` and
+  `f"..."` calls anywhere; `goto` and labels, refused like Lua refuses them;
+  `<const>` and `<close>`; `;` between table fields; `(f())` keeping one
+  value; and every word Lunar adds (`from`, `match`, `class`, ...) usable
+  as a name, since only Lua's reserved words are reserved.
+- A statement that is only an expression, not a call, is an error, as in
+  Lua.
+- Tables are written in source order; fields with no value write no line.
+
 - A file may end in a top-level `return`.
 - `field: T?` and `field?: T` may be left out of table literals; `field?: T`
   was being dropped by the parser.

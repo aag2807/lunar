@@ -81,10 +81,17 @@ type Parser struct {
 
 // addError adds a parse error with location information
 func (p *Parser) addError(message string, token lexer.Token) {
+	endLine, endColumn := token.EndLine, token.EndColumn
+	if endLine == 0 {
+		endLine, endColumn = token.Line, token.Column
+	}
 	p.errors = append(p.errors, &ParseError{
-		Message: message,
-		Line:    token.Line,
-		Column:  token.Column,
+		Message:   message,
+		Line:      token.Line,
+		Column:    token.Column,
+		File:      token.File,
+		EndLine:   endLine,
+		EndColumn: endColumn,
 	})
 }
 

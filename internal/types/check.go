@@ -15,6 +15,11 @@ type TypeError struct {
 	Message string
 	Line    int
 	Column  int
+	// File is the path of the source the error is in; EndLine and
+	// EndColumn are just past the offending span.
+	File      string
+	EndLine   int
+	EndColumn int
 }
 
 func (e *TypeError) Error() string {
@@ -392,12 +397,20 @@ func (c *Checker) loadStdlib() {
 		}
 
 		// Parse the stdlib file
-		l := lexer.New(string(content))
+		// Stdlib errors are reported as <stdlib>/<file>, wherever it lives.
+		l := lexer.NewFile("<stdlib>/"+filename, string(content))
 		p := parser.New(l)
 		statements := p.Parse()
 
 		if len(p.Errors()) > 0 {
-			// Stdlib file has parse errors, silently continue
+			// A broken stdlib file would leave its names undefined with no
+			// hint why; report its parse errors instead.
+			for _, e := range p.Errors() {
+				c.errors = append(c.errors, &TypeError{
+					Message: e.Message, Line: e.Line, Column: e.Column,
+					File: e.File, EndLine: e.EndLine, EndColumn: e.EndColumn,
+				})
+			}
 			continue
 		}
 
@@ -1270,7 +1283,7 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 					c.addError(
 						fmt.Sprintf("Generic type '%s' expects %d type arguments, got %d",
 							genericAlias.Name, len(genericAlias.TypeParams), len(typeArgs)),
-						lexer.Token{},
+						baseIdent.Token,
 					)
 					return Any
 				}
@@ -1292,77 +1305,77 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 			switch baseIdent.Value {
 			case "Exclude":
 				if len(typeArgs) != 2 {
-					c.addError("Exclude<T, U> expects 2 type arguments", lexer.Token{})
+					c.addError("Exclude<T, U> expects 2 type arguments", baseIdent.Token)
 					return Any
 				}
 				return c.excludeTypes(typeArgs[0], typeArgs[1])
 
 			case "Extract":
 				if len(typeArgs) != 2 {
-					c.addError("Extract<T, U> expects 2 type arguments", lexer.Token{})
+					c.addError("Extract<T, U> expects 2 type arguments", baseIdent.Token)
 					return Any
 				}
 				return c.extractTypes(typeArgs[0], typeArgs[1])
 
 			case "NonNullable":
 				if len(typeArgs) != 1 {
-					c.addError("NonNullable<T> expects 1 type argument", lexer.Token{})
+					c.addError("NonNullable<T> expects 1 type argument", baseIdent.Token)
 					return Any
 				}
 				return c.nonNullable(typeArgs[0])
 
 			case "Pick":
 				if len(typeArgs) != 2 {
-					c.addError("Pick<T, K> expects 2 type arguments", lexer.Token{})
+					c.addError("Pick<T, K> expects 2 type arguments", baseIdent.Token)
 					return Any
 				}
 				return c.pickType(typeArgs[0], typeArgs[1])
 
 			case "Omit":
 				if len(typeArgs) != 2 {
-					c.addError("Omit<T, K> expects 2 type arguments", lexer.Token{})
+					c.addError("Omit<T, K> expects 2 type arguments", baseIdent.Token)
 					return Any
 				}
 				return c.omitType(typeArgs[0], typeArgs[1])
 
 			case "Record":
 				if len(typeArgs) != 2 {
-					c.addError("Record<K, V> expects 2 type arguments", lexer.Token{})
+					c.addError("Record<K, V> expects 2 type arguments", baseIdent.Token)
 					return Any
 				}
 				return c.recordType(typeArgs[0], typeArgs[1])
 
 			case "Partial":
 				if len(typeArgs) != 1 {
-					c.addError("Partial<T> expects 1 type argument", lexer.Token{})
+					c.addError("Partial<T> expects 1 type argument", baseIdent.Token)
 					return Any
 				}
 				return c.partialType(typeArgs[0])
 
 			case "Required":
 				if len(typeArgs) != 1 {
-					c.addError("Required<T> expects 1 type argument", lexer.Token{})
+					c.addError("Required<T> expects 1 type argument", baseIdent.Token)
 					return Any
 				}
 				return c.requiredType(typeArgs[0])
 
 			case "Readonly":
 				if len(typeArgs) != 1 {
-					c.addError("Readonly<T> expects 1 type argument", lexer.Token{})
+					c.addError("Readonly<T> expects 1 type argument", baseIdent.Token)
 					return Any
 				}
 				return c.readonlyType(typeArgs[0])
 
 			case "ReturnType":
 				if len(typeArgs) != 1 {
-					c.addError("ReturnType<F> expects 1 type argument", lexer.Token{})
+					c.addError("ReturnType<F> expects 1 type argument", baseIdent.Token)
 					return Any
 				}
 				return c.returnType(typeArgs[0])
 
 			case "Parameters":
 				if len(typeArgs) != 1 {
-					c.addError("Parameters<F> expects 1 type argument", lexer.Token{})
+					c.addError("Parameters<F> expects 1 type argument", baseIdent.Token)
 					return Any
 				}
 				return c.parametersType(typeArgs[0])
@@ -1375,7 +1388,7 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 						c.addError(
 							fmt.Sprintf("Class '%s' expects %d type arguments, got %d",
 								classType.Name, len(classType.GenericParams), len(typeArgs)),
-							lexer.Token{},
+							baseIdent.Token,
 						)
 						return classType
 					}
@@ -1447,7 +1460,7 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		return c.resolveTemplateLiteralType(node)
 
 	default:
-		c.addError(fmt.Sprintf("Cannot resolve type expression: %T", expr), lexer.Token{})
+		c.addError(fmt.Sprintf("Cannot resolve type expression: %T", expr), exprToken(expr, lexer.Token{}))
 		return Any
 	}
 }
@@ -5090,10 +5103,17 @@ func (c *Checker) canAccessMember(targetClass *ClassType, visibility string) boo
 
 // addError adds a type error to the checker
 func (c *Checker) addError(message string, token lexer.Token) {
+	endLine, endColumn := token.EndLine, token.EndColumn
+	if endLine == 0 {
+		endLine, endColumn = token.Line, token.Column
+	}
 	c.errors = append(c.errors, &TypeError{
-		Message: message,
-		Line:    token.Line,
-		Column:  token.Column,
+		Message:   message,
+		Line:      token.Line,
+		Column:    token.Column,
+		File:      token.File,
+		EndLine:   endLine,
+		EndColumn: endColumn,
 	})
 }
 

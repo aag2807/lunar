@@ -7,6 +7,11 @@ type ParseError struct {
 	Message string
 	Line    int
 	Column  int
+	// File is the path of the source; EndLine and EndColumn are just past
+	// the offending token.
+	File      string
+	EndLine   int
+	EndColumn int
 }
 
 // Error implements the error interface

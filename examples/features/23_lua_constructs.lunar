@@ -21,3 +21,10 @@ local function localFn(n: number): number
     return n + 1
 end
 print(localFn(1))
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(t.a == 1 and t.b == 2)
+assert(i == 3)
+assert(s == "xy")
+assert(nested.list[2] == 2)
+assert(localFn(1) == 2)

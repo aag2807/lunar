@@ -1,0 +1,35 @@
+local Vehicle = {}
+Vehicle.__index = Vehicle
+
+function Vehicle.new(wheels)
+    local self = setmetatable({}, Vehicle)
+    self.wheels = nil
+    self.wheels = wheels
+    return self
+end
+
+function Vehicle:describe()
+    return tostring(self.wheels) .. " wheels, says " .. self:sound()
+end
+
+
+local Car = {}
+setmetatable(Car, {__index = Vehicle})
+Car.__index = Car
+
+function Car.new()
+    local self = setmetatable({}, Car)
+    do local __parent = Vehicle.new(4); for __k, __v in pairs(__parent) do self[__k] = __v end end
+    return self
+end
+
+function Car:sound()
+    return "vroom"
+end
+
+
+local c = Car.new()
+
+print(c:describe())
+
+assert(c:describe() == "4 wheels, says vroom")

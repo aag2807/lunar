@@ -1,0 +1,64 @@
+function area(s)
+    return (function()
+  local __match_value = s
+  if type(__match_value) == 'table' and __match_value.kind ~= nil and __match_value.kind == "circle" and __match_value.radius ~= nil then
+    local r = __match_value.radius
+    return 3.14159 * r * r
+  elseif type(__match_value) == 'table' and __match_value.h ~= nil and __match_value.kind ~= nil and __match_value.kind == "rect" and __match_value.w ~= nil then
+    local h = __match_value.h
+    local w = __match_value.w
+    return w * h
+  elseif true then
+    return 0
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+function grade(score)
+    return (function()
+  local __match_value = score
+  if __match_value == 100 then
+    return "perfect"
+  elseif (function()
+      local s = __match_value
+      return true and (s >= 90)
+    end)() then
+    local s = __match_value
+    return "A"
+  elseif (function()
+      local s = __match_value
+      return true and (s >= 80)
+    end)() then
+    local s = __match_value
+    return "B"
+  elseif (function()
+      local s = __match_value
+      return true and (s >= 70)
+    end)() then
+    local s = __match_value
+    return "C"
+  elseif true then
+    return "F"
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+print(area({kind = "circle", radius = 2}))
+
+print(area({h = 4, kind = "rect", w = 3}))
+
+print(area({kind = "unknown"}))
+
+print(grade(100), grade(95), grade(85), grade(50))
+
+assert(math.abs(area({kind = "circle", radius = 2}) - 12.56636) < 0.000001)
+
+assert(area({h = 4, kind = "rect", w = 3}) == 12)
+
+assert(area({kind = "unknown"}) == 0)
+
+assert(grade(100) == "perfect" and grade(95) == "A" and grade(85) == "B")
+
+assert(grade(75) == "C" and grade(50) == "F")

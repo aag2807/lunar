@@ -23,3 +23,9 @@ end
 print(colorName(Color.Red))
 print(colorName(Color.Blue))
 print(Status.Active, Status.Inactive)
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(colorName(Color.Red) == "red")
+assert(colorName(Color.Green) == "green")
+assert(colorName(Color.Blue) == "blue")
+assert(Status.Active == 1 and Status.Inactive == 0)

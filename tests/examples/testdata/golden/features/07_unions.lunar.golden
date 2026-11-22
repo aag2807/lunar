@@ -1,0 +1,27 @@
+function describeId(id)
+    return "id=" .. tostring(id)
+end
+
+function move(d)
+    return "moving " .. d
+end
+
+local a = 42
+
+local b = "abc"
+
+print(describeId(a), describeId(b))
+
+print(move("north"))
+
+local raw = "text"
+
+local asString = raw
+
+print(asString)
+
+assert(describeId(a) == "id=42" and describeId(b) == "id=abc")
+
+assert(move("north") == "moving north")
+
+assert(asString == "text")

@@ -1,0 +1,31 @@
+local a = 12
+
+local b = 10
+
+local and_result = a & b
+
+print("12 & 10 =", and_result)
+
+local or_result = a | b
+
+print("12 | 10 =", or_result)
+
+local xor_result = a ~ b
+
+print("12 ~ 10 =", xor_result)
+
+local not_result = ~a
+
+print("~12 =", not_result)
+
+local lshift_result = a << 2
+
+print("12 << 2 =", lshift_result)
+
+local rshift_result = a >> 2
+
+print("12 >> 2 =", rshift_result)
+
+local complex = a & b | a ~ b
+
+print("(12 & 10) | (12 ~ 10) =", complex)

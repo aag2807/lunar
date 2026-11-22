@@ -2,3 +2,6 @@ import { double, triple } from "./mod/math_utils"
 
 print(double(4))
 print(triple(4))
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(double(4) == 8 and triple(4) == 12)

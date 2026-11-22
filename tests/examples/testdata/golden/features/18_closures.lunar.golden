@@ -1,0 +1,43 @@
+function makeCounter()
+    local count = 0
+    return function()
+        count = count + 1
+        return count
+    end
+end
+
+function applyTwice(fn, value)
+    return fn(fn(value))
+end
+
+function compose(f, g)
+    return function(x)
+        return f(g(x))
+    end
+end
+
+local counter = makeCounter()
+
+print(counter(), counter(), counter())
+
+print(applyTwice(function(n)
+    return n + 10
+end, 1))
+
+local addThenDouble = compose(function(n)
+    return n * 2
+end, function(n)
+    return n + 1
+end)
+
+print(addThenDouble(3))
+
+local fresh = makeCounter()
+
+assert(fresh() == 1 and fresh() == 2)
+
+assert(applyTwice(function(n)
+    return n + 10
+end, 1) == 21)
+
+assert(addThenDouble(3) == 8)

@@ -1,0 +1,59 @@
+function greet(name)
+    return "Hello, " .. name
+end
+
+function withOptional(a, b)
+    if b == nil then
+        return a
+    end
+    return a + b
+end
+
+function divide(a, b)
+    if b == 0 then
+        return 0, "division by zero"
+    end
+    return a / b, "ok"
+end
+
+function collect(...)
+    local n = 0
+    for _, _v in ipairs({...}) do
+        n = n + 1
+    end
+    return n
+end
+
+local anon = function(x)
+    return x * x
+end
+
+local arrow = function(x)
+    return x + 1
+end
+
+print(greet("world"))
+
+print(withOptional(1), withOptional(1, 2))
+
+local q, msg = divide(10, 2)
+
+print(q, msg)
+
+print(collect(1, 2, 3))
+
+print(anon(4), arrow(4))
+
+assert(greet("world") == "Hello, world")
+
+assert(withOptional(1) == 1 and withOptional(1, 2) == 3)
+
+assert(q == 5 and msg == "ok")
+
+local zero, why = divide(1, 0)
+
+assert(zero == 0 and why == "division by zero")
+
+assert(collect(1, 2, 3) == 3 and collect() == 0)
+
+assert(anon(4) == 16 and arrow(4) == 5)

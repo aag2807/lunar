@@ -1,0 +1,49 @@
+local Circle = {}
+Circle.__index = Circle
+
+function Circle.new(radius)
+    local self = setmetatable({}, Circle)
+    self.radius = nil
+    self.radius = radius
+    return self
+end
+
+function Circle:area()
+    return 3.14159 * self.radius * self.radius
+end
+
+function Circle:name()
+    return "circle"
+end
+
+
+local Square = {}
+Square.__index = Square
+
+function Square.new(side)
+    local self = setmetatable({}, Square)
+    self.side = nil
+    self.side = side
+    return self
+end
+
+function Square:area()
+    return self.side * self.side
+end
+
+function Square:name()
+    return "square"
+end
+
+
+function report(s)
+    return s:name() .. ": " .. tostring(s:area())
+end
+
+print(report(Circle.new(1)))
+
+print(report(Square.new(3)))
+
+assert(report(Circle.new(1)) == "circle: 3.14159")
+
+assert(report(Square.new(3)) == "square: 9")

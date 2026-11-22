@@ -37,3 +37,12 @@ local q: number, msg: string = divide(10, 2)
 print(q, msg)
 print(collect(1, 2, 3))
 print(anon(4), arrow(4))
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(greet("world") == "Hello, world")
+assert(withOptional(1) == 1 and withOptional(1, 2) == 3)
+assert(q == 5 and msg == "ok")
+local zero: number, why: string = divide(1, 0)
+assert(zero == 0 and why == "division by zero")
+assert(collect(1, 2, 3) == 3 and collect() == 0)
+assert(anon(4) == 16 and arrow(4) == 5)

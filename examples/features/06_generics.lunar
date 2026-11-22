@@ -46,3 +46,9 @@ print(b.get())
 
 local p: Pair<string, number> = Pair<string, number>("age", 30)
 print(p.first(), p.second())
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(identity<number>(42) == 42 and identity<string>("text") == "text")
+assert(firstOf<number>({7, 8, 9}) == 7)
+assert(b.get() == "boxed")
+assert(p.first() == "age" and p.second() == 30)

@@ -1,0 +1,33 @@
+function readPort(cfg)
+    return (function() local __temp = (function() local __temp = (function() local __temp = cfg; if __temp ~= nil then return __temp.server else return nil end end)(); if __temp ~= nil then return __temp.port else return nil end end)(); if __temp ~= nil then return __temp else return 8080 end end)()
+end
+
+function firstTag(cfg)
+    return (function() local __temp = (function() local __temp = (function() local __temp = cfg; if __temp ~= nil then return __temp.tags else return nil end end)(); if __temp ~= nil then return __temp[1] else return nil end end)(); if __temp ~= nil then return __temp else return "none" end end)()
+end
+
+function invoke(fn)
+    return (function() local __temp = (function() local __fn = fn; if __fn ~= nil then return __fn(21) else return nil end end)(); if __temp ~= nil then return __temp else return "no fn" end end)()
+end
+
+local full = {server = {port = 3000}, tags = {"web"}}
+
+local empty = nil
+
+print(readPort(full), readPort(empty))
+
+print(firstTag(full), firstTag(empty))
+
+print(invoke(function(n)
+    return n * 2
+end), invoke(nil))
+
+assert(readPort(full) == 3000 and readPort(empty) == 8080)
+
+assert(firstTag(full) == "web" and firstTag(empty) == "none")
+
+assert(invoke(function(n)
+    return n * 2
+end) == 42)
+
+assert(invoke(nil) == "no fn")

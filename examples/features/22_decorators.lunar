@@ -12,3 +12,6 @@ function work(n: number): number
 end
 
 print(work(1))
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(work(1) == 2)

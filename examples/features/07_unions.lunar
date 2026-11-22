@@ -18,3 +18,8 @@ print(move("north"))
 local raw: any = "text"
 local asString: string = raw as string
 print(asString)
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(describeId(a) == "id=42" and describeId(b) == "id=abc")
+assert(move("north") == "moving north")
+assert(asString == "text")

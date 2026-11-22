@@ -31,3 +31,7 @@ local tasks: Task[] = {
 
 print(#completed(tasks))
 print(table.concat(titles(tasks), ", "))
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(#completed(tasks) == 2)
+assert(table.concat(titles(tasks), ", ") == "write, review, ship")

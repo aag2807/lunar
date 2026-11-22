@@ -1,0 +1,38 @@
+local playerX = 400
+
+local playerY = 300
+
+local playerSpeed = 200
+
+function load()
+    love.window.setTitle("Lunar + LÖVE Example")
+    love.window.setMode(800, 600)
+end
+
+function update(dt)
+    if love.keyboard.isDown("left") then
+        playerX = playerX - playerSpeed * dt
+    end
+    if love.keyboard.isDown("right") then
+        playerX = playerX + playerSpeed * dt
+    end
+    if love.keyboard.isDown("up") then
+        playerY = playerY - playerSpeed * dt
+    end
+    if love.keyboard.isDown("down") then
+        playerY = playerY + playerSpeed * dt
+    end
+end
+
+function draw()
+    love.graphics.clear(0.1, 0.1, 0.2, 1.0)
+    love.graphics.setColor(1.0, 1.0, 1.0, 1.0)
+    love.graphics.circle("fill", playerX, playerY, 20)
+    love.graphics.print("Use arrow keys to move", 10, 10)
+end
+
+function keypressed(key)
+    if key == "escape" then
+        print("Escape pressed - would quit game")
+    end
+end

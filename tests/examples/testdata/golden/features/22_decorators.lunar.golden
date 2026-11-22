@@ -1,0 +1,15 @@
+function logged(fn)
+    return function(...)
+        print("calling")
+        return fn(...)
+    end
+end
+
+function work(n)
+    return n + 1
+end
+work = logged(work)
+
+print(work(1))
+
+assert(work(1) == 2)

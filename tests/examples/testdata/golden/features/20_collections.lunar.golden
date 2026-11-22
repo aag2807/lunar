@@ -1,0 +1,27 @@
+function completed(tasks)
+    local out = {}
+    for _, t in ipairs(tasks) do
+        if t.done then
+            table.insert(out, t)
+        end
+    end
+    return out
+end
+
+function titles(tasks)
+    local out = {}
+    for _, t in ipairs(tasks) do
+        table.insert(out, t.title)
+    end
+    return out
+end
+
+local tasks = {{done = true, id = 1, title = "write"}, {done = false, id = 2, title = "review"}, {done = true, id = 3, title = "ship"}}
+
+print(# completed(tasks))
+
+print(table.concat(titles(tasks), ", "))
+
+assert(# completed(tasks) == 2)
+
+assert(table.concat(titles(tasks), ", ") == "write, review, ship")

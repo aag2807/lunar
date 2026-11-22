@@ -1,0 +1,170 @@
+local Priority = {
+    Low = 1,
+    Medium = 2,
+    High = 3,
+}
+
+local TodoList = {}
+TodoList.__index = TodoList
+
+function TodoList.new()
+    local self = setmetatable({}, TodoList)
+    self.tasks = nil
+    self.nextId = nil
+    self.tasks = {}
+    self.nextId = 1
+    return self
+end
+
+function TodoList:add(title, priority)
+    local level = Priority.Medium
+    if priority ~= nil then
+        level = priority
+    end
+    local task = {done = false, id = self.nextId, priority = level, title = title}
+    table.insert(self.tasks, task)
+    self.nextId = self.nextId + 1
+    return task.id
+end
+
+function TodoList:find(id)
+    for _, task in ipairs(self.tasks) do
+        if task.id == id then
+            return task
+        end
+    end
+    return nil
+end
+
+function TodoList:complete(id)
+    local task = self:find(id)
+    if task == nil then
+        return false
+    end
+    task.done = true
+    return true
+end
+
+function TodoList:remove(id)
+    for index, task in ipairs(self.tasks) do
+        if task.id == id then
+            table.remove(self.tasks, index)
+            return true
+        end
+    end
+    return false
+end
+
+function TodoList:pending()
+    local out = {}
+    for _, task in ipairs(self.tasks) do
+        if not task.done then
+            table.insert(out, task)
+        end
+    end
+    return out
+end
+
+function TodoList:progress()
+    local done = 0
+    for _, task in ipairs(self.tasks) do
+        if task.done then
+            done = done + 1
+        end
+    end
+    return done, # self.tasks
+end
+
+function TodoList:render()
+    if # self.tasks == 0 then
+        return "  (nothing to do)"
+    end
+    local lines = {}
+    local ordered = self:sortedByPriority()
+    for _, task in ipairs(ordered) do
+        local box = "[ ]"
+        if task.done then
+            box = "[x]"
+        end
+        table.insert(lines, string.format("  %s #%d %-24s %s", box, task.id, task.title, labelFor(task.priority)))
+    end
+    return table.concat(lines, "\n")
+end
+
+function TodoList:sortedByPriority()
+    local copy = {}
+    for _, task in ipairs(self.tasks) do
+        table.insert(copy, task)
+    end
+    table.sort(copy, function(a, b)
+        if a.priority == b.priority then
+            return a.id < b.id
+        end
+        return a.priority > b.priority
+    end)
+    return copy
+end
+
+
+function labelFor(priority)
+    return (function()
+  local __match_value = priority
+  if __match_value == 3 then
+    return "!high"
+  elseif __match_value == 2 then
+    return "~medium"
+  elseif __match_value == 1 then
+    return ".low"
+  elseif true then
+    return "?"
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+function banner(title)
+    print("")
+    print(title)
+    print(string.rep("-", # title))
+end
+
+local list = TodoList.new()
+
+local groceries = list:add("Buy groceries")
+
+local deploy = list:add("Ship the release", Priority.High)
+
+list:add("Water the plants", Priority.Low)
+
+local review = list:add("Review the pull request", Priority.High)
+
+banner("All tasks")
+
+print(list:render())
+
+list:complete(deploy)
+
+list:complete(groceries)
+
+banner("After completing two")
+
+print(list:render())
+
+local done, total = list:progress()
+
+print("")
+
+print(string.format("  %d of %d done, %d still pending", done, total, # list:pending()))
+
+list:remove(review)
+
+banner("After dropping the review")
+
+print(list:render())
+
+local missing = list:find(99)
+
+if missing == nil then
+    print("")
+    print("  task 99: not found")
+end

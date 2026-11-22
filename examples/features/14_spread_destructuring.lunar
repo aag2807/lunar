@@ -17,3 +17,8 @@ local settings = {...defaults, ...overrides}
 print(sum(1, 2, 3, 4))
 print(#extended, extended[1], extended[5])
 print(settings.retries, settings.timeout)
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(sum(1, 2, 3, 4) == 10)
+assert(#extended == 5 and extended[1] == 0 and extended[2] == 1 and extended[5] == 4)
+assert(settings.retries == 3 and settings.timeout == 60)

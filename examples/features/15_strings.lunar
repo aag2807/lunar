@@ -10,6 +10,15 @@ print(upper, part, joined)
 print(#name, name:len())
 print(string.format("%s has %d chars", name, #name))
 
+local wordCount: number = 0
 for word in ("one two three"):gmatch("%a+") do
     print(word)
+    wordCount = wordCount + 1
 end
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(greeting == "Hello, lunar!")
+assert(upper == "LUNAR" and part == "lun" and joined == "a-b-c")
+assert(#name == 5)
+assert(string.format("%s has %d chars", name, #name) == "lunar has 5 chars")
+assert(wordCount == 3)

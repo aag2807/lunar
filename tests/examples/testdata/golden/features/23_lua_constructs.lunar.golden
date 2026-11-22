@@ -1,0 +1,39 @@
+local t = {a = 1, b = 2}
+
+for k, v in pairs(t) do
+    print(k, v)
+end
+
+local i = 0
+
+repeat
+    i = i + 1
+until i >= 3
+
+print("repeat done", i)
+
+local s = "x"
+
+s = s .. "y"
+
+print(s)
+
+local nested = {list = {1, 2, 3}}
+
+print(nested.list[2])
+
+local function localFn(n)
+    return n + 1
+end
+
+print(localFn(1))
+
+assert(t.a == 1 and t.b == 2)
+
+assert(i == 3)
+
+assert(s == "xy")
+
+assert(nested.list[2] == 2)
+
+assert(localFn(1) == 2)

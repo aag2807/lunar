@@ -1,0 +1,102 @@
+local Ball = {}
+Ball.__index = Ball
+
+function Ball.new(x, y)
+    local self = setmetatable({}, Ball)
+    self.x = nil
+    self.y = nil
+    self.vx = nil
+    self.vy = nil
+    self.radius = nil
+    self.red = nil
+    self.green = nil
+    self.blue = nil
+    self.x = x
+    self.y = y
+    self.vx = math.random(- 260, 260)
+    self.vy = math.random(- 160, 40)
+    self.radius = math.random(10, 28)
+    self.red = 0.35 + math.random() * 0.65
+    self.green = 0.35 + math.random() * 0.65
+    self.blue = 0.35 + math.random() * 0.65
+    return self
+end
+
+function Ball:update(dt, gravity, width, height)
+    self.vy = self.vy + gravity * dt
+    self.x = self.x + self.vx * dt
+    self.y = self.y + self.vy * dt
+    if self.x - self.radius < 0 then
+        self.x = self.radius
+        self.vx = - self.vx * 0.9
+    else
+        if self.x + self.radius > width then
+            self.x = width - self.radius
+            self.vx = - self.vx * 0.9
+        end
+    end
+    if self.y - self.radius < 0 then
+        self.y = self.radius
+        self.vy = - self.vy * 0.9
+    else
+        if self.y + self.radius > height then
+            self.y = height - self.radius
+            self.vy = - self.vy * 0.75
+            self.vx = self.vx * 0.98
+        end
+    end
+end
+
+function Ball:draw()
+    love.graphics.setColor(self.red, self.green, self.blue, 1)
+    love.graphics.circle("fill", self.x, self.y, self.radius)
+end
+
+
+local balls = {}
+
+local gravity = 900
+
+function spawn()
+    local width = love.window.getWidth()
+    local height = love.window.getHeight()
+    table.insert(balls, Ball.new(width / 2, height / 3))
+end
+
+love.load = function()
+    love.window.setTitle("Lunar - bouncing balls")
+    love.window.setMode(800, 600)
+    love.graphics.setBackgroundColor(0.09, 0.10, 0.15)
+    spawn()
+end
+
+love.update = function(dt)
+    local width = love.window.getWidth()
+    local height = love.window.getHeight()
+    for _, ball in ipairs(balls) do
+        ball:update(dt, gravity, width, height)
+    end
+end
+
+love.draw = function()
+    for _, ball in ipairs(balls) do
+        ball:draw()
+    end
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.print("space: spawn    backspace: clear    escape: quit", 12, 12)
+    love.graphics.print(string.format("balls: %d", # balls), 12, 30)
+end
+
+love.keypressed = function(key)
+    if key == "space" then
+        spawn()
+    else
+        if key == "backspace" then
+            balls = {}
+        else
+            if key == "escape" then
+                love.event.quit()
+            end
+        end
+    end
+end

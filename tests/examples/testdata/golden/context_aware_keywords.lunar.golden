@@ -1,0 +1,40 @@
+local message = "Hello, Lunar!"
+
+local length = string.len(message)
+
+local upper = string.upper(message)
+
+print("Message: " .. message)
+
+print("Length: " .. tostring(length))
+
+print("Uppercase: " .. upper)
+
+local numbers = {1, 2, 3, 4, 5}
+
+table.insert(numbers, 6)
+
+table.sort(numbers)
+
+local result = table.concat(numbers, ", ")
+
+print("Numbers: " .. result)
+
+local myString = "I'm a string variable"
+
+local myTable = {[1] = "value"}
+
+function processString(input)
+    return "Processed: " .. input
+end
+
+function createTable()
+    local result = {}
+    return result
+end
+
+local processed = processString("data")
+
+print(processed)
+
+local newTable = createTable()

@@ -39,3 +39,10 @@ local words: string[] = {"a", "b", "c"}
 for i, w in ipairs(words) do
     print(i, w)
 end
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(sum == 15 and diff == 5 and prod == 50)
+assert(quot == 2.5 and floor == 2 and rem == 2 and power == 256)
+assert(total == 15)
+assert(countdown == 0)
+assert(#words == 3 and words[3] == "c")

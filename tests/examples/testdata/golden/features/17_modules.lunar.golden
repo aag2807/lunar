@@ -1,0 +1,9 @@
+local ___mod_math_utils = require("mod.math_utils")
+local double = ___mod_math_utils.double
+local triple = ___mod_math_utils.triple
+
+print(double(4))
+
+print(triple(4))
+
+assert(double(4) == 8 and triple(4) == 12)

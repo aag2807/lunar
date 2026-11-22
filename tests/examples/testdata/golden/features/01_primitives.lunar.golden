@@ -1,0 +1,67 @@
+local name = "lunar"
+
+local version = 1.6
+
+local ready = true
+
+local nothing = nil
+
+local sum = 10 + 5
+
+local diff = 10 - 5
+
+local prod = 10 * 5
+
+local quot = 10 / 4
+
+local floor = 10 // 4
+
+local rem = 10 % 4
+
+local power = 2 ^ 8
+
+print(name, version, ready, nothing)
+
+print(sum, diff, prod, quot, floor, rem, power)
+
+if version >= 1.0 and ready then
+    print("release")
+else
+    if version > 0 then
+        print("beta")
+    else
+        print("unreleased")
+    end
+end
+
+local total = 0
+
+for i = 1, 5 do
+    total = total + i
+end
+
+print("sum 1..5:", total)
+
+local countdown = 3
+
+while countdown > 0 do
+    countdown = countdown - 1
+end
+
+print("countdown:", countdown)
+
+local words = {"a", "b", "c"}
+
+for i, w in ipairs(words) do
+    print(i, w)
+end
+
+assert(sum == 15 and diff == 5 and prod == 50)
+
+assert(quot == 2.5 and floor == 2 and rem == 2 and power == 256)
+
+assert(total == 15)
+
+assert(countdown == 0)
+
+assert(# words == 3 and words[3] == "c")

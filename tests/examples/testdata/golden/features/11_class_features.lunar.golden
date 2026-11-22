@@ -1,0 +1,67 @@
+local Account = {}
+Account.__index = Account
+
+function Account.new(id, balance)
+    local self = setmetatable({}, Account)
+    self.id = nil
+    self.balance = nil
+    self.id = id
+    self.balance = balance
+    return self
+end
+
+Account.count = 0
+
+function Account:_get_amount()
+    return self.balance
+end
+
+function Account:_set_amount(value)
+    self.balance = value
+end
+
+local Account_mt = getmetatable(Account) or {}
+Account_mt.__index = function(self, key)
+    if key == "amount" then
+        return Account._get_amount(self)
+    end
+    return Account[key]
+end
+Account_mt.__newindex = function(self, key, value)
+    if key == "amount" then
+        Account._set_amount(self, value)
+        return
+    end
+    rawset(self, key, value)
+end
+setmetatable(Account, Account_mt)
+
+
+local Point = {}
+Point.__index = Point
+
+function Point.new(x, y)
+    local self = setmetatable({}, Point)
+    self.x = x
+    self.y = y
+    return self
+end
+
+function Point:sum()
+    return self.x + self.y
+end
+
+
+local acct = Account.new("a-1", 100)
+
+print(acct.id)
+
+local p = Point.new(2, 3)
+
+print(p.x, p.y, p:sum())
+
+assert(acct.id == "a-1")
+
+assert(Account.count == 0)
+
+assert(p.x == 2 and p.y == 3 and p:sum() == 5)

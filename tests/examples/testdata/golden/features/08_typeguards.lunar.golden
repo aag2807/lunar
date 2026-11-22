@@ -1,0 +1,29 @@
+function isString(value)
+    return type(value) == "string"
+end
+
+function stringify(value)
+    if isString(value) then
+        return value
+    end
+    return tostring(value)
+end
+
+function describe(value)
+    if type(value) == "number" then
+        return "number: " .. tostring(value)
+    end
+    return "other"
+end
+
+print(stringify("already"))
+
+print(stringify(42))
+
+print(describe(7))
+
+assert(stringify("already") == "already")
+
+assert(stringify(42) == "42")
+
+assert(describe(7) == "number: 7" and describe("x") == "other")

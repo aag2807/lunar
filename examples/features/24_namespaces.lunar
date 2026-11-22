@@ -5,3 +5,6 @@ namespace Geometry
 end
 
 print(Geometry.area(3, 4))
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(Geometry.area(3, 4) == 12)

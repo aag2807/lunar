@@ -1,0 +1,30 @@
+function sum(...)
+    local numbers = {...}
+    local total = 0
+    for _, n in ipairs(numbers) do
+        total = total + n
+    end
+    return total
+end
+
+local base = {1, 2, 3}
+
+local extended = (function() local __temp = {}; table.insert(__temp, 0); do local __src = base; local __len = #__src; for __i = 1, __len do table.insert(__temp, __src[__i]) end; for __k, __v in pairs(__src) do if type(__k) ~= 'number' or __k > __len then __temp[__k] = __v end end end; table.insert(__temp, 4); return __temp end)()
+
+local defaults = {retries = 3, timeout = 30}
+
+local overrides = {timeout = 60}
+
+local settings = (function() local __temp = {}; do local __src = defaults; local __len = #__src; for __i = 1, __len do table.insert(__temp, __src[__i]) end; for __k, __v in pairs(__src) do if type(__k) ~= 'number' or __k > __len then __temp[__k] = __v end end end; do local __src = overrides; local __len = #__src; for __i = 1, __len do table.insert(__temp, __src[__i]) end; for __k, __v in pairs(__src) do if type(__k) ~= 'number' or __k > __len then __temp[__k] = __v end end end; return __temp end)()
+
+print(sum(1, 2, 3, 4))
+
+print(# extended, extended[1], extended[5])
+
+print(settings.retries, settings.timeout)
+
+assert(sum(1, 2, 3, 4) == 10)
+
+assert(# extended == 5 and extended[1] == 0 and extended[2] == 1 and extended[5] == 4)
+
+assert(settings.retries == 3 and settings.timeout == 60)

@@ -32,3 +32,8 @@ print(acct.id)
 
 local p: Point = Point(2, 3)
 print(p.x, p.y, p.sum())
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(acct.id == "a-1")
+assert(Account.count == 0)
+assert(p.x == 2 and p.y == 3 and p.sum() == 5)

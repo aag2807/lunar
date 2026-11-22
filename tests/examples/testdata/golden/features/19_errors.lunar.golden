@@ -1,0 +1,20 @@
+function risky(n)
+    if n < 0 then
+        error("negative input")
+    end
+    return n * 2
+end
+
+local ok, result = pcall(risky, 5)
+
+print(ok, result)
+
+local failed, err = pcall(risky, - 1)
+
+print(failed, err)
+
+assert(ok == true and result == 10)
+
+assert(failed == false)
+
+assert(string.find(err, "negative input", 1, true) ~= nil)

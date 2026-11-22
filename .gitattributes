@@ -1,0 +1,5 @@
+# Generated and compared byte-for-byte: keep LF on every platform.
+*.golden text eol=lf
+*.expected text eol=lf
+*.lunar text eol=lf
+*.lua text eol=lf

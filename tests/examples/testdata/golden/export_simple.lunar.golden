@@ -1,0 +1,11 @@
+function greet(name)
+    return "Hello, " .. name
+end
+
+local MAX_SIZE = 100
+
+
+return {
+    greet = greet,
+    MAX_SIZE = MAX_SIZE
+}

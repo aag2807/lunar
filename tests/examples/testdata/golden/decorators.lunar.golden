@@ -1,0 +1,136 @@
+function logCalls(fn)
+    print("[Decorator] logCalls applied")
+    return fn
+end
+
+function sayHello(name)
+    return "Hello, " .. name
+end
+sayHello = logCalls(sayHello)
+
+function memoize(maxSize)
+    return function(fn)
+        print("[Decorator] memoize applied with max size:", maxSize)
+        return fn
+    end
+end
+
+function fibonacci(n)
+    if n <= 1 then
+        return n
+    end
+    return fibonacci(n - 1) + fibonacci(n - 2)
+end
+fibonacci = memoize(100)(fibonacci)
+
+function authenticate(fn)
+    print("[Decorator] authenticate applied")
+    return fn
+end
+
+function rateLimit(fn)
+    print("[Decorator] rateLimit applied")
+    return fn
+end
+
+function sensitiveOperation(data)
+    return "Processing: " .. data
+end
+sensitiveOperation = rateLimit(sensitiveOperation)
+sensitiveOperation = authenticate(sensitiveOperation)
+
+function deprecated(message)
+    return function(fn)
+        print("[WARNING] Deprecated:", message)
+        return fn
+    end
+end
+
+function oldAPI(x)
+    return x * 2
+end
+oldAPI = deprecated("Use newAPI() instead")(oldAPI)
+
+function singleton(cls)
+    print("[Decorator] singleton applied to class")
+    return cls
+end
+
+local Database = {}
+Database.__index = Database
+
+function Database.new(conn)
+    local self = setmetatable({}, Database)
+    self.connection = nil
+    self.connection = conn
+    return self
+end
+
+function Database:query(sql)
+    return "Result from: " .. sql
+end
+
+Database = singleton(Database)
+
+
+function timing(fn)
+    return function(...)
+        local start = os.clock()
+        local result = fn(...)
+        local duration = os.clock() - start
+        print("Execution time:", duration, "seconds")
+        return result
+    end
+end
+
+function expensiveOperation(n)
+    local sum = 0
+    for i = 1, n do
+        sum = sum + i
+    end
+    return sum
+end
+expensiveOperation = timing(expensiveOperation)
+
+function validatePositive(fn)
+    return function(x)
+        if x < 0 then
+            print("[ERROR] Value must be positive")
+            return nil
+        end
+        return fn(x)
+    end
+end
+
+function squareRoot(x)
+    return x ^ 0.5
+end
+squareRoot = validatePositive(squareRoot)
+
+print("=== Decorator Examples ===")
+
+print("")
+
+local result1 = sayHello("World")
+
+print("sayHello result:", result1)
+
+local result2 = fibonacci(5)
+
+print("fibonacci result:", result2)
+
+local result3 = sensitiveOperation("secret")
+
+print("sensitiveOperation result:", result3)
+
+local result4 = oldAPI(21)
+
+print("oldAPI result:", result4)
+
+local db = Database:new("localhost:5432")
+
+print("Database connection:", db.connection)
+
+local result5 = expensiveOperation(1000)
+
+print("expensiveOperation result:", result5)

@@ -1,0 +1,10 @@
+local Geometry = {}
+
+function Geometry.area(w, h)
+    return w * h
+end
+
+
+print(Geometry.area(3, 4))
+
+assert(Geometry.area(3, 4) == 12)

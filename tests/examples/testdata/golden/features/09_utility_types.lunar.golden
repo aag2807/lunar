@@ -1,0 +1,9 @@
+function show(u)
+    return tostring(u.id) .. ":" .. u.name
+end
+
+local preview = {id = 1, name = "ada"}
+
+print(show(preview))
+
+assert(show(preview) == "1:ada")

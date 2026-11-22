@@ -24,3 +24,9 @@ print(applyTwice(function(n: number): number return n + 10 end, 1))
 local addThenDouble = compose(function(n: number): number return n * 2 end,
                               function(n: number): number return n + 1 end)
 print(addThenDouble(3))
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+local fresh = makeCounter()
+assert(fresh() == 1 and fresh() == 2)
+assert(applyTwice(function(n: number): number return n + 10 end, 1) == 21)
+assert(addThenDouble(3) == 8)

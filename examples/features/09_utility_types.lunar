@@ -17,3 +17,6 @@ end
 
 local preview: UserPreview = {id = 1, name = "ada"}
 print(show(preview))
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(show(preview) == "1:ada")

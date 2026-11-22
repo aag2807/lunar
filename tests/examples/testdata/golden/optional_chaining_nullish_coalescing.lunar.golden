@@ -1,0 +1,84 @@
+function getTraditional(user)
+    if user ~= nil then
+        if user.profile ~= nil then
+            if user.profile.name ~= nil then
+                return user.profile.name
+            end
+        end
+    end
+    return "Unknown"
+end
+
+function getModern(user)
+    return (function() local __temp = (function() local __temp = (function() local __temp = user; if __temp ~= nil then return __temp.profile else return nil end end)(); if __temp ~= nil then return __temp.name else return nil end end)(); if __temp ~= nil then return __temp else return "Unknown" end end)()
+end
+
+function processApiResponse(response)
+    local name = (function() local __temp = (function() local __temp = (function() local __temp = (function() local __temp = response; if __temp ~= nil then return __temp.data else return nil end end)(); if __temp ~= nil then return __temp.user else return nil end end)(); if __temp ~= nil then return __temp.profile else return nil end end)(); if __temp ~= nil then return __temp.name else return nil end end)()
+    local email = (function() local __temp = (function() local __temp = (function() local __temp = (function() local __temp = response; if __temp ~= nil then return __temp.data else return nil end end)(); if __temp ~= nil then return __temp.user else return nil end end)(); if __temp ~= nil then return __temp.profile else return nil end end)(); if __temp ~= nil then return __temp.email else return nil end end)()
+    print("Name:", (function() local __temp = name; if __temp ~= nil then return __temp else return "Not provided" end end)())
+    print("Email:", (function() local __temp = email; if __temp ~= nil then return __temp else return "Not provided" end end)())
+end
+
+function connectDatabase(config)
+    local host = (function() local __temp = (function() local __temp = (function() local __temp = config; if __temp ~= nil then return __temp.database else return nil end end)(); if __temp ~= nil then return __temp.host else return nil end end)(); if __temp ~= nil then return __temp else return "localhost" end end)()
+    local port = (function() local __temp = (function() local __temp = (function() local __temp = config; if __temp ~= nil then return __temp.database else return nil end end)(); if __temp ~= nil then return __temp.port else return nil end end)(); if __temp ~= nil then return __temp else return 5432 end end)()
+    local username = (function() local __temp = (function() local __temp = (function() local __temp = (function() local __temp = config; if __temp ~= nil then return __temp.database else return nil end end)(); if __temp ~= nil then return __temp.credentials else return nil end end)(); if __temp ~= nil then return __temp.username else return nil end end)(); if __temp ~= nil then return __temp else return "admin" end end)()
+    print("Connecting to:", host .. ":" .. tostring(port))
+    print("Username:", username)
+end
+
+function handleClick(event)
+    local target = (function() local __temp = (function() local __temp = event; if __temp ~= nil then return __temp.target else return nil end end)(); if __temp ~= nil then return __temp.id else return nil end end)()
+    local value = (function() local __temp = (function() local __temp = (function() local __temp = event; if __temp ~= nil then return __temp.target else return nil end end)(); if __temp ~= nil then return __temp.value else return nil end end)(); if __temp ~= nil then return __temp else return "" end end)()
+    local classList = (function() local __temp = (function() local __temp = event; if __temp ~= nil then return __temp.target else return nil end end)(); if __temp ~= nil then return __temp.classList else return nil end end)()
+    print("Clicked element:", (function() local __temp = target; if __temp ~= nil then return __temp else return "unknown" end end)())
+    print("Value:", value)
+    if (function() local __temp = classList; if __temp ~= nil then return __temp.contains else return nil end end)() ~= nil then
+        print("Has classList methods")
+    end
+end
+
+function getFirstItem(items)
+    return (function() local __temp = (function() local __temp = items; if __temp ~= nil then return __temp[1] else return nil end end)(); if __temp ~= nil then return __temp else return "No items" end end)()
+end
+
+function getNestedValue(data, key)
+    return (function() local __temp = (function() local __temp = (function() local __temp = data; if __temp ~= nil then return __temp[key] else return nil end end)(); if __temp ~= nil then return __temp.value else return nil end end)(); if __temp ~= nil then return __temp else return nil end end)()
+end
+
+function callService(service, userId)
+    local result = (function() local __fn = (function() local __temp = (function() local __temp = service; if __temp ~= nil then return __temp.api else return nil end end)(); if __temp ~= nil then return __temp.fetchUser else return nil end end)(); if __fn ~= nil then return __fn(userId) else return nil end end)()
+    print("Result:", (function() local __temp = result; if __temp ~= nil then return __temp else return "Service unavailable" end end)())
+end
+
+function processFlag(flag)
+    local enabled = (function() local __temp = flag; if __temp ~= nil then return __temp else return true end end)()
+    print("Enabled:", enabled)
+end
+
+function processCount(count)
+    local value = (function() local __temp = count; if __temp ~= nil then return __temp else return 10 end end)()
+    print("Count:", value)
+end
+
+function getUserDisplayName(user, fallbackName)
+    return (function() local __temp = (function() local __temp = (function() local __temp = (function() local __temp = (function() local __temp = user; if __temp ~= nil then return __temp.displayName else return nil end end)(); if __temp ~= nil then return __temp else return (function() local __temp = user; if __temp ~= nil then return __temp.username else return nil end end)() end end)(); if __temp ~= nil then return __temp else return (function() local __temp = user; if __temp ~= nil then return __temp.email else return nil end end)() end end)(); if __temp ~= nil then return __temp else return fallbackName end end)(); if __temp ~= nil then return __temp else return "Anonymous" end end)()
+end
+
+function calculateTotal(order)
+    local subtotal = (function() local __temp = (function() local __temp = order; if __temp ~= nil then return __temp.subtotal else return nil end end)(); if __temp ~= nil then return __temp else return 0 end end)()
+    local tax = (function() local __temp = (function() local __temp = order; if __temp ~= nil then return __temp.tax else return nil end end)(); if __temp ~= nil then return __temp else return 0 end end)()
+    local shipping = (function() local __temp = (function() local __temp = order; if __temp ~= nil then return __temp.shipping else return nil end end)(); if __temp ~= nil then return __temp else return 0 end end)()
+    local discount = (function() local __temp = (function() local __temp = order; if __temp ~= nil then return __temp.discount else return nil end end)(); if __temp ~= nil then return __temp else return 0 end end)()
+    return subtotal + tax + shipping - discount
+end
+
+function loadUser(repo, id)
+    return coroutine.create(function()
+        local user = coroutine.yield((function() local __fn = (function() local __temp = repo; if __temp ~= nil then return __temp.findById else return nil end end)(); if __fn ~= nil then return __fn(id) else return nil end end)())
+        local name = (function() local __temp = (function() local __temp = user; if __temp ~= nil then return __temp.name else return nil end end)(); if __temp ~= nil then return __temp else return "Unknown User" end end)()
+        local status = (function() local __temp = (function() local __temp = user; if __temp ~= nil then return __temp.active else return nil end end)(); if __temp ~= nil then return __temp else return false end end)()
+        return name .. " (Active: " .. tostring(status) .. ")"
+    end)
+end

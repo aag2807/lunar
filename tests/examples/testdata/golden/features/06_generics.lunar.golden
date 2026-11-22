@@ -1,0 +1,65 @@
+function identity(value)
+    return value
+end
+
+function firstOf(items)
+    return items[1]
+end
+
+local Box = {}
+Box.__index = Box
+
+function Box.new(value)
+    local self = setmetatable({}, Box)
+    self.value = nil
+    self.value = value
+    return self
+end
+
+function Box:get()
+    return self.value
+end
+
+
+local Pair = {}
+Pair.__index = Pair
+
+function Pair.new(left, right)
+    local self = setmetatable({}, Pair)
+    self.left = nil
+    self.right = nil
+    self.left = left
+    self.right = right
+    return self
+end
+
+function Pair:first()
+    return self.left
+end
+
+function Pair:second()
+    return self.right
+end
+
+
+print(identity(42))
+
+print(identity("text"))
+
+print(firstOf({7, 8, 9}))
+
+local b = Box.new("boxed")
+
+print(b:get())
+
+local p = Pair.new("age", 30)
+
+print(p:first(), p:second())
+
+assert(identity(42) == 42 and identity("text") == "text")
+
+assert(firstOf({7, 8, 9}) == 7)
+
+assert(b:get() == "boxed")
+
+assert(p:first() == "age" and p:second() == 30)

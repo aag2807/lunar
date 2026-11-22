@@ -1,0 +1,180 @@
+function double(x)
+    return x * 2
+end
+
+function add(x, y)
+    return x + y
+end
+
+function multiply(x, y)
+    return x * y
+end
+
+function square(x)
+    return x * x
+end
+
+local result1 = double(5)
+
+print("Example 1:", result1)
+
+local result2 = add(5, 3)
+
+print("Example 2:", result2)
+
+local result3 = multiply(add(double(5), 3), 2)
+
+print("Example 3:", result3)
+
+function map(arr, fn)
+    local result = {}
+    for _, value in ipairs(arr) do
+        table.insert(result, fn(value))
+    end
+    return result
+end
+
+function filter(arr, predicate)
+    local result = {}
+    for _, value in ipairs(arr) do
+        if predicate(value) then
+            table.insert(result, value)
+        end
+    end
+    return result
+end
+
+function reduce(arr, fn, initial)
+    local acc = initial
+    for _, value in ipairs(arr) do
+        acc = fn(acc, value)
+    end
+    return acc
+end
+
+function is_even(x)
+    return x % 2 == 0
+end
+
+function sum(acc, x)
+    return acc + x
+end
+
+local numbers = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+
+local pipeline_result = reduce(map(filter(numbers, is_even), square), sum, 0)
+
+print("Example 4 (pipeline):", pipeline_result)
+
+local nested_result = reduce(map(filter(numbers, is_even), square), sum, 0)
+
+print("Example 4 (nested):", nested_result)
+
+function trim(s)
+    return s:match("^%s*(.-)%s*$")
+end
+
+function uppercase(s)
+    return s:upper()
+end
+
+function replace_spaces(s, replacement)
+    return s:gsub("%s", replacement)
+end
+
+function add_prefix(s, prefix)
+    return prefix .. s
+end
+
+local text_result = add_prefix(replace_spaces(uppercase(trim("  hello world  ")), "-"), ">>> ")
+
+print("Example 5:", text_result)
+
+function get_property(obj, key)
+    return obj[key]
+end
+
+function default_value(val, default)
+    if val == nil then
+        return default
+    end
+    return val
+end
+
+function to_string(val)
+    return tostring(val)
+end
+
+local user = {profile = {age = 30, name = "Alice"}}
+
+local user_name = to_string(default_value(get_property(get_property(user, "profile"), "name"), "Unknown"))
+
+print("Example 6:", user_name)
+
+function validate_positive(x)
+    if x > 0 then
+        return {error = nil, success = true, value = x}
+    end
+    return {error = "Must be positive", success = false, value = nil}
+end
+
+function validate_range(result, min, max)
+    if not result.success then
+        return result
+    end
+    if result.value >= min and result.value <= max then
+        return result
+    end
+    return {error = "Out of range", success = false, value = nil}
+end
+
+function extract_value(result, default)
+    if result.success then
+        return result.value
+    end
+    return default
+end
+
+local validated = extract_value(validate_range(validate_positive(50), 1, 100), 0)
+
+print("Example 7:", validated)
+
+function log_step(value, message)
+    print("[Log]", message, "->", value)
+    return value
+end
+
+function debug_pipeline(value)
+    print("[Debug] Current value:", value)
+    return value
+end
+
+local debug_result = debug_pipeline(log_step(add(log_step(double(log_step(5, "Start")), "After double"), 10), "After add"))
+
+print("Example 8 final:", debug_result)
+
+function negate(x)
+    return - x
+end
+
+function abs_value(x)
+    if x < 0 then
+        return - x
+    end
+    return x
+end
+
+function clamp(x, min, max)
+    if x < min then
+        return min
+    else
+        if x > max then
+            return max
+        end
+    end
+    return x
+end
+
+local math_result = negate(square(clamp(abs_value(- 150), 0, 100)))
+
+print("Example 9:", math_result)

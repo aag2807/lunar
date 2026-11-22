@@ -1,0 +1,16 @@
+function double(n)
+    return n * 2
+end
+
+function triple(n)
+    return n * 3
+end
+
+local VERSION = "1.0"
+
+
+return {
+    double = double,
+    triple = triple,
+    VERSION = VERSION
+}

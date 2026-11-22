@@ -19,3 +19,9 @@ local empty: Config = nil
 print(readPort(full), readPort(empty))
 print(firstTag(full), firstTag(empty))
 print(invoke(function(n: number): number return n * 2 end), invoke(nil))
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(readPort(full) == 3000 and readPort(empty) == 8080)
+assert(firstTag(full) == "web" and firstTag(empty) == "none")
+assert(invoke(function(n: number): number return n * 2 end) == 42)
+assert(invoke(nil) == "no fn")

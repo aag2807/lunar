@@ -25,3 +25,6 @@ end
 
 local c: Car = Car()
 print(c.describe())
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(c.describe() == "4 wheels, says vroom")

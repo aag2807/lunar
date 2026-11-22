@@ -1,0 +1,59 @@
+local Animal = {}
+Animal.__index = Animal
+
+function Animal.new(name, legs)
+    local self = setmetatable({}, Animal)
+    self.name = nil
+    self.legs = nil
+    self.name = name
+    self.legs = legs
+    return self
+end
+
+function Animal:describe()
+    return self.name .. " has " .. tostring(self.legs) .. " legs"
+end
+
+function Animal:speak()
+    return "..."
+end
+
+function Animal.kingdom()
+    return "Animalia"
+end
+
+
+local Dog = {}
+setmetatable(Dog, {__index = Animal})
+Dog.__index = Dog
+
+function Dog.new(name)
+    local self = setmetatable({}, Dog)
+    do local __parent = Animal.new(name, 4); for __k, __v in pairs(__parent) do self[__k] = __v end end
+    return self
+end
+
+function Dog:speak()
+    return "Woof"
+end
+
+
+local a = Animal.new("generic", 2)
+
+local d = Dog.new("Rex")
+
+print(a:describe())
+
+print(d:describe())
+
+print(a:speak(), d:speak())
+
+print(Animal.kingdom())
+
+assert(a:describe() == "generic has 2 legs")
+
+assert(d:describe() == "Rex has 4 legs")
+
+assert(a:speak() == "..." and d:speak() == "Woof")
+
+assert(Animal.kingdom() == "Animalia")

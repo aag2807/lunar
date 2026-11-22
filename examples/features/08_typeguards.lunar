@@ -20,3 +20,8 @@ end
 print(stringify("already"))
 print(stringify(42))
 print(describe(7))
+
+-- Checked results: a wrong answer fails the run, not just a crash.
+assert(stringify("already") == "already")
+assert(stringify(42) == "42")
+assert(describe(7) == "number: 7" and describe("x") == "other")

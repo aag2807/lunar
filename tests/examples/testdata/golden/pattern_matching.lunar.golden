@@ -1,0 +1,417 @@
+function describeNumber(n)
+    return (function()
+  local __match_value = n
+  if __match_value == 0 then
+    return "zero"
+  elseif __match_value == 1 then
+    return "one"
+  elseif __match_value == 2 then
+    return "two"
+  elseif true then
+    return "other number"
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+print("Literal patterns:")
+
+print(describeNumber(0))
+
+print(describeNumber(1))
+
+print(describeNumber(42))
+
+function acceptAnything(x)
+    return (function()
+  local __match_value = x
+  if true then
+    return "I accept everything!"
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+print("\nWildcard pattern:")
+
+print(acceptAnything(42))
+
+print(acceptAnything("hello"))
+
+function double(x)
+    return (function()
+  local __match_value = x
+  if true then
+    local n = __match_value
+    return n * 2
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+print("\nBinding patterns:")
+
+print(double(21))
+
+function classify(x)
+    return (function()
+  local __match_value = x
+  if (function()
+      local n = __match_value
+      return true and (n > 100)
+    end)() then
+    local n = __match_value
+    return "large"
+  elseif (function()
+      local n = __match_value
+      return true and (n > 10)
+    end)() then
+    local n = __match_value
+    return "medium"
+  elseif (function()
+      local n = __match_value
+      return true and (n > 0)
+    end)() then
+    local n = __match_value
+    return "small"
+  elseif __match_value == 0 then
+    return "zero"
+  elseif true then
+    return "negative"
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+print("\nGuard clauses:")
+
+print(classify(200))
+
+print(classify(50))
+
+print(classify(5))
+
+print(classify(0))
+
+print(classify(- 10))
+
+function fizzBuzz(n)
+    return (function()
+  local __match_value = n
+  if (function()
+      local x = __match_value
+      return true and (x % 15 == 0)
+    end)() then
+    local x = __match_value
+    return "FizzBuzz"
+  elseif (function()
+      local x = __match_value
+      return true and (x % 3 == 0)
+    end)() then
+    local x = __match_value
+    return "Fizz"
+  elseif (function()
+      local x = __match_value
+      return true and (x % 5 == 0)
+    end)() then
+    local x = __match_value
+    return "Buzz"
+  elseif true then
+    local x = __match_value
+    return tostring(x)
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+print("\nFizzBuzz with pattern matching:")
+
+for i = 1, 16 do
+    print(i, fizzBuzz(i))
+end
+
+function processResult(result)
+    return (function()
+  local __match_value = result
+  if (type(__match_value) == 'table' and (__match_value.type == 'Success' or __match_value.kind == 'Success')) then
+    return "Operation succeeded with value: " .. tostring(result.value)
+  elseif (type(__match_value) == 'table' and (__match_value.type == 'Error' or __match_value.kind == 'Error')) then
+    return "Operation failed: " .. result.message
+  elseif true then
+    return "Unknown result type"
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+local successResult = {type = "Success", value = 42}
+
+local errorResult = {message = "Network timeout", type = "Error"}
+
+print("\nDiscriminated unions:")
+
+print(processResult(successResult))
+
+print(processResult(errorResult))
+
+function calculateArea(shape)
+    return (function()
+  local __match_value = shape
+  if (type(__match_value) == 'table' and (__match_value.type == 'Circle' or __match_value.kind == 'Circle')) then
+    return 3.14159 * shape.radius * shape.radius
+  elseif (type(__match_value) == 'table' and (__match_value.type == 'Rectangle' or __match_value.kind == 'Rectangle')) then
+    return shape.width * shape.height
+  elseif (type(__match_value) == 'table' and (__match_value.type == 'Triangle' or __match_value.kind == 'Triangle')) then
+    return 0.5 * shape.base * shape.height
+  elseif true then
+    return 0
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+local circle = {radius = 5, type = "Circle"}
+
+local rectangle = {height = 20, type = "Rectangle", width = 10}
+
+local triangle = {base = 6, height = 8, type = "Triangle"}
+
+print("\nShape area calculator:")
+
+print("Circle area:", calculateArea(circle))
+
+print("Rectangle area:", calculateArea(rectangle))
+
+print("Triangle area:", calculateArea(triangle))
+
+function greet(person)
+    return (function()
+  local __match_value = person
+  if type(__match_value) == 'table' and __match_value.age ~= nil and __match_value.name ~= nil then
+    local a = __match_value.age
+    local n = __match_value.name
+    return n .. " is " .. tostring(a) .. " years old"
+  elseif type(__match_value) == 'table' and __match_value.name ~= nil then
+    local n = __match_value.name
+    return "Hello, " .. n
+  elseif true then
+    return "Hello, stranger"
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+local alice = {age = 30, name = "Alice"}
+
+local bob = {name = "Bob"}
+
+local anonymous = {}
+
+print("\nStruct patterns:")
+
+print(greet(alice))
+
+print(greet(bob))
+
+print(greet(anonymous))
+
+function parseCommand(cmd)
+    return (function()
+  local __match_value = cmd
+  if __match_value == "help" then
+    return "Showing help..."
+  elseif __match_value == "quit" then
+    return "Exiting..."
+  elseif __match_value == "save" then
+    return "Saving..."
+  elseif __match_value == "load" then
+    return "Loading..."
+  elseif true then
+    return "Unknown command: " .. cmd
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+print("\nString patterns:")
+
+print(parseCommand("help"))
+
+print(parseCommand("quit"))
+
+print(parseCommand("invalid"))
+
+function toYesNo(b)
+    return (function()
+  local __match_value = b
+  if __match_value == true then
+    return "Yes"
+  elseif __match_value == false then
+    return "No"
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+print("\nBoolean patterns:")
+
+print(toYesNo(true))
+
+print(toYesNo(false))
+
+function getValue(optional)
+    return (function()
+  local __match_value = optional
+  if __match_value == nil then
+    return "No value"
+  elseif true then
+    local val = __match_value
+    return "Value: " .. tostring(val)
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+print("\nNil patterns:")
+
+print(getValue(nil))
+
+print(getValue(42))
+
+print(getValue("hi"))
+
+function processEvent(event)
+    return (function()
+  local __match_value = event
+  if type(__match_value) == 'table' and __match_value.button ~= nil and __match_value.type ~= nil and __match_value.type == "click" then
+    local btn = __match_value.button
+    return "Clicked button: " .. tostring(btn)
+  elseif type(__match_value) == 'table' and __match_value.key ~= nil and __match_value.type ~= nil and __match_value.type == "keypress" then
+    local k = __match_value.key
+    return "Pressed key: " .. k
+  elseif type(__match_value) == 'table' and __match_value.delta ~= nil and __match_value.type ~= nil and __match_value.type == "scroll" then
+    local d = __match_value.delta
+    return "Scrolled by: " .. tostring(d)
+  elseif true then
+    return "Unknown event"
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+local clickEvent = {button = 1, type = "click"}
+
+local keyEvent = {key = "Enter", type = "keypress"}
+
+local scrollEvent = {delta = 120, type = "scroll"}
+
+print("\nNested patterns:")
+
+print(processEvent(clickEvent))
+
+print(processEvent(keyEvent))
+
+print(processEvent(scrollEvent))
+
+function handleResponse(response)
+    return (function()
+  local __match_value = response.status
+  if (function()
+      local code = __match_value
+      return true and (code >= 200 and code < 300)
+    end)() then
+    local code = __match_value
+    return "Success: " .. response.body
+  elseif __match_value == 404 then
+    return "Not found"
+  elseif (function()
+      local code = __match_value
+      return true and (code >= 400 and code < 500)
+    end)() then
+    local code = __match_value
+    return "Client error: " .. tostring(code)
+  elseif (function()
+      local code = __match_value
+      return true and (code >= 500)
+    end)() then
+    local code = __match_value
+    return "Server error: " .. tostring(code)
+  elseif true then
+    return "Unknown response"
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+local okResponse = {body = "Data loaded", status = 200}
+
+local notFoundResponse = {body = "", status = 404}
+
+local serverErrorResponse = {body = "", status = 500}
+
+print("\nHTTP response handler:")
+
+print(handleResponse(okResponse))
+
+print(handleResponse(notFoundResponse))
+
+print(handleResponse(serverErrorResponse))
+
+function transition(currentState, event)
+    return (function()
+  local __match_value = currentState
+  if __match_value == "idle" and (event == "start") then
+    return "running"
+  elseif __match_value == "running" and (event == "pause") then
+    return "paused"
+  elseif __match_value == "running" and (event == "stop") then
+    return "idle"
+  elseif __match_value == "paused" and (event == "resume") then
+    return "running"
+  elseif __match_value == "paused" and (event == "stop") then
+    return "idle"
+  elseif true then
+    local state = __match_value
+    return state
+  end
+  error('Pattern match failed: no case matched')
+end)()
+end
+
+print("\nState machine:")
+
+local state = "idle"
+
+print("Current state:", state)
+
+state = transition(state, "start")
+
+print("After 'start':", state)
+
+state = transition(state, "pause")
+
+print("After 'pause':", state)
+
+state = transition(state, "resume")
+
+print("After 'resume':", state)
+
+state = transition(state, "stop")
+
+print("After 'stop':", state)
+
+print("\n=== Pattern Matching Best Practices ===")
+
+print("1. Always include a wildcard (_) pattern at the end to handle unexpected cases")
+
+print("2. Order patterns from most specific to least specific")
+
+print("3. Use guards for complex conditions")
+
+print("4. Leverage struct patterns for destructuring")
+
+print("5. Pattern matching compiles to efficient if/elseif chains")
+
+print("6. Use 'with' keyword to separate the value from patterns")
+
+print("7. Each case uses '|' followed by pattern, '->', then expression")

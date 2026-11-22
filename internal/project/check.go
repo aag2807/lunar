@@ -31,6 +31,8 @@ type Module struct {
 	// Broken is set when the module does not parse: it is not checked or
 	// emitted, and its importers take its names as 'any'.
 	Broken bool
+	// checked is set once its exports are known.
+	checked bool
 
 	imports []resolvedImport
 }
@@ -143,7 +145,10 @@ func (p *Project) Check() (*Program, diag.List) {
 				if exports == nil {
 					exports = map[string]types.Type{}
 				}
-				return &types.ModuleInfo{Path: ri.target.Path, Exports: exports, Symbols: ri.target.Symbols, Broken: ri.target.Broken}, nil
+				// A module not checked yet is on an import cycle, which is
+				// reported already; its names are taken as 'any' meanwhile.
+				unknown := ri.target.Broken || !ri.target.checked
+				return &types.ModuleInfo{Path: ri.target.Path, Exports: exports, Symbols: ri.target.Symbols, Broken: unknown}, nil
 			}
 			return nil, fmt.Errorf("Cannot find module '%s'", node.Module)
 		})
@@ -154,6 +159,7 @@ func (p *Project) Check() (*Program, diag.List) {
 			continue
 		}
 		diags = append(diags, p.checkModule(m, checker, declSources)...)
+		m.checked = true
 	}
 
 	diags.Sort()

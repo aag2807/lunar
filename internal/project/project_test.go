@@ -121,6 +121,11 @@ func TestImportCycleIsAnError(t *testing.T) {
 	if !found {
 		t.Errorf("no cycle error in %v", messagesOf(diags))
 	}
+	// The cycle is the one error: the module checked first does not also
+	// claim the other exports nothing.
+	if len(diags) != 1 {
+		t.Errorf("want only the cycle error, got %v", messagesOf(diags))
+	}
 }
 
 func TestImportLeavingTheRootIsAnError(t *testing.T) {

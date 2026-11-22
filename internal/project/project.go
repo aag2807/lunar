@@ -130,6 +130,10 @@ type Project struct {
 	LuaFiles  []string // absolute *.lua paths to copy through
 
 	overlay map[string]string
+	// configPath is the config file, when there is one; wholeFolder says
+	// the project is the whole root, not files named on the command line.
+	configPath  string
+	wholeFolder bool
 }
 
 var supportedTargets = map[string]bool{"lua53": true, "lua54": true}
@@ -168,8 +172,19 @@ func Open(opts Options) (*Project, diag.List) {
 		}
 	}
 
+	// A path in the config is relative to its folder, unless absolute.
+	fromConfig := func(path string) string {
+		if filepath.IsAbs(path) {
+			return filepath.Clean(path)
+		}
+		return filepath.Join(configDir, path)
+	}
 	p := &Project{overlay: opts.Overlay, CopyLua: true, SourceMap: cfg.SourceMap, DataFiles: cfg.DataFiles}
-	p.Root = filepath.Join(configDir, cfg.RootDir)
+	p.Root = fromConfig(cfg.RootDir)
+	if found {
+		p.configPath, _ = filepath.Abs(configPath)
+	}
+	p.wholeFolder = len(opts.Files) == 0
 	if cfg.CopyLua != nil {
 		p.CopyLua = *cfg.CopyLua
 	}
@@ -181,7 +196,7 @@ func Open(opts Options) (*Project, diag.List) {
 	case opts.OutDir != "":
 		p.OutDir, _ = filepath.Abs(opts.OutDir)
 	case cfg.OutDir != "":
-		p.OutDir = filepath.Join(configDir, cfg.OutDir)
+		p.OutDir = fromConfig(cfg.OutDir)
 	}
 
 	p.Target = "lua53"
@@ -208,7 +223,7 @@ func Open(opts Options) (*Project, diag.List) {
 	// flagged paths, which may be anywhere.
 	declPaths := []string{p.Root}
 	for _, d := range cfg.Declarations {
-		declPaths = append(declPaths, filepath.Join(configDir, d))
+		declPaths = append(declPaths, fromConfig(d))
 	}
 	for _, d := range opts.Decls {
 		abs, _ := filepath.Abs(d)
@@ -270,7 +285,9 @@ func Open(opts Options) (*Project, diag.List) {
 }
 
 // scan lists the files under path (a file or a folder) ending in suffix,
-// sorted, skipping hidden folders and the output folder.
+// sorted, skipping hidden folders and the output folder. Folders reached
+// through symlinks are scanned like any other (the root included), each
+// once, so a link back up the tree does not loop.
 func (p *Project) scan(path, suffix string) ([]string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -282,22 +299,46 @@ func (p *Project) scan(path, suffix string) ([]string, error) {
 		}
 		return nil, nil
 	}
+	outInfo, outErr := os.Stat(p.OutDir)
+	isOutDir := func(dir string, info fs.FileInfo) bool {
+		return p.OutDir != "" && (dir == p.OutDir || (outErr == nil && os.SameFile(info, outInfo)))
+	}
 	var out []string
-	err = filepath.WalkDir(path, func(file string, d fs.DirEntry, err error) error {
+	var visited []fs.FileInfo
+	var walk func(dir string, info fs.FileInfo) error
+	walk = func(dir string, info fs.FileInfo) error {
+		for _, v := range visited {
+			if os.SameFile(v, info) {
+				return nil
+			}
+		}
+		visited = append(visited, info)
+		entries, err := os.ReadDir(dir)
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
-			if file != path && (strings.HasPrefix(d.Name(), ".") || (p.OutDir != "" && file == p.OutDir)) {
-				return filepath.SkipDir
+		for _, e := range entries {
+			file := filepath.Join(dir, e.Name())
+			st, err := os.Stat(file) // through a symlink
+			if err != nil {
+				continue // a dangling link
 			}
-			return nil
-		}
-		if strings.HasSuffix(file, suffix) && (suffix != ".lunar" || !strings.HasSuffix(file, ".lunar-tmp")) {
-			out = append(out, file)
+			if st.IsDir() {
+				if strings.HasPrefix(e.Name(), ".") || isOutDir(file, st) {
+					continue
+				}
+				if err := walk(file, st); err != nil {
+					return err
+				}
+				continue
+			}
+			if strings.HasSuffix(file, suffix) && (suffix != ".lunar" || !strings.HasSuffix(file, ".lunar-tmp")) {
+				out = append(out, file)
+			}
 		}
 		return nil
-	})
+	}
+	err = walk(path, info)
 	sort.Strings(out)
 	return out, err
 }

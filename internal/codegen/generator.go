@@ -2042,11 +2042,22 @@ func (g *Generator) generateImportStatement(node *ast.ImportStatement) string {
 		// import { name1, name2 } from "module"
 		// -> local __module = require("module")
 		// -> local name1 = __module.name1
+		// Names that are only types need nothing at run time; an import of
+		// nothing but types is no require at all (as in TypeScript).
+		var values []*ast.Identifier
+		for _, name := range node.Names {
+			if !node.TypeNames[name.Value] {
+				values = append(values, name)
+			}
+		}
+		if len(values) == 0 && len(node.Names) > 0 {
+			return ""
+		}
 		tempVar := "__" + strings.NewReplacer(".", "_", "/", "_", "-", "_").Replace(moduleName)
 
 		output.WriteString(fmt.Sprintf("local %s = require(\"%s\")\n", tempVar, moduleName))
 
-		for _, name := range node.Names {
+		for _, name := range values {
 			output.WriteString(g.generateIndent())
 			output.WriteString(fmt.Sprintf("local %s = %s.%s\n", name.Value, tempVar, name.Value))
 		}

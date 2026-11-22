@@ -7054,6 +7054,12 @@ func (c *Checker) bindImport(node *ast.ImportStatement) {
 			continue
 		}
 		c.env.Set(name.Value, typ)
+		if sym := info.Symbols[name.Value]; sym != nil && (sym.Kind == SymInterface || sym.Kind == SymTypeAlias) {
+			if node.TypeNames == nil {
+				node.TypeNames = map[string]bool{}
+			}
+			node.TypeNames[name.Value] = true
+		}
 		// Uses of an imported name are uses of the export's definition.
 		if sym := info.Symbols[name.Value]; sym != nil {
 			c.env.defineSym(name.Value, sym)

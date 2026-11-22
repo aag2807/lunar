@@ -101,3 +101,37 @@ func TestOutDirOfAnotherProjectIsRefused(t *testing.T) {
 		t.Errorf("a again: %v", messagesOf(diags))
 	}
 }
+
+// While a file is replaced, it is never missing: the new one is renamed
+// over the old one, which is kept under a second name until the end.
+func TestReplacedFileIsNeverMissing(t *testing.T) {
+	out := t.TempDir()
+	if err := writeOutputs(out, "/root", []Output{{Rel: "a.lua", Content: []byte("old a")}}); err != nil {
+		t.Fatal(err)
+	}
+	real := renameFile
+	defer func() { renameFile = real }()
+	renameFile = func(from, to string) error {
+		if strings.HasSuffix(to, "a.lua") {
+			if _, err := os.Stat(to); err != nil {
+				t.Errorf("a.lua missing while replaced: %v", err)
+			}
+		}
+		return real(from, to)
+	}
+	if err := writeOutputs(out, "/root", []Output{{Rel: "a.lua", Content: []byte("new a")}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(out, "a.lua")); got != "new a" {
+		t.Errorf("a.lua = %q", got)
+	}
+}
+
+// Without hard links, old files are moved aside, and a failed replace
+// still puts every one back.
+func TestFailedReplaceWithoutHardLinks(t *testing.T) {
+	realLink := linkFile
+	defer func() { linkFile = realLink }()
+	linkFile = func(string, string) error { return errors.New("no hard links here") }
+	TestFailedReplaceLeavesTheLastGoodBuild(t)
+}

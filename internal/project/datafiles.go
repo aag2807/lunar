@@ -2,6 +2,7 @@ package project
 
 import (
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -16,6 +17,30 @@ const noLibraries = "data files are loaded with no libraries opened"
 
 // isDataFile reports whether a root-relative path matches a dataFiles glob.
 // '*' matches within a folder name, '**' across folders.
+// unmatchedDataFiles warns about each dataFiles pattern that matches no
+// module: a misspelt one would turn the check off without a word.
+func (p *Project) unmatchedDataFiles(modules []*Module) diag.List {
+	var diags diag.List
+	if !p.wholeFolder {
+		return nil
+	}
+	for _, pattern := range p.DataFiles {
+		re := globRegexp(pattern)
+		matched := false
+		for _, m := range modules {
+			if re.MatchString(m.Rel) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			diags = append(diags, diag.Diagnostic{File: p.configPath, Line: 1, Column: 1, EndLine: 1, EndColumn: 1,
+				Severity: diag.Warning, Code: "config", Message: fmt.Sprintf("dataFiles pattern '%s' matches no file under rootDir (%s)", pattern, p.Root)})
+		}
+	}
+	return diags
+}
+
 func (p *Project) isDataFile(rel string) bool {
 	for _, pattern := range p.DataFiles {
 		if globRegexp(pattern).MatchString(rel) {
@@ -26,10 +51,23 @@ func (p *Project) isDataFile(rel string) bool {
 }
 
 func globRegexp(pattern string) *regexp.Regexp {
+	pattern = strings.TrimPrefix(filepath.ToSlash(pattern), "./")
+	switch {
+	case strings.HasSuffix(pattern, "/"):
+		pattern += "**" // a folder: everything in it
+	case !strings.ContainsAny(pattern, "*?") && !strings.HasSuffix(pattern, ".lunar"):
+		pattern += "/**"
+	}
 	var sb strings.Builder
 	sb.WriteString("^")
 	for i := 0; i < len(pattern); i++ {
 		switch c := pattern[i]; {
+		case strings.HasPrefix(pattern[i:], "**/"):
+			sb.WriteString("(?:.*/)?") // any folders, none included
+			i += 2
+		case strings.HasPrefix(pattern[i:], "/**") && i+3 == len(pattern):
+			sb.WriteString("(?:/.*)?")
+			i += 2
 		case c == '*' && i+1 < len(pattern) && pattern[i+1] == '*':
 			sb.WriteString(".*")
 			i++
@@ -65,6 +103,18 @@ func dataFileDiagnostics(m *Module, checker *types.Checker) diag.List {
 		}
 	}
 	for _, stmt := range m.Statements {
+		// Importing types needs nothing at run time; a value needs require.
+		if imp, ok := stmt.(*ast.ImportStatement); ok {
+			if imp.IsWildcard {
+				add(imp.Token, fmt.Sprintf("Data file imports '%s' as a whole, which needs require", imp.Module))
+			}
+			for _, name := range imp.Names {
+				if !imp.TypeNames[name.Value] {
+					add(name.Token, fmt.Sprintf("Data file imports the value '%s' from '%s', which needs require", name.Value, imp.Module))
+				}
+			}
+			continue
+		}
 		walk(reflect.ValueOf(stmt), func(n any) {
 			switch node := n.(type) {
 			case *ast.ClassDeclaration:

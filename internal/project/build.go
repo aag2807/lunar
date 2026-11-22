@@ -1,12 +1,14 @@
 package project
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -108,10 +110,17 @@ type manifest struct {
 // in place.
 func Build(p *Project) (Result, diag.List) {
 	if p.OutDir != "" {
+		// Two builds writing one folder at once removed each other's
+		// staged files and backups; the second waits for the first.
+		unlock, err := lockOutDir(p.OutDir)
+		if err != nil {
+			return Result{}, diag.List{{Severity: diag.Error, Code: "io", Message: err.Error()}}
+		}
+		defer unlock()
 		// Another project's outputs would all look stale to this one.
 		if data, err := os.ReadFile(filepath.Join(p.OutDir, manifestName)); err == nil {
 			var m manifest
-			if json.Unmarshal(data, &m) == nil && m.Root != "" && filepath.Clean(m.Root) != filepath.Clean(p.Root) {
+			if json.Unmarshal(data, &m) == nil && m.Root != "" && !sameDir(m.Root, p.Root) {
 				return Result{}, configError("outDir %s holds the build of another project (rootDir %s); give each project its own outDir", p.OutDir, m.Root)
 			}
 		}
@@ -142,6 +151,58 @@ func Build(p *Project) (Result, diag.List) {
 	}
 	res.Written = true
 	return res, diags
+}
+
+// sameDir says whether two paths name one folder, however each is
+// spelled: through a symlink, or with another drive-letter case.
+func sameDir(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	ia, errA := os.Stat(a)
+	ib, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(ia, ib)
+}
+
+// lockPath is the lock file for an output folder: in the temp folder, so
+// a build that writes nothing leaves outDir untouched, and named after the
+// folder itself, so every spelling of it shares one lock.
+func lockPath(outDir string) string {
+	key, _ := filepath.Abs(outDir)
+	if real, err := filepath.EvalSymlinks(key); err == nil {
+		key = real
+	} else if parent, err := filepath.EvalSymlinks(filepath.Dir(key)); err == nil {
+		key = filepath.Join(parent, filepath.Base(key))
+	}
+	if runtime.GOOS == "windows" {
+		key = strings.ToLower(key)
+	}
+	sum := sha256.Sum256([]byte(key))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("lunar-build-%x.lock", sum[:8]))
+}
+
+// lockWait is how long a build waits for another one writing its folder.
+var lockWait = 2 * time.Minute
+
+// lockOutDir waits until no other build holds outDir's lock, takes it, and
+// returns its release. The operating system drops the lock of a build that
+// dies, so a killed build never leaves the folder locked.
+func lockOutDir(outDir string) (func(), error) {
+	path := lockPath(outDir)
+	deadline := time.Now().Add(lockWait)
+	for {
+		release, busy, err := tryLock(path)
+		if err != nil {
+			return nil, fmt.Errorf("locking %s: %w", outDir, err)
+		}
+		if !busy {
+			return release, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("another lunar build is writing %s (waited %v)", outDir, lockWait)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }
 
 // retry runs op up to three times: on Windows a rename fails for a moment
@@ -183,7 +244,28 @@ func recoverLeftovers(outDir string) {
 	})
 }
 
+// linkFile is os.Link; tests replace it to see the fallback.
+var linkFile = os.Link
+
 func writeOutputs(outDir, root string, outs []Output) error {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return fmt.Errorf("creating %s: %w", outDir, err)
+	}
+	manifestPath := filepath.Join(outDir, manifestName)
+	var old manifest
+	if data, err := os.ReadFile(manifestPath); err == nil {
+		json.Unmarshal(data, &old)
+	}
+	// The manifest is written with the outputs and undone with them: one
+	// that failed to update after the outputs did made a build that said
+	// it wrote nothing, and left outputs no build would remove.
+	m := manifest{Root: root, Files: make([]string, 0, len(outs))}
+	for _, o := range outs {
+		m.Files = append(m.Files, o.Rel)
+	}
+	data, _ := json.MarshalIndent(m, "", "  ")
+	outs = append(outs[:len(outs):len(outs)], Output{Rel: manifestName, Content: append(data, '\n')})
+
 	var staged []string
 	cleanup := func() {
 		for _, s := range staged {
@@ -203,9 +285,11 @@ func writeOutputs(outDir, root string, outs []Output) error {
 		}
 		staged = append(staged, tmp)
 	}
-	// Move each old file aside and the new one into its place. If any step
-	// fails, undo every step taken, so the folder keeps the last good
-	// build rather than half of each.
+	// Keep each old file under a second name, then rename the new one over
+	// it: a reader never finds the file missing. Where a second name
+	// cannot be made (no hard links), the old file is moved aside instead.
+	// If any step fails, undo every step taken, so the folder keeps the
+	// last good build rather than half of each.
 	type step struct {
 		target, backup string
 		hadOld, placed bool
@@ -214,11 +298,11 @@ func writeOutputs(outDir, root string, outs []Output) error {
 	undo := func() {
 		for i := len(done) - 1; i >= 0; i-- {
 			st := done[i]
-			if st.placed {
-				os.Remove(st.target)
-			}
 			if st.hadOld {
 				renameFile(st.backup, st.target)
+				os.Remove(st.backup) // when both names were one file
+			} else if st.placed {
+				os.Remove(st.target)
 			}
 		}
 		cleanup()
@@ -227,9 +311,12 @@ func writeOutputs(outDir, root string, outs []Output) error {
 		st := step{target: filepath.Join(outDir, filepath.FromSlash(o.Rel))}
 		st.backup = st.target + ".lunar-old"
 		if info, err := os.Lstat(st.target); err == nil && !info.IsDir() {
-			if err := retry(func() error { return renameFile(st.target, st.backup) }); err != nil {
-				undo()
-				return fmt.Errorf("replacing %s: %w (nothing was changed)", st.target, err)
+			os.Remove(st.backup)
+			if linkFile(st.target, st.backup) != nil {
+				if err := retry(func() error { return renameFile(st.target, st.backup) }); err != nil {
+					undo()
+					return fmt.Errorf("replacing %s: %w (nothing was changed)", st.target, err)
+				}
 			}
 			st.hadOld = true
 		}
@@ -247,25 +334,14 @@ func writeOutputs(outDir, root string, outs []Output) error {
 	}
 
 	// Remove what the previous build wrote and this one did not.
-	current := map[string]bool{}
-	for _, o := range outs {
-		current[o.Rel] = true
+	current := map[string]bool{manifestName: true}
+	for _, rel := range m.Files {
+		current[rel] = true
 	}
-	manifestPath := filepath.Join(outDir, manifestName)
-	if data, err := os.ReadFile(manifestPath); err == nil {
-		var old manifest
-		if json.Unmarshal(data, &old) == nil {
-			for _, rel := range old.Files {
-				if !current[rel] && !strings.Contains(rel, "..") {
-					os.Remove(filepath.Join(outDir, filepath.FromSlash(rel)))
-				}
-			}
+	for _, rel := range old.Files {
+		if !current[rel] && !strings.Contains(rel, "..") {
+			os.Remove(filepath.Join(outDir, filepath.FromSlash(rel)))
 		}
 	}
-	m := manifest{Root: root, Files: make([]string, 0, len(outs))}
-	for _, o := range outs {
-		m.Files = append(m.Files, o.Rel)
-	}
-	data, _ := json.MarshalIndent(m, "", "  ")
-	return os.WriteFile(manifestPath, append(data, '\n'), 0o644)
+	return nil
 }

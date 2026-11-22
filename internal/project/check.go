@@ -220,6 +220,7 @@ func (p *Project) CheckReusing(prev *Program) (*Program, diag.List) {
 		m.checked = true
 	}
 
+	diags = append(diags, p.unmatchedDataFiles(sorted)...)
 	diags.Sort()
 	return &Program{Project: p, Modules: sorted, DeclIndex: declIndex,
 		contextKey: contextKey, declDiags: declDiags, byPath: byPath}, diags

@@ -1427,6 +1427,10 @@ type ImportStatement struct {
 	// RequireName is the name require() loads the module by, relative to
 	// the project root ("ai.brain"); the project fills it in.
 	RequireName string
+	// TypeNames are the imported names that are only types (interfaces,
+	// type aliases): the checker fills it in, and nothing is generated for
+	// them.
+	TypeNames map[string]bool
 }
 
 func (is *ImportStatement) statementNode()       {}

@@ -826,7 +826,7 @@ func (c *Checker) hoistedSignature(fn *ast.FunctionDeclaration) *FunctionType {
 	if len(fn.GenericParams) > 0 {
 		c.env = NewEnclosedEnvironment(prevEnv)
 		for _, genericParam := range fn.GenericParams {
-			c.env.Set(genericParam.Value, &GenericParamType{Name: genericParam.Value})
+			c.env.Set(genericParam.Value, c.typeParam(genericParam))
 		}
 		defer func() { c.env = prevEnv }()
 	}
@@ -1089,7 +1089,7 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		c.env = NewEnclosedEnvironment(prevEnv)
 		for _, genericParam := range node.GenericParams {
 			// Store as GenericParamType so we can substitute it later
-			c.env.Set(genericParam.Value, &GenericParamType{Name: genericParam.Value})
+			c.env.Set(genericParam.Value, c.typeParam(genericParam))
 		}
 	}
 
@@ -1183,7 +1183,7 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		if len(method.GenericParams) > 0 {
 			c.env = NewEnclosedEnvironment(prevSigEnv)
 			for i, gp := range method.GenericParams {
-				c.env.Set(gp.Value, &GenericParamType{Name: gp.Value})
+				c.env.Set(gp.Value, c.typeParam(gp))
 				methodGenerics[i] = gp.Value
 			}
 		}
@@ -1465,7 +1465,7 @@ func (c *Checker) buildInterface(node *ast.InterfaceDeclaration, name string, sy
 		if len(method.GenericParams) > 0 {
 			c.env = NewEnclosedEnvironment(prevSigEnv)
 			for i, gp := range method.GenericParams {
-				c.env.Set(gp.Value, &GenericParamType{Name: gp.Value})
+				c.env.Set(gp.Value, c.typeParam(gp))
 				methodGenerics[i] = gp.Value
 			}
 		}
@@ -2811,6 +2811,47 @@ func (c *Checker) substituteFunctionType(funcType *FunctionType, substitutions m
 	}
 }
 
+// typeParam is the type a type parameter stands for: T, bounded by its
+// constraint in <T extends Named>.
+func (c *Checker) typeParam(param *ast.Identifier) *GenericParamType {
+	gp := &GenericParamType{Name: param.Value}
+	if param.Constraint != nil {
+		gp.Constraint = c.resolveTypeExpression(param.Constraint)
+	}
+	return gp
+}
+
+// constraintOf finds the constraint of type parameter name in a
+// function's parameters, if it has one.
+func constraintOf(fn *FunctionType, name string) Type {
+	var find func(Type) Type
+	find = func(t Type) Type {
+		switch v := t.(type) {
+		case *GenericParamType:
+			if v.Name == name && v.Constraint != nil {
+				return v.Constraint
+			}
+		case *ArrayType:
+			return find(v.ElementType)
+		case *OptionalType:
+			return find(v.BaseType)
+		case *UnionType:
+			for _, m := range v.Types {
+				if c := find(m); c != nil {
+					return c
+				}
+			}
+		}
+		return nil
+	}
+	for _, p := range fn.Parameters {
+		if c := find(p); c != nil {
+			return c
+		}
+	}
+	return nil
+}
+
 // containsGenericParam says whether a type still names a type parameter.
 func containsGenericParam(t Type) bool {
 	switch v := t.(type) {
@@ -3135,7 +3176,7 @@ func yieldsMultipleValues(expr ast.Expression) bool {
 // Both spellings count: `b?: number` and the documented `b: number?`, which is
 // the same thing in Lua, where a missing argument arrives as nil.
 func paramIsOptional(param *ast.Parameter, resolved Type) bool {
-	if param.IsOptional {
+	if param.IsOptional || param.Default != nil {
 		return true
 	}
 	// An untyped parameter is a Lua parameter: left out, it is nil.
@@ -3224,7 +3265,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		c.env = NewEnclosedEnvironment(prevEnv)
 		for _, genericParam := range node.GenericParams {
 			// Store as GenericParamType so we can substitute it later
-			c.env.Set(genericParam.Value, &GenericParamType{Name: genericParam.Value})
+			c.env.Set(genericParam.Value, c.typeParam(genericParam))
 		}
 	}
 
@@ -3438,6 +3479,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	// Add parameters to scope
 	for i, param := range node.Parameters {
 		c.env.Set(param.Name.Value, params[i])
+		c.checkDefault(param, params[i])
 		c.define(param.Name.Token, SymParameter, params[i])
 	}
 
@@ -4726,6 +4768,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 				paramType = c.paramType(param)
 			}
 			c.env.Set(param.Name.Value, paramType)
+			c.checkDefault(param, paramType)
 			c.define(param.Name.Token, SymParameter, paramType)
 		}
 
@@ -4799,6 +4842,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 				paramType = c.paramType(param)
 			}
 			c.env.Set(param.Name.Value, paramType)
+			c.checkDefault(param, paramType)
 			c.define(param.Name.Token, SymParameter, paramType)
 		}
 
@@ -5170,6 +5214,17 @@ func classNameOf(e ast.Expression) string {
 		return ident.Value
 	}
 	return ""
+}
+
+// checkDefault checks a parameter's default value against its type.
+func (c *Checker) checkDefault(param *ast.Parameter, typ Type) {
+	if param.Default == nil {
+		return
+	}
+	dt := c.checkExpression(param.Default)
+	if param.Type != nil && !dt.IsAssignableTo(typ) {
+		c.addError(fmt.Sprintf("Default value of '%s' is '%s', not '%s'", param.Name.Value, dt.String(), typ.String()), param.Name.Token)
+	}
 }
 
 // paramType is a parameter's annotated type; `name?: T` may be left out,
@@ -5647,6 +5702,7 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 		paramTypes[i] = paramType
 		if param.Name != nil {
 			c.env.Set(param.Name.Value, paramType)
+			c.checkDefault(param, paramType)
 			c.define(param.Name.Token, SymParameter, paramType)
 		}
 	}
@@ -6293,6 +6349,17 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 		// Infer type arguments from call arguments
 		typeArgs := make([]Type, len(fnType.GenericParams))
 		inferred := make([]bool, len(fnType.GenericParams))
+		generic := fnType // fnType becomes the instantiation below
+		defer func() {
+			// What T was inferred as has to satisfy <T extends X>.
+			for i, name := range generic.GenericParams {
+				if i < len(typeArgs) && inferred[i] && typeArgs[i] != nil {
+					if bound := constraintOf(generic, name); bound != nil && !typeArgs[i].IsAssignableTo(bound) {
+						c.addError(fmt.Sprintf("Type '%s' does not satisfy the constraint '%s' of '%s'", typeArgs[i].String(), bound.String(), name), node.Token)
+					}
+				}
+			}
+		}()
 
 		for i, arg := range node.Arguments {
 			if i >= len(fnType.Parameters) {
@@ -6407,6 +6474,11 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 			}
 
 			if c.reportLiteralFields(arg, paramType) {
+				continue
+			}
+			// A parameter that may be left out may be passed nil, which is
+			// what leaving it out passes (and what takes its default).
+			if _, isNil := argType.(*NilType); isNil && i < len(fnType.OptionalParams) && fnType.OptionalParams[i] {
 				continue
 			}
 			if !argType.IsAssignableTo(paramType) {
@@ -6598,6 +6670,10 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 	}
 	if c.usesUnknown(actualLeftType, rightIdent.Token) {
 		return Any
+	}
+	// x.name on a <T extends Named>: T has what Named has.
+	if gp, ok := actualLeftType.(*GenericParamType); ok && gp.Constraint != nil {
+		actualLeftType = gp.Constraint
 	}
 
 	// Check if left type has the property

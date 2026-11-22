@@ -1,0 +1,9 @@
+-- What T is inferred as has to satisfy its constraint.
+interface Named
+    name: string
+end
+function nameOf<T extends Named>(x: T): string
+    return x.name
+end
+-- error: does not satisfy the constraint
+print(nameOf(5))

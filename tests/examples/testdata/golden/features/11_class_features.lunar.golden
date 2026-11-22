@@ -1,3 +1,5 @@
+local __metamethods = {"__add", "__sub", "__mul", "__div", "__mod", "__pow", "__unm", "__idiv", "__band", "__bor", "__bxor", "__shl", "__shr", "__bnot", "__concat", "__len", "__eq", "__lt", "__le", "__call", "__tostring", "__close", "__gc", "__mode", "__name", "__pairs", "__metatable"}
+
 local Account, Point, Savings, Plain
 
 Account = {}
@@ -70,6 +72,7 @@ print(p.x, p.y, p:sum())
 
 Savings = {}
 setmetatable(Savings, {__index = Account})
+for _, k in ipairs(__metamethods) do Savings[k] = Account[k] end
 Savings.__index = Savings
 Savings.__getters = setmetatable({}, {__index = Account.__getters})
 Savings.__setters = setmetatable({}, {__index = Account.__setters})
@@ -107,6 +110,7 @@ end
 
 Plain = {}
 setmetatable(Plain, {__index = Account})
+for _, k in ipairs(__metamethods) do Plain[k] = Account[k] end
 Plain.__index = Plain
 
 function Plain.__init(self, id)

@@ -1,0 +1,24 @@
+-- Metamethods are inherited: Lua looks them up on the metatable itself,
+-- not through __index, so a subclass gets its parent's.
+class A
+    n: number
+    constructor(n: number)
+        self.n = n
+    end
+    __tostring(): string
+        return "A" .. self.n
+    end
+    __eq(other: A): boolean
+        return self.n == other.n
+    end
+end
+class B extends A
+end
+class C extends B
+    __tostring(): string
+        return "C" .. self.n
+    end
+end
+assert(tostring(B(1)) == "A1")
+assert(tostring(C(2)) == "C2")
+assert(B(3) == B(3))

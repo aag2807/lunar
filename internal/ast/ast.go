@@ -20,6 +20,8 @@ type Expression interface {
 type Identifier struct {
 	Token lexer.Token
 	Value string
+	// Constraint is X in a type parameter <T extends X>.
+	Constraint Expression
 }
 
 func (i *Identifier) expressionNode()      {}
@@ -587,8 +589,11 @@ type Parameter struct {
 	Token      lexer.Token
 	Name       *Identifier
 	Type       Expression
-	IsRest     bool   // true for ...param
-	IsOptional bool   // true for param?: type
+	IsRest     bool // true for ...param
+	IsOptional bool // true for param?: type
+	// Default is the value a parameter left out (or passed nil) takes:
+	// x: number = 4.
+	Default    Expression
 	Visibility string // "public", "private", "protected" for constructor parameter properties
 	IsReadonly bool   // true for readonly parameter properties
 }

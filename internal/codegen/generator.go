@@ -32,6 +32,9 @@ type Generator struct {
 	currentClassName string   // Current class being generated
 	exports          []string // Track exported names for module generation
 	target           string   // Target Lua version: lua53 or lua54
+	// needMetamethodList: a subclass copies its parent's metamethods,
+	// so the module declares the list of their names.
+	needMetamethodList bool
 }
 
 // newGenerator is the one constructor every public variant goes through, so
@@ -168,11 +171,35 @@ func (g *Generator) Generate(statements []ast.Statement) string {
 		output.WriteString(returnStmt)
 	}
 
-	if g.sourceMapBuilder != nil {
-		return g.placeMappings(output.String())
+	code := output.String()
+	if g.needMetamethodList {
+		code = metamethodList + code
 	}
-	return output.String()
+	if g.sourceMapBuilder != nil {
+		return g.placeMappings(code)
+	}
+	return code
 }
+
+// defaultsPrologue gives each parameter with a default its value when the
+// argument is left out or nil: x: number = 4.
+func (g *Generator) defaultsPrologue(params []*ast.Parameter) string {
+	var out strings.Builder
+	for _, p := range params {
+		if p.Default == nil || p.Name == nil {
+			continue
+		}
+		out.WriteString(g.generateIndent())
+		out.WriteString(fmt.Sprintf("if %s == nil then %s = %s end\n", p.Name.Value, p.Name.Value, g.generateExpression(p.Default)))
+	}
+	return out.String()
+}
+
+// metamethodList names Lua's metamethods, for subclasses to copy from
+// their parent (Lua does not find them through __index).
+const metamethodList = `local __metamethods = {"__add", "__sub", "__mul", "__div", "__mod", "__pow", "__unm", "__idiv", "__band", "__bor", "__bxor", "__shl", "__shr", "__bnot", "__concat", "__len", "__eq", "__lt", "__le", "__call", "__tostring", "__close", "__gc", "__mode", "__name", "__pairs", "__metatable"}
+
+`
 
 // exportedFunctionNames lists the top-level exported functions in order.
 func exportedFunctionNames(statements []ast.Statement) []string {
@@ -500,6 +527,7 @@ func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) s
 		output.WriteString(g.generateIndent())
 		output.WriteString(fmt.Sprintf("local %s = {...}\n", restParam.Name.Value))
 	}
+	output.WriteString(g.defaultsPrologue(node.Parameters))
 
 	for _, stmt := range node.Body.Statements {
 		output.WriteString(g.generateStatement(stmt))
@@ -973,10 +1001,16 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 	output.WriteString(g.generateIndent())
 	output.WriteString(fmt.Sprintf("%s%s = {}\n", g.localUnlessForward(className), className))
 
-	// Set up inheritance if there's a parent class
+	// Set up inheritance if there's a parent class. Lua finds metamethods
+	// on the metatable itself, never through __index, so the parent's
+	// (__tostring, __eq, __add, ...) are copied; the class's own, defined
+	// below, replace them.
 	if parentName != "" {
 		output.WriteString(g.generateIndent())
 		output.WriteString(fmt.Sprintf("setmetatable(%s, {__index = %s})\n", className, parentName))
+		output.WriteString(g.generateIndent())
+		output.WriteString(fmt.Sprintf("for _, k in ipairs(__metamethods) do %s[k] = %s[k] end\n", className, parentName))
+		g.needMetamethodList = true
 	}
 
 	output.WriteString(g.generateIndent())
@@ -1032,6 +1066,9 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 		}
 		output.WriteString(")\n")
 		g.indent++
+		if node.Constructor != nil {
+			output.WriteString(g.defaultsPrologue(node.Constructor.Parameters))
+		}
 		if inheritsConstructor {
 			output.WriteString(g.generateIndent())
 			output.WriteString(fmt.Sprintf("%s.__init(self, ...)\n", parentName))
@@ -1125,6 +1162,7 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 			output.WriteString(g.generateIndent())
 			output.WriteString(fmt.Sprintf("local %s = {...}\n", methodRest.Name.Value))
 		}
+		output.WriteString(g.defaultsPrologue(method.Parameters))
 		if method.Body != nil {
 			for _, stmt := range method.Body.Statements {
 				output.WriteString(g.generateStatement(stmt))
@@ -2015,6 +2053,7 @@ func (g *Generator) generateFunctionExpression(node *ast.FunctionExpression) str
 		output.WriteString(g.generateIndent())
 		output.WriteString(fmt.Sprintf("local %s = {...}\n", restParam.Name.Value))
 	}
+	output.WriteString(g.defaultsPrologue(node.Parameters))
 	for _, stmt := range node.Body.Statements {
 		output.WriteString(g.generateStatement(stmt))
 	}

@@ -11,7 +11,7 @@ func TestIncompleteCodeIsASyntaxError(t *testing.T) {
 	for _, src := range []string{
 		"function", "local function", "if x", "class", "interface", "enum",
 		"import", "import { a } from", "export class", "export function", "declare",
-		"for i = 1, do", "function g<T extends X>() end", "local { a, b } = t",
+		"for i = 1, do", "function g<T extends>() end", "local { a, b } = t",
 		"print(1)\nfunction\nprint(2)\n", "local x: = 1", "function f()\n    return 1\n",
 		"local t = { a = 1,", "x = (1 + ",
 	} {

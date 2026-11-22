@@ -1,0 +1,17 @@
+-- A parameter's default is its value when the argument is left out or nil.
+local function f(x: number = 4, s: string = "a"): string
+    return s .. x
+end
+assert(f() == "a4" and f(1) == "a1" and f(nil, "b") == "b4")
+class P
+    n: number
+    constructor(n: number = 7)
+        self.n = n
+    end
+    scaled(k: number = 2): number
+        return self.n * k
+    end
+end
+assert(P().n == 7 and P(1).scaled() == 2 and P(1).scaled(3) == 3)
+local g = function(y: number = 9): number return y end
+assert(g() == 9)

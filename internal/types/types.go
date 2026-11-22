@@ -192,6 +192,8 @@ func (t *VoidType) IsAssignableTo(other Type) bool {
 // GenericParamType represents a generic type parameter (e.g., T in class Box<T>)
 type GenericParamType struct {
 	Name string // The parameter name (e.g., "T")
+	// Constraint is what T has to be, in <T extends Named>, or nil.
+	Constraint Type
 }
 
 func (t *GenericParamType) String() string { return t.Name }
@@ -211,6 +213,10 @@ func (t *GenericParamType) IsAssignableTo(other Type) bool {
 		return true
 	}
 	if _, isUnknown := other.(*UnknownType); isUnknown {
+		return true
+	}
+	// <T extends Named>: a T is a Named.
+	if t.Constraint != nil && t.Constraint.IsAssignableTo(other) {
 		return true
 	}
 	// T fits a union that lists it, which is what a `T?` return type is.

@@ -1,3 +1,5 @@
+local __metamethods = {"__add", "__sub", "__mul", "__div", "__mod", "__pow", "__unm", "__idiv", "__band", "__bor", "__bxor", "__shl", "__shr", "__bnot", "__concat", "__len", "__eq", "__lt", "__le", "__call", "__tostring", "__close", "__gc", "__mode", "__name", "__pairs", "__metatable"}
+
 local Vehicle, Car
 
 Vehicle = {}
@@ -19,6 +21,7 @@ end
 
 Car = {}
 setmetatable(Car, {__index = Vehicle})
+for _, k in ipairs(__metamethods) do Car[k] = Vehicle[k] end
 Car.__index = Car
 
 function Car.__init(self)

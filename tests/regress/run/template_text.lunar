@@ -2,3 +2,6 @@
 local x = 1
 local s = `é🎮 ${x} ñ`
 assert(s == "é🎮 1 ñ")
+-- A brace inside a string inside ${...} does not end it.
+local t = { a = 1 }
+assert(`x ${t["a"]} ${"}"} ${'{'}` == "x 1 } {")

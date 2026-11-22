@@ -1,3 +1,5 @@
+local __metamethods = {"__add", "__sub", "__mul", "__div", "__mod", "__pow", "__unm", "__idiv", "__band", "__bor", "__bxor", "__shl", "__shr", "__bnot", "__concat", "__len", "__eq", "__lt", "__le", "__call", "__tostring", "__close", "__gc", "__mode", "__name", "__pairs", "__metatable"}
+
 local Animal, Dog, Puppy
 
 Animal = {}
@@ -28,6 +30,7 @@ end
 
 Dog = {}
 setmetatable(Dog, {__index = Animal})
+for _, k in ipairs(__metamethods) do Dog[k] = Animal[k] end
 Dog.__index = Dog
 
 function Dog.__init(self, name)
@@ -78,6 +81,7 @@ print(Animal.kingdom())
 
 Puppy = {}
 setmetatable(Puppy, {__index = Dog})
+for _, k in ipairs(__metamethods) do Puppy[k] = Dog[k] end
 Puppy.__index = Puppy
 
 function Puppy.__init(self, ...)

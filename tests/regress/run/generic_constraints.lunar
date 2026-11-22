@@ -1,0 +1,8 @@
+-- <T extends Named>: T has what Named has.
+interface Named
+    name: string
+end
+function nameOf<T extends Named>(x: T): string
+    return x.name
+end
+assert(nameOf({ name = "n" }) == "n")

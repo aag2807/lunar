@@ -1,0 +1,6 @@
+-- A default has to be of the parameter's type.
+-- error: Default value of 'x'
+local function f(x: number = "a"): number
+    return x
+end
+print(f())

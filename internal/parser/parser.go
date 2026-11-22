@@ -377,6 +377,16 @@ func (p *Parser) parseTemplateLiteral() ast.Expression {
 			exprStart := i
 
 			for i < len(raw) && braceCount > 0 {
+				// A string inside the expression may hold braces: ${"}"}.
+				if q := raw[i]; q == '"' || q == '\'' {
+					for i++; i < len(raw) && raw[i] != q; i++ {
+						if raw[i] == '\\' {
+							i++
+						}
+					}
+					i++
+					continue
+				}
 				if raw[i] == '{' {
 					braceCount++
 				} else if raw[i] == '}' {
@@ -2456,6 +2466,13 @@ func (p *Parser) parseParameter() *ast.Parameter {
 		param.Type = p.parseType()
 	}
 
+	// x: number = 4: the value when the argument is left out or nil.
+	if p.peekTokenIs(lexer.ASSIGN) {
+		p.nextToken() // '='
+		p.nextToken()
+		param.Default = p.parseExpression(LOWEST)
+	}
+
 	return param
 }
 
@@ -4163,18 +4180,22 @@ func (p *Parser) parseGenericParameters() []*ast.Identifier {
 			return nil
 		}
 
-		params = append(params, p.parseIdentifierOrContextual())
+		param := p.parseIdentifierOrContextual()
+		params = append(params, param)
 
 		p.nextToken()
+
+		// <T extends Named>: what T has to be.
+		if p.curTokenIs(lexer.EXTENDS) {
+			p.nextToken()
+			param.Constraint = p.parseType()
+			p.nextToken()
+		}
 
 		if p.curTokenIs(lexer.COMMA) {
 			p.nextToken() // move past comma to next parameter
 		} else if !p.curTokenIs(lexer.GT) {
-			if p.curTokenIs(lexer.EXTENDS) {
-				p.addError("constraints on type parameters (T extends X) are not supported; write <T>", p.curToken)
-			} else {
-				p.addError(fmt.Sprintf("expected ',' or '>' after a type parameter, got '%s'", p.curToken.Literal), p.curToken)
-			}
+			p.addError(fmt.Sprintf("expected ',' or '>' after a type parameter, got '%s'", p.curToken.Literal), p.curToken)
 			return nil
 		}
 	}

@@ -134,6 +134,11 @@ func (l *Lexer) NextToken() Token {
 	case '@':
 		tok = newToken(AT, l.ch, l.line, l.column)
 	case '.':
+		if isDigit(l.peekChar()) {
+			// A numeral with a leading point, such as .5
+			line, column := l.line, l.column
+			return Token{Type: NUMBER, Literal: l.readNumber(), Line: line, Column: column}
+		}
 		if l.peekChar() == '.' {
 			// Check if it's ... or ..
 			l.readChar() // consume second dot
@@ -260,20 +265,62 @@ func (l *Lexer) readIdentifier() string {
 	return l.input[position:l.position]
 }
 
+// readNumber reads a Lua numeral: decimal with optional fraction and
+// exponent (3, 3.14, .5, 1e-9), or hexadecimal with optional fraction and
+// binary exponent (0xFF, 0xA.8p1). The caller has seen a digit, or a '.'
+// followed by a digit.
 func (l *Lexer) readNumber() string {
 	position := l.position
+
+	if l.ch == '0' && (l.peekChar() == 'x' || l.peekChar() == 'X') {
+		l.readChar() // 0
+		l.readChar() // x
+		for isHexDigit(l.ch) {
+			l.readChar()
+		}
+		if l.ch == '.' && isHexDigit(l.peekChar()) {
+			l.readChar()
+			for isHexDigit(l.ch) {
+				l.readChar()
+			}
+		}
+		l.readExponent('p', 'P')
+		return l.input[position:l.position]
+	}
+
 	for isDigit(l.ch) {
 		l.readChar()
 	}
-
 	if l.ch == '.' && isDigit(l.peekChar()) {
 		l.readChar()
 		for isDigit(l.ch) {
 			l.readChar()
 		}
 	}
-
+	l.readExponent('e', 'E')
 	return l.input[position:l.position]
+}
+
+// readExponent consumes an exponent marker, optional sign and digits, but
+// only when digits actually follow: "2e" stays the number 2 and the name e.
+func (l *Lexer) readExponent(lower, upper byte) {
+	if l.ch != lower && l.ch != upper {
+		return
+	}
+	next := l.peekChar()
+	digitAt := 1
+	if next == '+' || next == '-' {
+		digitAt = 2
+	}
+	if l.readPosition+digitAt-1 >= len(l.input) || !isDigit(l.input[l.readPosition+digitAt-1]) {
+		return
+	}
+	for i := 0; i < digitAt; i++ {
+		l.readChar()
+	}
+	for isDigit(l.ch) {
+		l.readChar()
+	}
 }
 
 func (l *Lexer) readString(delimiter byte) string {

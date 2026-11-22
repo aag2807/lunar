@@ -25,7 +25,7 @@ print(area({kind = "unknown"}))
 print(grade(100), grade(95), grade(85), grade(50))
 
 -- Checked results: a wrong answer fails the run, not just a crash.
-assert(math.abs(area({kind = "circle", radius = 2}) - 12.56636) < 0.000001)
+assert(math.abs(area({kind = "circle", radius = 2}) - 12.56636) < 1e-9)
 assert(area({kind = "rect", w = 3, h = 4}) == 12)
 assert(area({kind = "unknown"}) == 0)
 assert(grade(100) == "perfect" and grade(95) == "A" and grade(85) == "B")

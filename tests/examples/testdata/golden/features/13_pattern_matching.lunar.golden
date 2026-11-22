@@ -53,7 +53,7 @@ print(area({kind = "unknown"}))
 
 print(grade(100), grade(95), grade(85), grade(50))
 
-assert(math.abs(area({kind = "circle", radius = 2}) - 12.56636) < 0.000001)
+assert(math.abs(area({kind = "circle", radius = 2}) - 12.56636) < 1e-9)
 
 assert(area({h = 4, kind = "rect", w = 3}) == 12)
 

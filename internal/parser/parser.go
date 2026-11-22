@@ -196,7 +196,7 @@ func (p *Parser) parseSuperExpression() ast.Expression {
 }
 
 func (p *Parser) parseNumberLiteral() ast.Expression {
-	value, err := strconv.ParseFloat(p.curToken.Literal, 64)
+	value, err := parseLuaNumber(p.curToken.Literal)
 	if err != nil {
 		msg := fmt.Sprintf("could not parse %q as number", p.curToken.Literal)
 		p.addError(msg, p.curToken)
@@ -204,6 +204,16 @@ func (p *Parser) parseNumberLiteral() ast.Expression {
 	}
 
 	return &ast.NumberLiteral{Token: p.curToken, Value: value}
+}
+
+// parseLuaNumber converts a Lua numeral to its value. Go's ParseFloat reads
+// hexadecimal only with a binary exponent, so one is supplied when absent.
+func parseLuaNumber(literal string) (float64, error) {
+	lower := strings.ToLower(literal)
+	if strings.HasPrefix(lower, "0x") && !strings.Contains(lower, "p") {
+		literal += "p0"
+	}
+	return strconv.ParseFloat(literal, 64)
 }
 
 func (p *Parser) parseStringLiteral() ast.Expression {
@@ -1040,7 +1050,7 @@ func (p *Parser) parseType() ast.Expression {
 		typeExpr = &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
 	case lexer.NUMBER:
 		// Number literal in type position (for literal types)
-		value, _ := strconv.ParseFloat(p.curToken.Literal, 64)
+		value, _ := parseLuaNumber(p.curToken.Literal)
 		typeExpr = &ast.NumberLiteral{Token: p.curToken, Value: value}
 	case lexer.TRUE:
 		// Boolean literal type: true
@@ -1458,7 +1468,7 @@ func (p *Parser) parseSimpleTypeWithSuffixes(skipOptional bool) ast.Expression {
 	case lexer.STRING:
 		typeExpr = &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
 	case lexer.NUMBER:
-		value, _ := strconv.ParseFloat(p.curToken.Literal, 64)
+		value, _ := parseLuaNumber(p.curToken.Literal)
 		typeExpr = &ast.NumberLiteral{Token: p.curToken, Value: value}
 	case lexer.TRUE:
 		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: true}
@@ -1613,7 +1623,7 @@ func (p *Parser) parseNonUnionIntersectionType(skipOptional bool) ast.Expression
 		typeExpr = &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
 	case lexer.NUMBER:
 		// Number literal in type position (for literal types)
-		value, _ := strconv.ParseFloat(p.curToken.Literal, 64)
+		value, _ := parseLuaNumber(p.curToken.Literal)
 		typeExpr = &ast.NumberLiteral{Token: p.curToken, Value: value}
 	case lexer.TRUE:
 		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: true}

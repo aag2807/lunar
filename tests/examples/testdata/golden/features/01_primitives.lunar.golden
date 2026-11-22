@@ -20,6 +20,12 @@ local rem = 10 % 4
 
 local power = 2 ^ 8
 
+local mask = 0xFF
+
+local tiny = 1e-3
+
+local half = .5
+
 print(name, version, ready, nothing)
 
 print(sum, diff, prod, quot, floor, rem, power)
@@ -65,3 +71,5 @@ assert(total == 15)
 assert(countdown == 0)
 
 assert(# words == 3 and words[3] == "c")
+
+assert(mask == 255 and tiny == 0.001 and half == 0.5)

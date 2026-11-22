@@ -11,6 +11,9 @@ local quot: number = 10 / 4
 local floor: number = 10 // 4
 local rem: number = 10 % 4
 local power: number = 2 ^ 8
+local mask: number = 0xFF
+local tiny: number = 1e-3
+local half: number = .5
 
 print(name, version, ready, nothing)
 print(sum, diff, prod, quot, floor, rem, power)
@@ -46,3 +49,4 @@ assert(quot == 2.5 and floor == 2 and rem == 2 and power == 256)
 assert(total == 15)
 assert(countdown == 0)
 assert(#words == 3 and words[3] == "c")
+assert(mask == 255 and tiny == 0.001 and half == 0.5)

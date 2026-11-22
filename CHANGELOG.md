@@ -25,7 +25,9 @@ their changelog described features that did not work.
 - Data files (`dataFiles`) are checked for anything a Lua state with no
   libraries opened lacks, string methods included.
 - If an output cannot be replaced, the ones already replaced are put back:
-  the folder always holds one whole build. `outDir` may not be `rootDir`.
+  the folder always holds one whole build, and a build that was killed while
+  writing is repaired by the next. `outDir` may not be `rootDir`, nor the
+  `outDir` of another project.
 - Compiling one file: flags may follow the file name, `-o` may be a device or
   pipe, and with no config only the declarations beside the file are read. A
   file outside its config's `rootDir` is reported as such.
@@ -76,7 +78,10 @@ their changelog described features that did not work.
   namespace, construct correctly.
 - `local xs = {1, 2, 3}` is `number[]`; arithmetic works on unions of
   numbers; a class value fits a union that lists its class; a string index
-  signature covers every undeclared name.
+  signature covers every undeclared name; `["a"] = 1` in a literal is the
+  field `a`.
+- Generic interfaces: `interface Box<T>`, used as `Box<number>`, also across
+  modules.
 - Refused with an error instead of miscompiled: implementation overloads,
   `async`/`await`, `import * from` without a name, statements after `return`.
 - Targets are `lua53` and `lua54` only.
@@ -88,7 +93,10 @@ their changelog described features that did not work.
   too), references and rename across files, hover, completion, signature help,
   document and workspace symbols. Each file uses the config found from its own
   folder; config errors are shown; rename is refused while a file does not
-  parse, and includes table-literal keys.
+  parse, and includes table-literal keys. An edit re-checks only the edited
+  file and what imports it (about 70 ms instead of 1 s for 200 scripts).
+  Windows drive letters and `\\wsl$` paths are handled, and replies use the
+  editor's own URIs.
 - A tree-sitter grammar (`editors/tree-sitter-lunar`), a Neovim plugin for
   `vim.lsp` and nvim-treesitter's main branch, a Zed extension, and an updated
   VS Code extension.

@@ -3,7 +3,7 @@
 
 declare interface File
 	read: function(format?: string): string | nil
-	write: function(...: string): boolean
+	write: function(...: string | number): any
 	close: function(): void
 	flush: function(): void
 	seek: function(whence?: string, offset?: number): number
@@ -18,7 +18,7 @@ declare interface IOLib
 	flush: function(): void
 	lines: function(filename?: string): function(): string
 	read: function(...: string): string
-	write: function(...: string): void
+	write: function(...: string | number): any
 
 	-- File Handles
 	input: function(file?: File | string): File

@@ -1,0 +1,15 @@
+name = "warden"
+phases = {
+  [1] = {
+    health = 3
+    kind = "chase"
+    label = "CATCH IT"
+    speed = 22
+  }
+  [2] = {
+    health = 6
+    kind = "duel"
+    label = "FIGHT"
+  }
+}
+wake = 30

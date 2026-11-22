@@ -1,0 +1,22 @@
+-- The engine side's boss data file: an optional field left out, a literal
+-- union, nested literals; loaded with no libraries opened.
+interface Phase
+    kind: "chase" | "armour" | "duel"
+    label: string
+    health: number
+    speed: number?
+end
+interface Boss
+    name: string
+    wake: number
+    phases: Phase[]
+end
+const warden: Boss = {
+    name = "warden",
+    wake = 30,
+    phases = {
+        { kind = "chase", label = "CATCH IT", health = 3, speed = 22 },
+        { kind = "duel", label = "FIGHT", health = 6 },
+    },
+}
+return warden

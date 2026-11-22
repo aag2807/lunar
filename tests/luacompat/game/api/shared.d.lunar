@@ -1,0 +1,3 @@
+declare function ring_run(c: any): any
+declare function dash_to(c: any): any
+declare function clear_out(c: any): any

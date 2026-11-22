@@ -1,0 +1,3 @@
+local warden = {name = "warden", wake = 30, phases = {{kind = "chase", label = "CATCH IT", health = 3, speed = 22}, {kind = "duel", label = "FIGHT", health = 6}}}
+
+return warden

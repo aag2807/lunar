@@ -3007,6 +3007,16 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 			continue
 		}
 
+		// Decorators on a method: @logged before it.
+		var memberDecorators []*ast.Decorator
+		for p.curTokenIs(lexer.AT) {
+			if d := p.parseDecorator(); d != nil {
+				memberDecorators = append(memberDecorators, d)
+			}
+			p.nextToken()
+		}
+		methodsBefore := len(class.Methods)
+
 		// Track modifiers for current member
 		isStatic := false
 		isAbstract := false
@@ -3122,6 +3132,13 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 
 		default:
 			p.nextToken()
+		}
+		if len(memberDecorators) > 0 {
+			if len(class.Methods) > methodsBefore {
+				class.Methods[len(class.Methods)-1].Decorators = memberDecorators
+			} else {
+				p.addError("decorators apply to functions, classes and methods", memberDecorators[0].Token)
+			}
 		}
 	}
 	p.unclosedAtEOF("end", class.Token)

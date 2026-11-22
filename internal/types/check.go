@@ -4973,7 +4973,27 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 		return &OptionalType{BaseType: c.checkCallWithType(node, funcType)}
 	}
 
+	// e?.hit(1): the method of an optional receiver is called when the
+	// receiver is there, and the call yields nil otherwise.
+	if opt, ok := funcType.(*OptionalType); ok && inOptionalChain(node.Function) {
+		if _, isFn := opt.BaseType.(*FunctionType); isFn {
+			return withNil(c.checkCallWithType(node, opt.BaseType))
+		}
+	}
 	return c.checkCallWithType(node, funcType)
+}
+
+// inOptionalChain says whether a member chain has a ?. or ?[ link.
+func inOptionalChain(e ast.Expression) bool {
+	switch n := e.(type) {
+	case *ast.DotExpression:
+		return n.IsOptional || inOptionalChain(n.Left)
+	case *ast.IndexExpression:
+		return n.IsOptional || inOptionalChain(n.Left)
+	case *ast.CallExpression:
+		return n.IsOptional || inOptionalChain(n.Function)
+	}
+	return false
 }
 
 // checkCallWithType checks a call whose callee type has already been resolved.
@@ -5613,6 +5633,14 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 				c.stringMethodUses = append(c.stringMethodUses, rightIdent.Token)
 				return resolved(ast.DispatchSelf, Any)
 			}
+		}
+		return wrapIfOptional(Any)
+
+	case *TableType:
+		// t.key on table<string, V> is t["key"]: a V (or nil, if the key
+		// is missing, which a table type cannot rule out).
+		if IsStringType(typ.KeyType) || isAnyType(typ.KeyType) {
+			return resolved(ast.DispatchPlain, typ.ValueType)
 		}
 		return wrapIfOptional(Any)
 

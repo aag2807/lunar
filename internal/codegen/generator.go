@@ -700,6 +700,57 @@ func (g *Generator) localUnlessForward(name string) string {
 	return "local "
 }
 
+// optionalLink finds the nearest ?. ?[ or ?.() link down a member chain.
+func optionalLink(e ast.Expression) ast.Expression {
+	switch n := e.(type) {
+	case *ast.DotExpression:
+		if n.IsOptional {
+			return n
+		}
+		return optionalLink(n.Left)
+	case *ast.IndexExpression:
+		if n.IsOptional {
+			return n
+		}
+		return optionalLink(n.Left)
+	case *ast.CallExpression:
+		if n.IsOptional || n.Parenthesized {
+			if n.IsOptional {
+				return n
+			}
+			return nil
+		}
+		return optionalLink(n.Function)
+	}
+	return nil
+}
+
+// shortCircuit generates outer, a chain containing the optional link, so a
+// nil before the link makes the whole chain nil: the value before the link
+// is kept in __o, and the rest of the chain runs on it only when it is set.
+func (g *Generator) shortCircuit(outer ast.Expression, link ast.Expression) string {
+	holder := &ast.Identifier{Value: "__o"}
+	var base string
+	switch n := link.(type) {
+	case *ast.DotExpression:
+		base = g.generateExpression(n.Left)
+		left := n.Left
+		n.Left, n.IsOptional = holder, false
+		defer func() { n.Left, n.IsOptional = left, true }()
+	case *ast.IndexExpression:
+		base = g.generateExpression(n.Left)
+		left := n.Left
+		n.Left, n.IsOptional = holder, false
+		defer func() { n.Left, n.IsOptional = left, true }()
+	case *ast.CallExpression:
+		base = g.generateExpression(n.Function)
+		fn := n.Function
+		n.Function, n.IsOptional = holder, false
+		defer func() { n.Function, n.IsOptional = fn, true }()
+	}
+	return g.iife(fmt.Sprintf("(function() local __o = %s; if __o == nil then return nil end; return %s end)()", base, g.generateExpression(outer)))
+}
+
 // spreadArguments renders call arguments with a spread that is not the
 // only one: every element of each spread is passed, in order, wherever it
 // stands. ({table.unpack(a), 9} would keep one element of a: a call in
@@ -1009,6 +1060,21 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 
 		output.WriteString(g.generateIndent())
 		output.WriteString("end\n")
+		// Decorators wrap the method, the first one outermost.
+		for i := len(method.Decorators) - 1; i >= 0; i-- {
+			d := method.Decorators[i]
+			ref := className + "." + method.Name.Value
+			call := d.Name.Value
+			if len(d.Arguments) > 0 {
+				args := make([]string, len(d.Arguments))
+				for j, arg := range d.Arguments {
+					args[j] = g.generateExpression(arg)
+				}
+				call += "(" + strings.Join(args, ", ") + ")"
+			}
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("%s = %s(%s)\n", ref, call, ref))
+		}
 		output.WriteString("\n")
 	}
 
@@ -1573,6 +1639,13 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 	// the fields it set onto the instance being built. Without this it compiled
 	// to a bare `Parent(args)` call, which is not even a function in the
 	// generated Lua, so any subclass crashed on construction.
+	// e?.hit(1): the ?. stops the call too, and the method gets its self.
+	if !node.IsOptional {
+		if link := optionalLink(node.Function); link != nil {
+			return g.shortCircuit(node, link)
+		}
+	}
+
 	if _, isSuper := node.Function.(*ast.SuperExpression); isSuper {
 		parent := g.generateExpression(node.Function)
 		args := []string{"self"}
@@ -1756,6 +1829,12 @@ func (g *Generator) generateTemplateLiteral(node *ast.TemplateLiteral) string {
 
 // generateDotExpression generates code for a dot expression
 func (g *Generator) generateDotExpression(node *ast.DotExpression) string {
+	// a?.b.c: the ?. stops the whole chain at a nil a.
+	if !node.IsOptional {
+		if link := optionalLink(node.Left); link != nil {
+			return g.shortCircuit(node, link)
+		}
+	}
 	// super.x is the parent's getter for x with this object as self, or the
 	// field itself.
 	if _, isSuper := node.Left.(*ast.SuperExpression); isSuper && !node.IsMethodCall {

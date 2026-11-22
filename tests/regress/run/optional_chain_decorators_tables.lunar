@@ -1,0 +1,45 @@
+-- a?.b.c stops at a nil a, as a?.b?.c would; e?.hit(1) calls when e is set.
+interface Inner
+    c: number
+end
+interface Outer
+    b: Inner
+end
+local none: Outer? = nil
+local some: Outer? = { b = { c = 4 } }
+assert(none?.b.c == nil and some?.b.c == 4)
+
+class Enemy
+    hp: number = 5
+    hit(n: number): number
+        self.hp = self.hp - n
+        return self.hp
+    end
+end
+local e: Enemy? = Enemy()
+local gone: Enemy? = nil
+assert(e?.hit(1) == 4 and gone?.hit(1) == nil)
+
+-- A decorator on a method wraps the method.
+local calls = 0
+local function counted(fn: any): any
+    return function(...: any): any
+        calls = calls + 1
+        return fn(...)
+    end
+end
+class Meter
+    total: number = 0
+    @counted
+    add(n: number): number
+        self.total = self.total + n
+        return self.total
+    end
+end
+local m = Meter()
+m.add(2)
+assert(m.add(3) == 5 and calls == 2)
+
+-- A key read with '.' from table<string, V> is a V, so its methods take self.
+local byName: table<string, Enemy> = { a = Enemy() }
+assert(byName.a.hit(2) == 3)

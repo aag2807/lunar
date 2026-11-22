@@ -992,6 +992,15 @@ func (c *Checker) fillEnumShell(t *EnumType) *EnumType {
 	return t
 }
 
+// typeOnlyNames are the names the checker binds for types, which are not
+// values to suggest.
+var typeOnlyNames = map[string]bool{
+	"any": true, "unknown": true, "never": true, "void": true, "nil": true, "number": true, "string": false,
+	"boolean": true, "table": false, "Partial": true, "Required": true, "Readonly": true, "Pick": true,
+	"Omit": true, "Record": true, "Exclude": true, "Extract": true, "NonNullable": true, "ReturnType": true,
+	"Parameters": true, "InstanceType": true,
+}
+
 // didYouMean returns " Did you mean 'x'?" for the closest candidate, or "".
 func didYouMean(name string, candidates []string) string {
 	if similar := findSimilarNames(name, candidates, suggestionDistance(name), 1); len(similar) > 0 {
@@ -4627,9 +4636,10 @@ func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target as
 				_, hasMethod := rec.Methods[field.Value]
 				// A field given a literal (n = 1) takes other values of its
 				// kind (t.n = 2), as an unannotated local does.
-				if hasProp && valueType != nil && isLiteralType(current) &&
-					widenLiteralType(valueType).Equals(widenLiteralType(current)) {
-					rec.Properties[field.Value] = widenLiteralType(current)
+				// So does one given either of two literals (c and 16 or 7).
+				if wide := widenLiteralType(current); hasProp && valueType != nil && wide != current &&
+					widenLiteralType(valueType).IsAssignableTo(wide) {
+					rec.Properties[field.Value] = wide
 				}
 				if !hasProp && !hasMethod {
 					added := Type(Any)
@@ -5480,31 +5490,23 @@ func (c *Checker) checkIdentifier(node *ast.Identifier) Type {
 			return Any
 		}
 
-		// Collect all available names from environment, classes, interfaces, etc.
-		candidates := c.env.GetAllNames()
-
-		// Add class names
+		// The values in scope, classes and enums among them: not types
+		// (interfaces, aliases, any, nil, Pick), which a value cannot be.
+		var candidates []string
+		for _, name := range c.env.GetAllNames() {
+			if !typeOnlyNames[name] && c.interfaces[name] == nil && c.typeAliases[name] == nil {
+				candidates = append(candidates, name)
+			}
+		}
 		for className := range c.classes {
 			candidates = append(candidates, className)
 		}
-
-		// Add interface names
-		for interfaceName := range c.interfaces {
-			candidates = append(candidates, interfaceName)
-		}
-
-		// Add enum names
 		for enumName := range c.enums {
 			candidates = append(candidates, enumName)
 		}
 
-		// Add type alias names
-		for aliasName := range c.typeAliases {
-			candidates = append(candidates, aliasName)
-		}
-
-		// Find similar names
-		suggestions := findSimilarNames(node.Value, candidates, 3, 3)
+		// Find similar names, as close as the name's length allows
+		suggestions := findSimilarNames(node.Value, candidates, suggestionDistance(node.Value), 3)
 
 		// Add suggestions to error message
 		if len(suggestions) > 0 {
@@ -7238,18 +7240,44 @@ func (c *Checker) checkTypeAssertion(node *ast.TypeAssertion) Type {
 	}
 
 	// Check the expression being asserted (ensures it's valid)
-	c.checkExpression(node.Expression)
+	sourceType := c.checkExpression(node.Expression)
 
 	// Resolve the target type
 	targetType := c.resolveTypeExpression(node.TargetType)
 
-	// Type assertions are generally allowed, but we can warn about impossible casts
-	// For now, we'll be permissive - the developer knows what they're doing
-	// We could add stricter checking here in the future
+	// An assertion may narrow (number | string as number) or claim a table
+	// is a record ({} as Enemy), but it cannot make one kind of value
+	// another: 5 as string, 5 as Enemy.
+	if sk, tk := valueKind(sourceType), valueKind(targetType); sk != "" && tk != "" && sk != tk && (isPrimitiveKind(sk) || isPrimitiveKind(tk)) {
+		c.addError(fmt.Sprintf("Cannot assert '%s' as '%s': a %s is never a %s", sourceType.String(), targetType.String(), sk, tk), node.Token)
+	}
 
 	// Return the target type - that's what the assertion claims it is
 	return targetType
 }
+
+// valueKind is the kind of Lua value every value of t is ("number",
+// "string", "boolean", "table", "function"), or "" when t may be several
+// or is not known (any, unknown, nil, unions, type parameters).
+func valueKind(t Type) string {
+	switch t.(type) {
+	case *EnumType:
+		return "" // number or string members
+	case *NumberType, *NumberLiteralType:
+		return "number"
+	case *StringType, *StringLiteralType:
+		return "string"
+	case *BooleanType, *BooleanLiteralType:
+		return "boolean"
+	case *InterfaceType, *ClassType, *ArrayType, *TableType, *TupleType:
+		return "table"
+	case *FunctionType:
+		return "function"
+	}
+	return ""
+}
+
+func isPrimitiveKind(k string) bool { return k == "number" || k == "string" || k == "boolean" }
 
 // applyConstAssertion applies const assertion logic to an expression
 // This makes literals as specific as possible and objects/arrays readonly

@@ -28,3 +28,8 @@ end
 print(inblock())
 local function g(x) if x then return g end return 1 end
 print(g(nil) + 1, g(true) == g)
+local flag = math.type(1) == "integer"
+local r29 = { class = (flag and 16 or 7), name = (flag and "a" or "b") }
+r29.class = 19
+r29.name = "c"
+print(r29.class, r29.name)

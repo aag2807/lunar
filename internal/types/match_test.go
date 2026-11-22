@@ -56,3 +56,50 @@ func TestUnknownAndStringMembers(t *testing.T) {
 		}
 	}
 }
+
+// An assertion can narrow or widen, but not turn one kind of value into
+// another: a number is never a string or a record.
+func TestImpossibleAssertions(t *testing.T) {
+	refused := []string{
+		"local n = 5\nlocal s = n as string\n",
+		"interface P\n    x: number\nend\nlocal p = 5 as P\n",
+		"local b = \"x\" as boolean\n",
+	}
+	for _, src := range refused {
+		errs := checkSource(t, src)
+		if len(errs) == 0 || !strings.Contains(strings.Join(messages(errs), "\n"), "Cannot assert") {
+			t.Errorf("%q: %v", src, messages(errs))
+		}
+	}
+	accepted := []string{
+		"interface P\n    x: number\nend\nlocal p = {} as P\n",
+		"local function f(v: number | string): number\n    return v as number\nend\n",
+		"interface P\n    x: number\nend\nlocal p = nil as P\n",
+		"local a: any = 1\nlocal s = a as string\n",
+		"local function g(v: unknown): string\n    return v as string\nend\n",
+	}
+	for _, src := range accepted {
+		if errs := checkSource(t, src); len(errs) != 0 {
+			t.Errorf("%q: %v", src, messages(errs))
+		}
+	}
+}
+
+// "Did you mean" offers values close to the name, not types or far ones.
+func TestUndefinedVariableSuggestions(t *testing.T) {
+	cases := map[string]string{
+		"interface Shape\n    w: number\nend\nlocal shape = 1\nprint(shap)\n": "Did you mean 'shape'?",
+		"print(u)\n":    "Undefined variable 'u'",
+		"print(nill)\n": "Undefined variable 'nill'",
+		"print(prnt)\n": "Did you mean 'print'?",
+	}
+	for src, want := range cases {
+		msgs := strings.Join(messages(checkSource(t, src)), "\n")
+		if !strings.Contains(msgs, want) {
+			t.Errorf("%q: %s", src, msgs)
+		}
+		if strings.Contains(msgs, "'nil'") || strings.Contains(msgs, "'any'") || strings.Contains(msgs, "'Shape'") || strings.Contains(msgs, "'_G'") {
+			t.Errorf("%q suggests a type or a far name: %s", src, msgs)
+		}
+	}
+}

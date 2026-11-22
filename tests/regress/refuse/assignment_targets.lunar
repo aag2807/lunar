@@ -1,0 +1,7 @@
+-- invalid syntax: Only a name, a field or an index can be assigned, as in Lua.
+local x = 1
+local t = { b = 1 }
+-- error: cannot assign to '(x + 1)'
+x + 1 = 2
+-- error: cannot assign to '(t.b)'
+(t.b) = 1

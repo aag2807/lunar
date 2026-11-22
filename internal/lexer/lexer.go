@@ -62,7 +62,8 @@ func (l *Lexer) fail(msg string) {
 // readChar advances one byte. Moving past a newline starts the next line,
 // so line and column stay right inside strings and comments too.
 func (l *Lexer) readChar() {
-	if l.ch == '\n' {
+	// A line ends at \n, or at a \r not followed by one (CR-only files).
+	if l.ch == '\n' || (l.ch == '\r' && (l.readPosition >= len(l.input) || l.input[l.readPosition] != '\n')) {
 		l.line++
 		l.column = 0
 	}
@@ -317,7 +318,7 @@ func (l *Lexer) skipComment() {
 
 func (l *Lexer) skipSingleLineComment() {
 	// Skip until newline but don't consume it
-	for l.ch != '\n' && !l.eof() {
+	for l.ch != '\n' && l.ch != '\r' && !l.eof() {
 		l.readChar()
 	}
 }
@@ -351,7 +352,7 @@ func (l *Lexer) readNumber() string {
 			}
 		}
 		l.readExponent('p', 'P')
-		return l.input[position:l.position]
+		return l.malformedNumber(position)
 	}
 
 	for isDigit(l.ch) {
@@ -365,7 +366,22 @@ func (l *Lexer) readNumber() string {
 		}
 	}
 	l.readExponent('e', 'E')
-	return l.input[position:l.position]
+	return l.malformedNumber(position)
+}
+
+// malformedNumber returns the numeral read from position, or, when
+// letters or digits run on after it (5print, 0x1g, 3e), reads them too and
+// reports it as Lua does.
+func (l *Lexer) malformedNumber(position int) string {
+	if !isLetter(l.ch) && !isDigit(l.ch) {
+		return l.input[position:l.position]
+	}
+	for isLetter(l.ch) || isDigit(l.ch) {
+		l.readChar()
+	}
+	text := l.input[position:l.position]
+	l.fail(fmt.Sprintf("malformed number near '%s'", text))
+	return text
 }
 
 // readExponent consumes an exponent marker, optional sign and digits, but

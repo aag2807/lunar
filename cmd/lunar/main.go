@@ -158,6 +158,12 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 		if output == "" {
 			output = strings.TrimSuffix(input, ".lunar") + ".lua"
 		}
+		// The Lua would replace the source it was compiled from.
+		if inInfo, err := os.Stat(input); err == nil {
+			if outInfo, err := os.Stat(output); err == nil && os.SameFile(inInfo, outInfo) {
+				return rep.usage(fmt.Sprintf("-o %s is the input file itself; the Lua would overwrite the source", output))
+			}
+		}
 		opts.ConfigPath, opts.Files = *configFile, []string{input}
 		once = func() int { return rep.compileFile(opts, input, output) }
 	}
@@ -199,6 +205,9 @@ func (r *reporter) build(opts project.Options) int {
 		return code
 	}
 	r.report(diags, res.Files, res.Written)
+	if internalError(diags) {
+		return exitInternal
+	}
 	if res.Written && !r.json {
 		fmt.Fprintf(r.stdout, "Compiled %d file(s) into %s\n", res.Files, p.OutDir)
 	}
@@ -230,6 +239,9 @@ func (r *reporter) compileFile(opts project.Options, input, output string) int {
 	}
 	written := !diags.HasErrors()
 	r.report(diags, 1, written)
+	if internalError(diags) {
+		return exitInternal
+	}
 	if !written {
 		return exitErrors
 	}
@@ -306,6 +318,17 @@ func (r *reporter) ioOrConfig(diags diag.List) int {
 		}
 	}
 	return 0
+}
+
+// internalError says whether a diagnostic is a compiler bug (a recovered
+// panic): exit 3, whatever else was found.
+func internalError(diags diag.List) bool {
+	for _, d := range diags {
+		if d.Code == "internal" {
+			return true
+		}
+	}
+	return false
 }
 
 // report prints diagnostics and, in JSON mode, the closing summary.

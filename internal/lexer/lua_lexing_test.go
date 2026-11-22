@@ -1,6 +1,9 @@
 package lexer
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // firstString lexes src and returns its first STRING token.
 func firstString(t *testing.T, src string) Token {
@@ -120,4 +123,31 @@ func TestBomShebangAndWhitespace(t *testing.T) {
 			t.Errorf("%q: first token %s %q", src, toks[0].Type, toks[0].Literal)
 		}
 	}
+}
+
+// A carriage return alone ends a line, as in Lua: a comment on the first
+// line of a CR-only file does not swallow the rest.
+func TestCarriageReturnEndsALine(t *testing.T) {
+	toks := types("-- comment\rprint(1)\rprint(2)\r")
+	if toks[0].Literal != "print" || toks[0].Line != 2 {
+		t.Errorf("first token %q on line %d", toks[0].Literal, toks[0].Line)
+	}
+}
+
+// A numeral runs into the letters after it: 5print is one malformed
+// number, as Lua reads it, not 5 then print.
+func TestMalformedNumber(t *testing.T) {
+	for _, src := range []string{"5print()", "0x1g", "3e"} {
+		toks := types(src)
+		if toks[0].Type != ILLEGAL || toks[0].Literal != "malformed number near '"+src[:len(src)-len(trailing(src))]+"'" {
+			t.Errorf("%q: %s %q", src, toks[0].Type, toks[0].Literal)
+		}
+	}
+}
+
+func trailing(src string) string {
+	if i := strings.IndexByte(src, '('); i >= 0 {
+		return src[i:]
+	}
+	return ""
 }

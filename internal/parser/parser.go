@@ -296,7 +296,8 @@ func (p *Parser) parseMatchOrName() ast.Expression {
 // parseAwaitOrName parses `await x`, which is refused later, or the name
 // await anywhere else.
 func (p *Parser) parseAwaitOrName() ast.Expression {
-	if p.peekTokenIsIdentOrContextual() {
+	// `local u = await` then a new line is the name.
+	if p.peekTokenIsIdentOrContextual() && p.peekToken.Line == p.curToken.EndLine {
 		return p.parseAwaitExpression()
 	}
 	return p.parseIdentifier()
@@ -580,8 +581,17 @@ func (p *Parser) parseGroupedInner() ast.Expression {
 	if call, ok := exp.(*ast.CallExpression); ok {
 		call.Parenthesized = true
 	}
+	// (...) is the first vararg value only: the parentheses stay.
+	if v, ok := exp.(*ast.VarargExpression); ok {
+		return &ast.ParenExpression{Token: open, Expression: v}
+	}
 	// Called, indexed or reached into, the parentheses decide what that
 	// applies to: (t.f or g)(2), (a or b)[1], (function() end)().
+	// (t.b) = 1 is not an assignment in Lua: the parentheses stay, for the
+	// assignment to refuse.
+	if p.peekTokenIs(lexer.ASSIGN) && !isNilNode(exp) {
+		return &ast.ParenExpression{Token: open, Expression: exp}
+	}
 	if !isCallable(exp) || isNilNode(exp) {
 		switch p.peekToken.Type {
 		case lexer.LPAREN, lexer.LBRACKET, lexer.DOT, lexer.COLON, lexer.STRING, lexer.LBRACE:
@@ -825,6 +835,34 @@ func (p *Parser) isColonMethodCall() bool {
 	p.nextToken() // curToken = method name
 	// obj:m(...), obj:m{...} and obj:m"..."
 	return p.peekTokenIs(lexer.LPAREN) || p.peekTokenIs(lexer.LBRACE) || p.peekTokenIs(lexer.STRING)
+}
+
+// exprToken is the token an expression starts with, or fallback.
+func exprToken(e ast.Expression, fallback lexer.Token) lexer.Token {
+	switch n := e.(type) {
+	case *ast.Identifier:
+		return n.Token
+	case *ast.StringLiteral:
+		return n.Token
+	case *ast.NumberLiteral:
+		return n.Token
+	case *ast.BooleanLiteral:
+		return n.Token
+	case *ast.DotExpression:
+		return exprToken(n.Left, n.Token)
+	}
+	return fallback
+}
+
+// genericBaseToken is the token of what type arguments follow, which has
+// to name a type: 1<A> and "s"<A> are errors, not crashes.
+func (p *Parser) genericBaseToken(base ast.Expression) lexer.Token {
+	switch base.(type) {
+	case *ast.Identifier, *ast.DotExpression:
+	default:
+		p.addError(fmt.Sprintf("type arguments follow a type name, not '%s'", base.String()), exprToken(base, p.curToken))
+	}
+	return exprToken(base, p.curToken)
 }
 
 // peekStartsAnnotation says whether a ':' in peek position starts a type
@@ -1114,8 +1152,9 @@ func (p *Parser) tryParseGenericType(baseExpr ast.Expression) ast.Expression {
 	}
 
 	// Type arguments in an expression are only for a call or a member:
-	// Box<number>(1), Pool<Enemy>.new(). `print(a < b, c > d)` compares.
-	if p.peekTokenIs(lexer.GT) {
+	// Box<number>(1), Pool<Enemy>.new(). `print(a < b, c > d)` and
+	// `a < b >> 1` compare.
+	if p.peekTokenIs(lexer.GT) || p.peekTokenIs(lexer.RIGHT_SHIFT) {
 		after := p.SaveState()
 		p.nextToken() // '>'
 		called := p.peekTokenIs(lexer.LPAREN) || p.peekTokenIs(lexer.DOT)
@@ -1176,7 +1215,10 @@ func (p *Parser) parseSpreadExpression() ast.Expression {
 	// A bare '...' is Lua's vararg expression; only '...' followed by an operand
 	// on the same line is a spread, as in {...items}. `local m = ...` then a
 	// line starting with a name is the vararg, then a new statement.
-	if !p.peekStartsExpression() || p.peekToken.Line != p.curToken.Line {
+	// What follows a spread is a name, a call, a parenthesised expression or
+	// a table: `... - 1` and `... ~ 1` are operators on the vararg.
+	spreadable := p.peekTokenIsIdentOrContextual() || p.peekTokenIs(lexer.LPAREN) || p.peekTokenIs(lexer.LBRACE)
+	if !spreadable || p.peekToken.Line != p.curToken.Line {
 		return &ast.VarargExpression{Token: p.curToken}
 	}
 
@@ -1636,7 +1678,7 @@ func (p *Parser) parseTypeSuffix(baseType ast.Expression) ast.Expression {
 			}
 
 			currentType = &ast.GenericType{
-				Token:         baseType.(*ast.Identifier).Token,
+				Token:         p.genericBaseToken(baseType),
 				BaseType:      baseType,
 				TypeArguments: typeArgs,
 			}
@@ -1817,7 +1859,7 @@ func (p *Parser) parseSimpleTypeWithSuffixes(skipOptional bool) ast.Expression {
 			if p.curTokenIs(lexer.RBRACKET) {
 				// Empty brackets: T[] is array type
 				currentType = &ast.ArrayType{
-					Token:       typeExpr.(*ast.Identifier).Token,
+					Token:       exprToken(typeExpr, p.curToken),
 					ElementType: currentType,
 				}
 			} else {
@@ -1851,7 +1893,7 @@ func (p *Parser) parseSimpleTypeWithSuffixes(skipOptional bool) ast.Expression {
 			}
 
 			currentType = &ast.GenericType{
-				Token:         typeExpr.(*ast.Identifier).Token,
+				Token:         p.genericBaseToken(typeExpr),
 				BaseType:      typeExpr,
 				TypeArguments: typeArgs,
 			}
@@ -1995,7 +2037,7 @@ func (p *Parser) parseNonUnionIntersectionType(skipOptional bool) ast.Expression
 			}
 
 			currentType = &ast.GenericType{
-				Token:         typeExpr.(*ast.Identifier).Token,
+				Token:         p.genericBaseToken(typeExpr),
 				BaseType:      typeExpr,
 				TypeArguments: typeArgs,
 			}
@@ -2483,7 +2525,7 @@ func (p *Parser) parseFunctionSignature() *ast.FunctionDeclaration {
 	}
 	fd.Parameters = p.parseFunctionParameters()
 
-	if p.peekTokenIs(lexer.COLON) {
+	if p.peekStartsAnnotation() {
 		p.nextToken() //consume :
 		p.nextToken() // move onto return type
 		fd.ReturnType = p.parseType()
@@ -2525,8 +2567,8 @@ func (p *Parser) parseAsyncFunctionDeclaration() *ast.FunctionDeclaration {
 	}
 	fd.Parameters = p.parseFunctionParameters()
 
-	// Parse optional return type
-	if p.peekTokenIs(lexer.COLON) {
+	// Parse optional return type (a `::label::` first in the body is not one)
+	if p.peekStartsAnnotation() {
 		p.nextToken() // consume :
 		p.nextToken() // move onto return type
 		fd.ReturnType = p.parseType()
@@ -2555,8 +2597,8 @@ func (p *Parser) parseFunctionExpression() ast.Expression {
 	}
 	fe.Parameters = p.parseFunctionParameters()
 
-	// Parse optional return type
-	if p.peekTokenIs(lexer.COLON) {
+	// Parse optional return type (a `::label::` first in the body is not one)
+	if p.peekStartsAnnotation() {
 		p.nextToken() // consume :
 		p.nextToken() // move onto return type
 		fe.ReturnType = p.parseType()
@@ -2651,6 +2693,23 @@ func (p *Parser) parseExpressionStatement() ast.Statement {
 	// Check if this is an assignment
 	if p.peekTokenIs(lexer.ASSIGN) {
 		assignToken := p.peekToken
+		// Lua assigns to a name, a field or an index only: `x + 1 = 2`
+		// and `f() = {}` were written out and did not load.
+		for _, target := range targets {
+			switch t := target.(type) {
+			case *ast.Identifier:
+			case *ast.DotExpression:
+				if t.IsOptional || t.IsMethodCall {
+					p.addError("cannot assign through '?.'; assign to the field of a value known to be there", t.Token)
+				}
+			case *ast.IndexExpression:
+				if t.IsOptional {
+					p.addError("cannot assign through '?['; assign to the element of a value known to be there", t.Token)
+				}
+			default:
+				p.addError(fmt.Sprintf("cannot assign to '%s': only a name, a field or an index can be assigned", target.String()), assignToken)
+			}
+		}
 		p.nextToken() // consume '='
 		p.nextToken() // move to first value expression
 

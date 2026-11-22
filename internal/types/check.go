@@ -353,7 +353,7 @@ type Checker struct {
 	stringMethodUses []lexer.Token
 	// stringDots are the s.m expressions that resolved through the string
 	// library; a call through one may be plain Lua's s.m(s, ...).
-	stringDots map[*ast.DotExpression]bool
+	stringDots map[*ast.DotExpression]*FunctionType
 
 	// exprTypes records the type computed for each expression checked.
 	exprTypes map[ast.Expression]Type
@@ -3160,6 +3160,10 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		_, inThisScope := c.env.store[node.Name.Value]
 		declaredGlobal := c.ambient[node.Name.Value] == existingType && !node.IsLocal
 		switch {
+		case node.IsLocal:
+			// local function assert(v) is a new local, shadowing whatever the
+			// name was, as any local does.
+			c.env.SetLocal(node.Name.Value, funcType)
 		case declaredGlobal && !isFunc:
 			// Declared as a value: any takes the function, nothing else can.
 			if _, isAny := existingType.(*AnyType); !isAny {
@@ -3196,6 +3200,14 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 			// A new binding, possibly shadowing one from an outer scope.
 			c.env.Set(node.Name.Value, funcType)
 		}
+	} else if !node.IsLocal {
+		// `function f()` with no f in scope defines a global, wherever it
+		// is written: one in a do block is visible after it.
+		root := c.env
+		for root.outer != nil {
+			root = root.outer
+		}
+		root.Set(node.Name.Value, funcType)
 	} else {
 		c.env.Set(node.Name.Value, funcType)
 	}
@@ -3249,7 +3261,16 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	if c.inferringReturn {
 		// funcType is already registered; callers see the inferred type because
 		// they hold the same pointer.
-		funcType.ReturnType = combineReturnTypes(c.inferredReturns)
+		returns := make([]Type, len(c.inferredReturns))
+		for i, t := range c.inferredReturns {
+			returns[i] = withoutSelf(t, funcType)
+		}
+		funcType.ReturnType = combineReturnTypes(returns)
+		// A plain Lua function returning different kinds of value has
+		// callers that know which one they get: it returns any.
+		if _, isUnion := funcType.ReturnType.(*UnionType); isUnion && funcType.Untyped {
+			funcType.ReturnType = Any
+		}
 	}
 
 	c.inferringReturn, c.inferredReturns = prevInferring, prevInferred
@@ -3270,6 +3291,37 @@ func parameterNames(params []*ast.Parameter) []string {
 
 // combineReturnTypes reduces the return types seen in a body to one type: void
 // when nothing is returned, the single type when they agree, otherwise a union.
+// withoutSelf replaces fn inside a type its own body returns (`return f`)
+// by a copy returning any: a function type containing itself never ends
+// when printed or compared.
+func withoutSelf(t Type, fn *FunctionType) Type {
+	switch v := t.(type) {
+	case *FunctionType:
+		if v == fn {
+			flat := *fn
+			flat.ReturnType = Any
+			return &flat
+		}
+	case *UnionType:
+		members := make([]Type, len(v.Types))
+		for i, m := range v.Types {
+			members[i] = withoutSelf(m, fn)
+		}
+		return &UnionType{Types: members}
+	case *TupleType:
+		elems := make([]Type, len(v.Elements))
+		for i, e := range v.Elements {
+			elems[i] = withoutSelf(e, fn)
+		}
+		return &TupleType{Elements: elems}
+	case *OptionalType:
+		return &OptionalType{BaseType: withoutSelf(v.BaseType, fn)}
+	case *ArrayType:
+		return &ArrayType{ElementType: withoutSelf(v.ElementType, fn), EmptyLiteral: v.EmptyLiteral}
+	}
+	return t
+}
+
 func combineReturnTypes(types []Type) Type {
 	if len(types) == 0 {
 		return Void
@@ -5281,8 +5333,14 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 			return &ArrayType{ElementType: types[0]}
 		}
 
-		// If elements have different types, create a union type
+		// If elements have different types, create a union type; one of
+		// them any makes the element any.
 		if len(types) > 1 {
+			for _, t := range types {
+				if t.Equals(Any) {
+					return &ArrayType{ElementType: Any}
+				}
+			}
 			return &ArrayType{ElementType: &UnionType{Types: types}}
 		}
 
@@ -5379,6 +5437,9 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 	c.scopeEnd = prevScopeEnd
 	if c.inferringReturn {
 		returnType = combineReturnTypes(c.inferredReturns)
+		if _, isUnion := returnType.(*UnionType); isUnion && untypedSignature(node.Parameters, node.ReturnType, 0) {
+			returnType = Any
+		}
 	}
 	c.inferringReturn, c.inferredReturns = prevInferring, prevInferred
 
@@ -5672,12 +5733,19 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 		}
 	}
 
-	// s.upper() is Lunar for s:upper(), but s.sub(s, 2, 3), the string
-	// passed as its own first argument, is plain Lua's string.sub(s, 2, 3)
-	// and stays as written.
-	if dot, ok := node.Function.(*ast.DotExpression); ok && !dot.IsMethodCall && c.stringDots[dot] &&
-		len(node.Arguments) > 0 && exprText(node.Arguments[0]) == exprText(dot.Left) {
-		dot.MethodDispatch = ast.DispatchPlain
+	// s.upper() is Lunar for s:upper(), but plain Lua's s.f(...) is
+	// string.f(...) and stays as written: when the string is passed as its
+	// own first argument (s.sub(s, 2, 3)), or when the arguments already
+	// fill every parameter, leaving no room for the receiver
+	// (s.upper("xyz") is string.upper("xyz")).
+	if dot, ok := node.Function.(*ast.DotExpression); ok && !dot.IsMethodCall {
+		if lib := c.stringDots[dot]; lib != nil {
+			explicitSelf := len(node.Arguments) > 0 && exprText(node.Arguments[0]) == exprText(dot.Left)
+			full := !lib.HasRestParameter && len(node.Arguments) >= len(lib.Parameters)
+			if explicitSelf || full {
+				dot.MethodDispatch = ast.DispatchPlain
+			}
+		}
 	}
 
 	// obj:f(x) on a function stored in a field passes obj as f's first
@@ -6385,14 +6453,18 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		// the receiver and mark every parameter as required, so checking calls
 		// against them would reject correct code like s:match(pattern).
 		if lib, ok := c.interfaces["StringLib"]; ok {
-			_, isProp := lib.GetProperty(propertyName)
+			prop, isProp := lib.GetProperty(propertyName)
 			_, isMethod := lib.GetMethod(propertyName)
 			if isProp || isMethod {
 				c.stringMethodUses = append(c.stringMethodUses, rightIdent.Token)
 				if c.stringDots == nil {
-					c.stringDots = map[*ast.DotExpression]bool{}
+					c.stringDots = map[*ast.DotExpression]*FunctionType{}
 				}
-				c.stringDots[node] = true
+				fn, _ := prop.(*FunctionType)
+				if fn == nil {
+					fn = &FunctionType{HasRestParameter: true}
+				}
+				c.stringDots[node] = fn
 				return resolved(ast.DispatchSelf, Any)
 			}
 		}

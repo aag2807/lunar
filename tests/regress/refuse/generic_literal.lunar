@@ -1,0 +1,3 @@
+-- invalid syntax: Type arguments follow a type name; anything else was a crash.
+-- error: type arguments follow a type name, not '1'
+type T = 1<number>

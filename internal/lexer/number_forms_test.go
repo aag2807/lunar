@@ -33,7 +33,7 @@ func TestNumberFormsLeaveDotOperatorsAlone(t *testing.T) {
 		"f(...)": {IDENT, LPAREN, ELLIPSIS, RPAREN},
 		"x[1].e": {IDENT, LBRACKET, NUMBER, RBRACKET, DOT, IDENT},
 		"n-1":    {IDENT, MINUS, NUMBER},
-		"2e":     {NUMBER, IDENT},
+		"2e":     {ILLEGAL}, // malformed number, as Lua says
 	}
 	for src, want := range cases {
 		l := New(src)

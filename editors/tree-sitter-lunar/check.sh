@@ -27,7 +27,11 @@ tree-sitter test -p .
 list=$(mktemp)
 trap 'rm -f "$list"; rm -rf "$TREE_SITTER_LIBDIR"' EXIT
 # Plain Lua is Lunar too: the compiler's Lua corpus must parse as well.
-git -C "$repo" ls-files '*.lunar' 'tests/luacompat/*.lua' | sed "s|^|$repo/|" > "$list"
+# A file whose first line is "-- invalid syntax: ..." is a test that the
+# compiler refuses bad code, so it is meant not to parse.
+git -C "$repo" ls-files '*.lunar' 'tests/luacompat/*.lua' | while read -r f; do
+    head -n 1 "$repo/$f" | grep -q '^-- invalid syntax' || echo "$repo/$f"
+done > "$list"
 bad=$(tree-sitter parse -p . --quiet --paths "$list" 2>/dev/null | grep -E 'ERROR|MISSING' || true)
 if [ -n "$bad" ]; then
     echo "these files do not parse cleanly:" >&2

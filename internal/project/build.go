@@ -2,7 +2,9 @@ package project
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -95,6 +97,8 @@ type Result struct {
 const manifestName = ".lunar-manifest.json"
 
 type manifest struct {
+	// Root is the rootDir of the project that wrote the folder.
+	Root  string   `json:"root,omitempty"`
 	Files []string `json:"files"`
 }
 
@@ -103,6 +107,16 @@ type manifest struct {
 // it, and a failed build writes nothing at all, so the last good Lua stays
 // in place.
 func Build(p *Project) (Result, diag.List) {
+	if p.OutDir != "" {
+		// Another project's outputs would all look stale to this one.
+		if data, err := os.ReadFile(filepath.Join(p.OutDir, manifestName)); err == nil {
+			var m manifest
+			if json.Unmarshal(data, &m) == nil && m.Root != "" && filepath.Clean(m.Root) != filepath.Clean(p.Root) {
+				return Result{}, configError("outDir %s holds the build of another project (rootDir %s); give each project its own outDir", p.OutDir, m.Root)
+			}
+		}
+		recoverLeftovers(p.OutDir)
+	}
 	prog, diags := p.Check()
 	res := Result{}
 	for _, m := range prog.Modules {
@@ -123,7 +137,7 @@ func Build(p *Project) (Result, diag.List) {
 		return res, configError("no output folder: set outDir in %s or pass --out", ConfigName)
 	}
 
-	if err := writeOutputs(p.OutDir, outs); err != nil {
+	if err := writeOutputs(p.OutDir, p.Root, outs); err != nil {
 		return res, append(diags, diag.Diagnostic{Severity: diag.Error, Code: "io", Message: err.Error()})
 	}
 	res.Written = true
@@ -146,7 +160,30 @@ func retry(op func() error) error {
 // renameFile is os.Rename; tests replace it to make one rename fail.
 var renameFile = os.Rename
 
-func writeOutputs(outDir string, outs []Output) error {
+// recoverLeftovers repairs what a build killed while writing left behind:
+// an old file it had moved aside goes back if nothing replaced it, and
+// staged copies are removed.
+func recoverLeftovers(outDir string) {
+	filepath.WalkDir(outDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		switch {
+		case strings.HasSuffix(path, ".lunar-tmp"):
+			os.Remove(path)
+		case strings.HasSuffix(path, ".lunar-old"):
+			target := strings.TrimSuffix(path, ".lunar-old")
+			if _, err := os.Lstat(target); errors.Is(err, fs.ErrNotExist) {
+				renameFile(path, target)
+			} else {
+				os.Remove(path)
+			}
+		}
+		return nil
+	})
+}
+
+func writeOutputs(outDir, root string, outs []Output) error {
 	var staged []string
 	cleanup := func() {
 		for _, s := range staged {
@@ -225,7 +262,7 @@ func writeOutputs(outDir string, outs []Output) error {
 			}
 		}
 	}
-	m := manifest{Files: make([]string, 0, len(outs))}
+	m := manifest{Root: root, Files: make([]string, 0, len(outs))}
 	for _, o := range outs {
 		m.Files = append(m.Files, o.Rel)
 	}

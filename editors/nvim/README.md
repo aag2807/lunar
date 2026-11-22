@@ -58,6 +58,17 @@ Set `vim.g.lunar_lsp = false` before the plugin loads to enable it yourself
 Without the tree-sitter parser, buffers fall back to the regex syntax in
 `syntax/lunar.lua`.
 
+Folding: the plugin sets `foldexpr` to tree-sitter's folds, and leaves
+`foldmethod` to you (setting it for you would open every buffer with all its
+folds closed). To fold Lunar buffers by syntax:
+
+```lua
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "lunar",
+  callback = function() vim.wo[0][0].foldmethod = "expr" end,
+})
+```
+
 ## Test
 
 ```sh

@@ -38,3 +38,38 @@ func TestRenameIncludesTableLiteralKeys(t *testing.T) {
 		t.Errorf("main.lunar edits: %d, want 3 (declaration, literal key, s.atk): %+v", n, edit.Changes)
 	}
 }
+
+func renameIn(t *testing.T, text, name string, nth int, newName string) string {
+	t.Helper()
+	root := writeTree(t, map[string]string{"lunar.config.json": `{"outDir": "../out"}`, "a.lunar": text})
+	c := newClientAt(t, root)
+	c.open("a.lunar")
+	c.change("a.lunar", text)
+	c.diagnosticsFor("a.lunar")
+	_, errMsg := c.call("textDocument/rename", map[string]any{
+		"textDocument": map[string]any{"uri": c.uri("a.lunar")}, "position": at(t, text, name, nth, 0), "newName": newName})
+	return errMsg
+}
+
+// A rename that would change what a name refers to is refused: a to b
+// next to another b would make print(a + b) print(b + b).
+func TestRenameRefusesACapture(t *testing.T) {
+	cases := []string{
+		"local a = 1\nlocal b = 2\nprint(a + b)\n",
+		"local b = 2\nlocal a = 1\nprint(a + b)\n",
+		"local a = 1\nlocal function f()\n    local b = 2\n    return a + b\nend\nprint(f())\n",
+	}
+	for _, text := range cases {
+		if errMsg := renameIn(t, text, "a = 1", 1, "b"); !strings.Contains(errMsg, "'b'") {
+			t.Errorf("%q: rename a to b gave %q", text, errMsg)
+		}
+	}
+}
+
+// Shadowing that changes nothing is fine: the inner a becomes an inner b.
+func TestRenameAllowsHarmlessShadowing(t *testing.T) {
+	text := "local b = 1\ndo\n    local a = 2\n    print(a)\nend\nprint(b)\n"
+	if errMsg := renameIn(t, text, "a = 2", 1, "b"); errMsg != "" {
+		t.Errorf("rename a to b: %q", errMsg)
+	}
+}

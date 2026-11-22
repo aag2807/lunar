@@ -141,7 +141,14 @@ type PublishDiagnosticsCapabilities struct {
 
 // WorkspaceClientCapabilities represents workspace capabilities
 type WorkspaceClientCapabilities struct {
-	ApplyEdit bool `json:"applyEdit,omitempty"`
+	ApplyEdit             bool                     `json:"applyEdit,omitempty"`
+	DidChangeWatchedFiles *DynamicRegistrationOnly `json:"didChangeWatchedFiles,omitempty"`
+}
+
+// DynamicRegistrationOnly is a client capability that says only whether
+// the server may register it at run time.
+type DynamicRegistrationOnly struct {
+	DynamicRegistration bool `json:"dynamicRegistration,omitempty"`
 }
 
 // InitializeResult represents the initialize response

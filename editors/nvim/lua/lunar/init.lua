@@ -19,6 +19,9 @@ function M.parser_install_info()
   end
   return {
     url = 'https://github.com/aag2807/lunar',
+    -- The repository's branch: without one nvim-treesitter fetches "main",
+    -- which does not exist.
+    branch = 'master',
     location = 'editors/tree-sitter-lunar',
     queries = 'queries',
   }

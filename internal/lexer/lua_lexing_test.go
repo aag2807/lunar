@@ -151,3 +151,12 @@ func trailing(src string) string {
 	}
 	return ""
 }
+
+// A non-ASCII character outside a string is one unexpected character, not
+// one error per byte.
+func TestNonASCIICharacterIsOneToken(t *testing.T) {
+	toks := types("local é = 1")
+	if toks[1].Type != ILLEGAL || toks[1].Literal != "é" || toks[2].Literal != "=" {
+		t.Errorf("tokens %q %q %q", toks[1].Literal, toks[2].Literal, toks[3].Literal)
+	}
+}

@@ -3,6 +3,7 @@ package lexer
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 type Lexer struct {
@@ -286,6 +287,13 @@ func (l *Lexer) scanToken() Token {
 			tok.Type = NUMBER
 			tok.Literal = l.readNumber()
 			return tok
+		} else if l.ch >= 0x80 {
+			// One character, however many bytes it takes: é is one error.
+			_, size := utf8.DecodeRuneInString(l.input[l.position:])
+			tok = Token{Type: ILLEGAL, Literal: l.input[l.position : l.position+size], Line: l.line, Column: l.column}
+			for i := 1; i < size; i++ {
+				l.readChar()
+			}
 		} else {
 			tok = newToken(ILLEGAL, l.ch, l.line, l.column)
 		}

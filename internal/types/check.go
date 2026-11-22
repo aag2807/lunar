@@ -262,14 +262,15 @@ func findSimilarNames(target string, candidates []string, maxDistance int, maxSu
 		}
 	}
 
-	// Sort by distance (simple bubble sort for small lists)
-	for i := 0; i < len(suggestions); i++ {
-		for j := i + 1; j < len(suggestions); j++ {
-			if suggestions[j].distance < suggestions[i].distance {
-				suggestions[i], suggestions[j] = suggestions[j], suggestions[i]
-			}
+	// Closest first, and alphabetically among equals: the candidates
+	// often come from a map, whose order changes from run to run, so the
+	// suggestion did too (the editor and the CLI disagreed).
+	sort.Slice(suggestions, func(i, j int) bool {
+		if suggestions[i].distance != suggestions[j].distance {
+			return suggestions[i].distance < suggestions[j].distance
 		}
-	}
+		return suggestions[i].name < suggestions[j].name
+	})
 
 	// Return top suggestions
 	result := make([]string, 0, maxSuggestions)
@@ -4236,6 +4237,12 @@ func (c *Checker) checkBlockStatement(node *ast.BlockStatement) {
 
 	prevEnv := c.env
 	c.env = NewEnclosedEnvironment(prevEnv)
+	// A local in a do, if or loop block is visible to the block's end.
+	if node.EndToken.End > 0 {
+		prevScopeEnd := c.scopeEnd
+		c.scopeEnd = node.EndToken.End
+		defer func() { c.scopeEnd = prevScopeEnd }()
+	}
 
 	// Types declared inside the block, usable throughout it.
 	c.predeclareTypeNames(node.Statements)

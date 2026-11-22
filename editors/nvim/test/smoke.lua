@@ -44,6 +44,17 @@ if attached then
   check(got, 'no diagnostics after introducing an error')
 end
 
+-- Outside a checkout the parser comes from GitHub, from the repository's
+-- branch (nvim-treesitter would otherwise ask for a "main" that is not there).
+do
+  local lunar = require('lunar')
+  local real = lunar.local_grammar
+  lunar.local_grammar = function() return nil end
+  local info = lunar.parser_install_info()
+  lunar.local_grammar = real
+  check(info.url and info.branch == 'master', 'GitHub parser source: ' .. vim.inspect(info))
+end
+
 if #failures > 0 then
   io.stderr:write('FAIL\n  ' .. table.concat(failures, '\n  ') .. '\n')
   vim.cmd('cquit 1')

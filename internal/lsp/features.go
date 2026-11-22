@@ -249,6 +249,9 @@ func (s *Server) rename(uri string, pos Position, newName string) (interface{}, 
 	if !identifierPattern.MatchString(newName) || lexer.LookupIdent(newName) != lexer.IDENT {
 		return nil, fmt.Errorf("'%s' is not a valid name", newName)
 	}
+	if err := s.renameConflict(occ.Sym, newName); err != nil {
+		return nil, err
+	}
 	edit := WorkspaceEdit{Changes: map[string][]TextEdit{}}
 	for _, o := range s.occurrencesOf(occ.Sym, true) {
 		u := s.uriOf(o.Tok.File)
@@ -374,4 +377,68 @@ func (s *Server) tokenStillThere(path string, tok lexer.Token) bool {
 		return false
 	}
 	return text[tok.Offset:tok.End] == tok.Literal
+}
+
+// renameConflict says why renaming sym to newName would change what a name
+// refers to: a declaration of newName would capture one of sym's
+// occurrences, or sym would capture one of newName's. Shadowing that
+// changes nothing (an inner local renamed to an outer name it hides) is
+// fine.
+func (s *Server) renameConflict(sym *types.Symbol, newName string) error {
+	ours := s.occurrencesOf(sym, true)
+	seen := map[types.Key]bool{sym.Key(): true}
+	for _, ix := range s.indexes() {
+		for _, other := range ix.Symbols {
+			if other.Name != newName || seen[other.Key()] {
+				continue
+			}
+			seen[other.Key()] = true
+			// A member clashes with a member of the same owner.
+			if sym.Container != "" || other.Container != "" {
+				if sym.Container == other.Container {
+					return fmt.Errorf("'%s' already has a member '%s'", sym.Container, newName)
+				}
+				continue
+			}
+			for _, o := range ours {
+				if captures(other, sym, o.Tok) {
+					return fmt.Errorf("renaming to '%s' would make %s line %d refer to the '%s' declared at line %d",
+						newName, s.relName(o.Tok.File), o.Tok.Line, newName, other.Decl.Line)
+				}
+			}
+			for _, o := range s.occurrencesOf(other, false) {
+				if captures(sym, other, o.Tok) {
+					return fmt.Errorf("renaming to '%s' would make the '%s' at %s line %d refer to the renamed name",
+						newName, newName, s.relName(o.Tok.File), o.Tok.Line)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// captures says whether, once both have the same name, captor would be
+// what the name at tok refers to instead of victim: captor is visible at
+// tok and declared closer to it.
+func captures(captor, victim *types.Symbol, tok lexer.Token) bool {
+	if !visibleAt(captor, tok) {
+		return false
+	}
+	switch {
+	case captor.Decl.File != tok.File:
+		return false // a global or another file's: the local wins
+	case victim.Decl.File != tok.File:
+		return true // the local captor wins over a global victim
+	}
+	return captor.Decl.Offset > victim.Decl.Offset
+}
+
+// visibleAt says whether sym can be named at tok: a local from its
+// declaration to the end of its scope, a file's top-level names in the
+// whole file, declared globals everywhere.
+func visibleAt(sym *types.Symbol, tok lexer.Token) bool {
+	if sym.ScopeEnd == -1 {
+		return sym.Decl.File == tok.File || strings.HasSuffix(sym.Decl.File, ".d.lunar")
+	}
+	return sym.Decl.File == tok.File && sym.Decl.Offset <= tok.Offset && tok.Offset < sym.ScopeEnd
 }

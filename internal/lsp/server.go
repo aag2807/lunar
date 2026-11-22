@@ -6,6 +6,7 @@ package lsp
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -35,9 +36,12 @@ type Server struct {
 	// both take it.
 	mu          sync.Mutex
 	initialized bool
-	shutdown    bool
-	root        string
-	docs        map[string]string // open buffers by absolute path
+	shutdown    bool // shutdown was requested; exit ends the server
+	exited      bool
+	// watchFiles: the client lets the server register file watching.
+	watchFiles bool
+	root       string
+	docs       map[string]string // open buffers by absolute path
 	// clientURIs is the URI the editor opened each file with, which is
 	// how it is named back to the editor.
 	clientURIs map[string]string
@@ -76,6 +80,10 @@ func NewServer() *Server {
 }
 
 // Run serves requests until the client disconnects or asks to exit.
+// ErrExitWithoutShutdown is what Run returns for an exit notification
+// that came without a shutdown request first: the process should exit 1.
+var ErrExitWithoutShutdown = errors.New("exit without shutdown")
+
 func (s *Server) Run() error {
 	for {
 		msg, err := s.readMessage()
@@ -89,9 +97,12 @@ func (s *Server) Run() error {
 			s.logger.Printf("error handling message: %v", err)
 		}
 		s.mu.Lock()
-		done := s.shutdown
+		exited, shutdown := s.exited, s.shutdown
 		s.mu.Unlock()
-		if done {
+		if exited {
+			if !shutdown {
+				return ErrExitWithoutShutdown
+			}
 			return nil
 		}
 	}
@@ -166,6 +177,19 @@ func (s *Server) handleMessage(content json.RawMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// The client's answer to a request of the server's own
+	// (client/registerCapability): nothing to do.
+	if req.Method == "" {
+		return nil
+	}
+	// After shutdown only exit is expected.
+	if s.shutdown && req.Method != "exit" {
+		if req.ID != nil {
+			return s.sendError(req.ID, InvalidRequest, "the server is shutting down")
+		}
+		return nil
+	}
+
 	if !s.initialized && req.Method != "initialize" && req.Method != "exit" {
 		if req.ID != nil {
 			return s.sendError(req.ID, ServerNotInitialized, "server not initialized")
@@ -178,12 +202,21 @@ func (s *Server) handleMessage(content json.RawMessage) error {
 		return s.handleInitialize(content)
 	case "initialized":
 		s.initialized = true
+		if s.watchFiles {
+			// Scripts, declarations and configs changed on disk (a git
+			// checkout, a generator) are then reported by the client.
+			watchers := []map[string]string{{"globPattern": "**/*.lunar"}, {"globPattern": "**/*.lua"}, {"globPattern": "**/" + project.ConfigName}}
+			return s.sendMessage(map[string]any{"jsonrpc": "2.0", "id": "lunar-watch", "method": "client/registerCapability",
+				"params": map[string]any{"registrations": []map[string]any{{
+					"id": "lunar-watch", "method": "workspace/didChangeWatchedFiles",
+					"registerOptions": map[string]any{"watchers": watchers}}}}})
+		}
 		return nil
 	case "shutdown":
 		s.shutdown = true
 		return s.sendResponse(req.ID, nil)
 	case "exit":
-		s.shutdown = true
+		s.exited = true
 		return nil
 	case "textDocument/didOpen":
 		var p DidOpenTextDocumentParams
@@ -292,6 +325,9 @@ func (s *Server) handleInitialize(content json.RawMessage) error {
 		s.root = uriToPath(req.Params.RootURI)
 	}
 	s.dirty = true
+	if w := req.Params.Capabilities.Workspace.DidChangeWatchedFiles; w != nil && w.DynamicRegistration {
+		s.watchFiles = true
+	}
 	// Requests may follow as soon as the client has this response.
 	s.initialized = true
 

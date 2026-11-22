@@ -67,6 +67,9 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 	// lunar lsp: the language server, on stdin and stdout.
 	if len(args) > 0 && args[0] == "lsp" {
 		if err := lsp.NewServer().Run(); err != nil {
+			if errors.Is(err, lsp.ErrExitWithoutShutdown) {
+				return 1 // as the protocol says
+			}
 			fmt.Fprintf(stderr, "lunar lsp: %v\n", err)
 			return exitInternal
 		}

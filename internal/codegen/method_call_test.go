@@ -1,8 +1,6 @@
 package codegen
 
 import (
-	"lunar/internal/lexer"
-	"lunar/internal/parser"
 	"strings"
 	"testing"
 )
@@ -25,19 +23,7 @@ local p = Person("John")
 p.sayHello()
 `
 
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser had %d errors:", len(p.Errors()))
-		for _, err := range p.Errors() {
-			t.Errorf("  - %s", err)
-		}
-	}
-
-	g := New()
-	output := g.Generate(statements)
+	output := generate(t, input)
 
 	// Instance method call should use colon syntax
 	if !strings.Contains(output, `p:sayHello()`) {
@@ -62,19 +48,7 @@ end
 local message = Utils.greet("World")
 `
 
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser had %d errors:", len(p.Errors()))
-		for _, err := range p.Errors() {
-			t.Errorf("  - %s", err)
-		}
-	}
-
-	g := New()
-	output := g.Generate(statements)
+	output := generate(t, input)
 
 	// Static method call should use dot syntax
 	if !strings.Contains(output, `Utils.greet("World")`) {
@@ -111,19 +85,7 @@ c.increment()
 Counter.reset(c)
 `
 
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser had %d errors:", len(p.Errors()))
-		for _, err := range p.Errors() {
-			t.Errorf("  - %s", err)
-		}
-	}
-
-	g := New()
-	output := g.Generate(statements)
+	output := generate(t, input)
 
 	// Instance method should use colon
 	if !strings.Contains(output, `c:increment()`) {
@@ -153,19 +115,7 @@ local calc = Calculator()
 local result = calc.add(5, 3)
 `
 
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser had %d errors:", len(p.Errors()))
-		for _, err := range p.Errors() {
-			t.Errorf("  - %s", err)
-		}
-	}
-
-	g := New()
-	output := g.Generate(statements)
+	output := generate(t, input)
 
 	// Instance method call with arguments should use colon
 	if !strings.Contains(output, `calc:add(5, 3)`) {
@@ -187,19 +137,7 @@ class Example
 end
 `
 
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser had %d errors:", len(p.Errors()))
-		for _, err := range p.Errors() {
-			t.Errorf("  - %s", err)
-		}
-	}
-
-	g := New()
-	output := g.Generate(statements)
+	output := generate(t, input)
 
 	// Instance method definition should use colon
 	if !strings.Contains(output, `function Example:instanceMethod()`) {
@@ -226,19 +164,7 @@ local p = Person("John")
 local n = p.name
 `
 
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser had %d errors:", len(p.Errors()))
-		for _, err := range p.Errors() {
-			t.Errorf("  - %s", err)
-		}
-	}
-
-	g := New()
-	output := g.Generate(statements)
+	output := generate(t, input)
 
 	// Property access should remain as dot syntax (not a function call)
 	if !strings.Contains(output, `p.name`) {

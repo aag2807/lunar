@@ -48,7 +48,6 @@ func getStdlibPath() string {
 
 func main() {
 	outputFile := flag.String("o", "", "Output file (default: replaces .lunar with .lua)")
-	noTypeCheck := flag.Bool("no-typecheck", false, "Skip type checking")
 	sourceMap := flag.Bool("source-map", false, "Generate source map (.lua.map file)")
 	targetLua := flag.String("target", "", "Target Lua version: lua53 (default) or lua54")
 	configFile := flag.String("config", "", "Path to lunar.config.json (auto-detected if not specified)")
@@ -101,7 +100,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		os.Exit(1)
 	}
-	cfg.Merge(*noTypeCheck, *sourceMap, false, *targetLua)
+	cfg.Merge(false, *sourceMap, false, *targetLua)
 
 	target := cfg.CompilerOptions.Target
 	if target == "" {
@@ -128,7 +127,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	opts := compileOptions{typeCheck: !*noTypeCheck, sourceMap: *sourceMap, target: target}
+	opts := compileOptions{sourceMap: *sourceMap, target: target}
 	if *watchMode {
 		runWatchMode(inputFile, output, opts, *watchInterval, *watchClear)
 		return
@@ -145,7 +144,6 @@ func main() {
 }
 
 type compileOptions struct {
-	typeCheck bool
 	sourceMap bool
 	target    string
 }
@@ -153,18 +151,16 @@ type compileOptions struct {
 // compile runs lexer -> parser -> checker -> codegen on one file and writes the Lua.
 func compile(inputFile, outputFile string, opts compileOptions) error {
 	declarationStatements := []ast.Statement{}
-	if opts.typeCheck {
-		declFiles, err := discoverDeclarationFiles(inputFile)
+	declFiles, err := discoverDeclarationFiles(inputFile)
+	if err != nil {
+		return fmt.Errorf("failed to discover declaration files: %w", err)
+	}
+	for _, declFile := range declFiles {
+		declStatements, err := parseDeclarationFile(declFile)
 		if err != nil {
-			return fmt.Errorf("failed to discover declaration files: %w", err)
+			return fmt.Errorf("failed to parse declaration file %s: %w", declFile, err)
 		}
-		for _, declFile := range declFiles {
-			declStatements, err := parseDeclarationFile(declFile)
-			if err != nil {
-				return fmt.Errorf("failed to parse declaration file %s: %w", declFile, err)
-			}
-			declarationStatements = append(declarationStatements, declStatements...)
-		}
+		declarationStatements = append(declarationStatements, declStatements...)
 	}
 
 	source, err := os.ReadFile(inputFile)
@@ -178,13 +174,13 @@ func compile(inputFile, outputFile string, opts compileOptions) error {
 		return formatParserErrors(inputFile, string(source), p.Errors())
 	}
 
-	if opts.typeCheck {
-		// Declarations first so they're registered before the main code.
-		allStatements := append(declarationStatements, statements...)
-		checker := types.NewChecker(getStdlibPath())
-		if typeErrors := checker.Check(allStatements); len(typeErrors) > 0 {
-			return formatTypeErrors(inputFile, string(source), typeErrors)
-		}
+	// Declarations first so they're registered before the main code. The
+	// checker also decides ':' versus '.' and which calls construct, so it
+	// always runs.
+	allStatements := append(declarationStatements, statements...)
+	checker := types.NewChecker(getStdlibPath())
+	if typeErrors := checker.Check(allStatements); len(typeErrors) > 0 {
+		return formatTypeErrors(inputFile, string(source), typeErrors)
 	}
 
 	// Only the main file is emitted, never its declarations.
@@ -341,7 +337,6 @@ Options:
   --target <version>    Target Lua version: lua53 (default) or lua54
   --source-map          Also write <output>.map
   --config <file>       Path to lunar.config.json (default: searched upward)
-  --no-typecheck        Skip type checking
   --watch               Recompile when the input file changes
   --watch-interval <ms> Watch polling interval (default 500)
   --watch-clear         Clear the console before each rebuild

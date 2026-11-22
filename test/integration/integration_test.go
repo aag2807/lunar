@@ -243,3 +243,20 @@ func copyFile(t *testing.T, from, to string, mode os.FileMode) {
 		t.Fatal(err)
 	}
 }
+
+// TestNoTypecheckFlagIsGone: the checker decides ':' versus '.' and which
+// calls construct, so compiling without it would silently change the Lua.
+func TestNoTypecheckFlagIsGone(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.lunar")
+	if err := os.WriteFile(src, []byte("local x = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(compilerBin, "--no-typecheck", src).CombinedOutput()
+	if err == nil {
+		t.Fatalf("--no-typecheck was accepted:\n%s", out)
+	}
+	if !strings.Contains(string(out), "no-typecheck") {
+		t.Errorf("error should name the flag, got:\n%s", out)
+	}
+}

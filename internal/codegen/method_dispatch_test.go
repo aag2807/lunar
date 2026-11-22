@@ -3,12 +3,15 @@ package codegen
 import (
 	"lunar/internal/lexer"
 	"lunar/internal/parser"
+	"lunar/internal/types"
 	"strings"
 	"testing"
 )
 
-// generate is a helper that compiles a snippet without type checking, which is
-// how these tests exercise the generator's own receiver inference.
+// generate compiles a snippet the way the compiler does, type checking it
+// first: the checker decides member dispatch and constructor calls. Type
+// errors are ignored here, since many snippets lean on undeclared globals;
+// generateChecked is the strict version.
 func generate(t *testing.T, input string) string {
 	t.Helper()
 
@@ -23,6 +26,7 @@ func generate(t *testing.T, input string) string {
 		t.Fatalf("parser had %d errors", len(p.Errors()))
 	}
 
+	types.NewChecker().Check(statements)
 	return New().Generate(statements)
 }
 

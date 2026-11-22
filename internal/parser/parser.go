@@ -2595,6 +2595,7 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 		Token:      p.curToken,
 		Properties: []*ast.PropertyDeclaration{},
 		Methods:    []*ast.FunctionDeclaration{},
+		IsAmbient:  p.ambient,
 	}
 
 	// Parse class name - allows context-aware keywords

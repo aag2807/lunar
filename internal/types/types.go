@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"lunar/internal/ast"
+	"sort"
 	"strings"
 )
 
@@ -797,6 +798,7 @@ type ClassType struct {
 	Constructor        *FunctionType            // Constructor signature
 	Implements         []*InterfaceType
 	IsAbstract         bool                     // Whether class is abstract
+	Ambient            bool                     // Declared with `declare class`: foreign Lua
 	GenericParams      []string                 // Generic type parameter names (e.g., ["T", "U"])
 	IndexSignature     *IndexSignature          // [key: KeyType]: ValueType
 	Getters            map[string]*FunctionType // Property getters
@@ -870,6 +872,52 @@ func (t *ClassType) GetMethod(name string) (*FunctionType, bool) {
 		return t.Parent.GetMethod(name)
 	}
 	return nil, false
+}
+
+// GetGetter returns a property getter, checking the inheritance chain.
+func (t *ClassType) GetGetter(name string) (*FunctionType, bool) {
+	if fn, ok := t.Getters[name]; ok {
+		return fn, true
+	}
+	if t.Parent != nil {
+		return t.Parent.GetGetter(name)
+	}
+	return nil, false
+}
+
+// GetSetter returns a property setter, checking the inheritance chain.
+func (t *ClassType) GetSetter(name string) (*FunctionType, bool) {
+	if fn, ok := t.Setters[name]; ok {
+		return fn, true
+	}
+	if t.Parent != nil {
+		return t.Parent.GetSetter(name)
+	}
+	return nil, false
+}
+
+// MemberNames lists every member reachable on the class or its instances,
+// inherited ones included, for "did you mean" suggestions.
+func (t *ClassType) MemberNames() []string {
+	seen := map[string]bool{}
+	for c := t; c != nil; c = c.Parent {
+		for _, m := range []map[string]Type{c.Properties, c.StaticProperties} {
+			for name := range m {
+				seen[name] = true
+			}
+		}
+		for _, m := range []map[string]*FunctionType{c.Methods, c.StaticMethods, c.Getters, c.Setters} {
+			for name := range m {
+				seen[name] = true
+			}
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // GetStaticProperty returns the type of a static property

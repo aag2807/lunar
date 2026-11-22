@@ -700,9 +700,28 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 	// Publish the (still empty) class before resolving its members so that a
 	// member signature can name the class itself, as in
 	// `static open(owner: string): Account`. Members fill in the same pointer.
+	classType.Ambient = node.IsAmbient
 	classType = c.fillClassShell(classType)
 	c.classes[classType.Name] = classType
 	c.env.Set(classType.Name, classType)
+
+	// ClassName.new is the constructor Lunar generates, so a Lunar class
+	// cannot define its own. A declared class describes foreign Lua and may.
+	if !node.IsAmbient {
+		reserved := func(tok lexer.Token) {
+			c.addError(fmt.Sprintf("'new' is reserved for the constructor of class '%s'", node.Name.Value), tok)
+		}
+		for _, m := range node.Methods {
+			if m != nil && m.Name != nil && m.Name.Value == "new" {
+				reserved(m.Name.Token)
+			}
+		}
+		for _, prop := range node.Properties {
+			if prop != nil && prop.Name != nil && prop.Name.Value == "new" {
+				reserved(prop.Name.Token)
+			}
+		}
+	}
 
 	// Add generic type parameters to scope temporarily
 	prevEnv := c.env
@@ -4099,6 +4118,10 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 		// instantiation of one.
 		_, viaSuper := node.Function.(*ast.SuperExpression)
 
+		// Enemy(3) constructs through Enemy.new; recording it here means
+		// codegen gets it right for classes from other modules too.
+		node.ConstructorCall = !viaSuper && !classType.Ambient
+
 		// Check if trying to instantiate an abstract class
 		if classType.IsAbstract && !viaSuper {
 			c.addError(
@@ -4538,6 +4561,29 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		}
 		return wrapIfOptional(Any)
 	case *ClassType:
+		// The class's own name on the left means the class itself rather than
+		// an instance; one type stands for both.
+		viaClassName := false
+		if ident, ok := node.Left.(*ast.Identifier); ok && ident.Value == typ.Name {
+			viaClassName = true
+		}
+
+		// ClassName.new(...) is the constructor every Lunar class gets.
+		if propertyName == "new" && !typ.Ambient {
+			if !viaClassName {
+				c.addError(fmt.Sprintf("'new' is static; call %s.new(...) or %s(...)", typ.Name, typ.Name), rightIdent.Token)
+				return wrapIfOptional(Any)
+			}
+			if typ.IsAbstract {
+				c.addError(fmt.Sprintf("Cannot instantiate abstract class '%s'", typ.Name), rightIdent.Token)
+			}
+			ctor := typ.Constructor
+			if ctor == nil {
+				ctor = &FunctionType{Parameters: []Type{}, ReturnType: typ}
+			}
+			return resolved(ast.DispatchPlain, ctor)
+		}
+
 		// Check static properties first (when accessing class directly like Math.PI)
 		if propType, ok := typ.GetStaticProperty(propertyName); ok {
 			// Check visibility for static properties
@@ -4592,9 +4638,23 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 			}
 			return resolved(ast.DispatchSelf, methodType)
 		}
-		// In Lua, accessing a non-existent property returns nil at runtime
-		// Allow this for type guards and dynamic property access
-		// Return 'any' to be permissive (the property might exist in subclasses)
+		// Accessors read and write like fields.
+		if getter, ok := typ.GetGetter(propertyName); ok {
+			return resolved(ast.DispatchPlain, getter.ReturnType)
+		}
+		if setter, ok := typ.GetSetter(propertyName); ok && len(setter.Parameters) == 1 {
+			return resolved(ast.DispatchPlain, setter.Parameters[0])
+		}
+		// A declared class may describe only part of a foreign table.
+		if typ.Ambient {
+			return wrapIfOptional(Any)
+		}
+		// Probing for a subclass's member is how a type guard tells them
+		// apart (`return value.breed ~= nil`); it reads as optional here.
+		if member, ok := c.subclassMember(typ, propertyName); ok {
+			return resolved(ast.DispatchPlain, withNil(member))
+		}
+		c.addError(fmt.Sprintf("Class '%s' has no member '%s'.%s", typ.Name, propertyName, didYouMean(propertyName, typ.MemberNames())), rightIdent.Token)
 		return wrapIfOptional(Any)
 
 	case *InterfaceType:
@@ -4645,6 +4705,42 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		// For other types, allow any property access (could be table access)
 		return wrapIfOptional(Any)
 	}
+}
+
+// subclassMember finds a property, method or getter on some class that
+// extends base, directly or not.
+func (c *Checker) subclassMember(base *ClassType, name string) (Type, bool) {
+	names := make([]string, 0, len(c.classes))
+	for n := range c.classes {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		cl := c.classes[n]
+		if cl == base {
+			continue
+		}
+		extends := false
+		for p := cl.Parent; p != nil; p = p.Parent {
+			if p == base {
+				extends = true
+				break
+			}
+		}
+		if !extends {
+			continue
+		}
+		if t, ok := cl.Properties[name]; ok {
+			return t, true
+		}
+		if m, ok := cl.Methods[name]; ok {
+			return m, true
+		}
+		if g, ok := cl.Getters[name]; ok {
+			return g.ReturnType, true
+		}
+	}
+	return nil, false
 }
 
 // checkIndexExpression checks an index expression

@@ -129,6 +129,9 @@ type CallExpression struct {
 	Function   Expression
 	Arguments  []Expression
 	IsOptional bool // true for optional call syntax (fn?.())
+	// ConstructorCall is set by the type checker when the callee is a Lunar
+	// class, as in Enemy(3); codegen then calls its constructor, Enemy.new.
+	ConstructorCall bool
 }
 
 func (ce *CallExpression) expressionNode()      {}
@@ -952,6 +955,9 @@ type ClassDeclaration struct {
 	Getters        []*GetterDeclaration       // property getters
 	Setters        []*SetterDeclaration       // property setters
 	Decorators     []*Decorator               // decorators applied to the class
+	// IsAmbient marks a `declare class`, which describes a Lua class Lunar
+	// did not compile; its construction is not Lunar's ClassName.new.
+	IsAmbient bool
 }
 
 // GetterDeclaration represents a property getter

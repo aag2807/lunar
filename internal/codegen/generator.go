@@ -17,14 +17,10 @@ type Generator struct {
 	currentLine      int
 	currentColumn    int
 	sourceFile       string
-	classes          map[string]bool            // Track defined classes for constructor calls
-	classParents     map[string]string          // Track parent class names for super
-	staticMethods    map[string]map[string]bool // Track static methods: class -> method -> isStatic
-	currentClassName string                     // Current class being generated
-	exports          []string                   // Track exported names for module generation
-	target           string                     // Target Lua version: lua51, lua52, lua53, lua54, luajit
-	selfReceivers    []map[string]bool          // Scoped set of locals whose methods take an implicit self
-	instanceArrays   map[string]bool            // Locals holding a collection of class instances
+	classParents     map[string]string // Track parent class names for super
+	currentClassName string            // Current class being generated
+	exports          []string          // Track exported names for module generation
+	target           string            // Target Lua version: lua51, lua52, lua53, lua54, luajit
 }
 
 // newGenerator is the one constructor every public variant goes through, so
@@ -34,13 +30,9 @@ func newGenerator(target string, sm *sourcemap.Builder, sourceFile string) *Gene
 		target = "lua53"
 	}
 	g := &Generator{
-		classes:        make(map[string]bool),
-		classParents:   make(map[string]string),
-		staticMethods:  make(map[string]map[string]bool),
-		exports:        make([]string, 0),
-		target:         target,
-		selfReceivers:  []map[string]bool{make(map[string]bool)},
-		instanceArrays: make(map[string]bool),
+		classParents: make(map[string]string),
+		exports:      make([]string, 0),
+		target:       target,
 	}
 	if sm != nil {
 		g.sourceMapBuilder = sm
@@ -303,7 +295,6 @@ func (g *Generator) generateStatement(stmt ast.Statement) string {
 // generateVariableDeclaration generates code for a variable declaration
 func (g *Generator) generateVariableDeclaration(node *ast.VariableDeclaration) string {
 	var output strings.Builder
-	g.trackDeclaredReceivers(node.Names, node.Types, node.Values)
 	output.WriteString(g.generateIndent())
 	output.WriteString("local ")
 
@@ -358,10 +349,6 @@ func (g *Generator) renderParameters(parameters []*ast.Parameter) (string, *ast.
 
 func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) string {
 	var output strings.Builder
-
-	g.pushReceiverScope()
-	defer g.popReceiverScope()
-	g.trackParameterReceivers(node.Parameters)
 
 	output.WriteString(g.generateIndent())
 	if node.IsLocal {
@@ -563,40 +550,16 @@ func (g *Generator) generateForStatement(node *ast.ForStatement) string {
 
 	output.WriteString(" do\n")
 
-	g.pushReceiverScope()
-	if node.IsGeneric && g.iteratesInstances(node.Iterator) && len(node.Variables) > 1 {
-		// The value variable holds an instance, so its methods take self.
-		g.markSelfReceiver(node.Variables[1].Value)
-	}
-
 	g.indent++
 	for _, stmt := range node.Body.Statements {
 		output.WriteString(g.generateStatement(stmt))
 	}
 	g.indent--
-	g.popReceiverScope()
 
 	output.WriteString(g.generateIndent())
 	output.WriteString("end\n")
 
 	return output.String()
-}
-
-// iteratesInstances reports whether a generic for iterates a collection known
-// to hold class instances, as in `for _, ball in ipairs(balls)`.
-func (g *Generator) iteratesInstances(iterator ast.Expression) bool {
-	collection := iterator
-
-	if call, ok := iterator.(*ast.CallExpression); ok && len(call.Arguments) == 1 {
-		if ident, ok := call.Function.(*ast.Identifier); ok &&
-			(ident.Value == "ipairs" || ident.Value == "pairs") {
-			collection = call.Arguments[0]
-		}
-	}
-
-	ident, ok := collection.(*ast.Identifier)
-
-	return ok && g.instanceArrays[ident.Value]
 }
 
 // generateDoStatement generates code for a do statement
@@ -660,21 +623,6 @@ func (g *Generator) generateAssignmentStatement(node *ast.AssignmentStatement) s
 func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string {
 	var output strings.Builder
 	className := node.Name.Value
-
-	// Track this class for constructor calls
-	g.classes[className] = true
-
-	// Initialize static methods tracking for this class
-	if g.staticMethods[className] == nil {
-		g.staticMethods[className] = make(map[string]bool)
-	}
-
-	// Track which methods are static
-	for _, method := range node.Methods {
-		if method.IsStatic {
-			g.staticMethods[className][method.Name.Value] = true
-		}
-	}
 
 	// Track parent class name for super
 	if node.Extends != nil {
@@ -800,9 +748,6 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 			continue
 		}
 
-		g.pushReceiverScope()
-		g.trackParameterReceivers(method.Parameters)
-
 		output.WriteString(g.generateIndent())
 		if method.IsStatic {
 			// Static methods use dot notation (no self parameter)
@@ -827,7 +772,6 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 			}
 		}
 		g.indent--
-		g.popReceiverScope()
 
 		output.WriteString(g.generateIndent())
 		output.WriteString("end\n")
@@ -1405,147 +1349,14 @@ func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
 	return fmt.Sprintf("%s %s %s", left, operator, right)
 }
 
-// pushReceiverScope starts a new lexical scope for implicit-self tracking.
-func (g *Generator) pushReceiverScope() {
-	g.selfReceivers = append(g.selfReceivers, make(map[string]bool))
-}
-
-// popReceiverScope discards the innermost implicit-self scope.
-func (g *Generator) popReceiverScope() {
-	if len(g.selfReceivers) > 1 {
-		g.selfReceivers = g.selfReceivers[:len(g.selfReceivers)-1]
-	}
-}
-
-// markSelfReceiver records that calls on this name need Lua's ':' syntax.
-func (g *Generator) markSelfReceiver(name string) {
-	if len(g.selfReceivers) == 0 {
-		g.selfReceivers = []map[string]bool{make(map[string]bool)}
-	}
-	g.selfReceivers[len(g.selfReceivers)-1][name] = true
-}
-
-// isSelfReceiver reports whether a name is known to hold a class instance or a
-// string, both of which dispatch their methods through ':' in Lua.
-func (g *Generator) isSelfReceiver(name string) bool {
-	for i := len(g.selfReceivers) - 1; i >= 0; i-- {
-		if g.selfReceivers[i][name] {
-			return true
-		}
-	}
-	return false
-}
-
-// typeNeedsSelfDispatch reports whether a declared type annotation describes a
-// receiver whose methods are called with ':' (a class instance or a string).
-func (g *Generator) typeNeedsSelfDispatch(typeExpr ast.Expression) bool {
-	if generic, ok := typeExpr.(*ast.GenericType); ok {
-		typeExpr = generic.BaseType
-	}
-
-	ident, ok := typeExpr.(*ast.Identifier)
-	if !ok {
-		return false
-	}
-
-	return g.classes[ident.Value] || ident.Value == "string"
-}
-
-// valueNeedsSelfDispatch reports whether an initializer obviously produces a
-// class instance or a string, e.g. `local p = Person()` or `local s = "hi"`.
-func (g *Generator) valueNeedsSelfDispatch(value ast.Expression) bool {
-	switch v := value.(type) {
-	case *ast.StringLiteral, *ast.TemplateLiteral:
-		return true
-	case *ast.CallExpression:
-		callee := v.Function
-		if generic, ok := callee.(*ast.GenericType); ok {
-			callee = generic.BaseType
-		}
-		if ident, ok := callee.(*ast.Identifier); ok {
-			return g.classes[ident.Value]
-		}
-	}
-	return false
-}
-
-// trackDeclaredReceivers records any names in a declaration whose methods will
-// need ':' dispatch, so later calls on them generate the right syntax.
-func (g *Generator) trackDeclaredReceivers(names []*ast.Identifier, typeExprs []ast.Expression, values []ast.Expression) {
-	for i, name := range names {
-		if name == nil {
-			continue
-		}
-		if i < len(typeExprs) && typeExprs[i] != nil {
-			if g.typeNeedsSelfDispatch(typeExprs[i]) {
-				g.markSelfReceiver(name.Value)
-				continue
-			}
-
-			// `local balls: Ball[]` means iterating it yields instances.
-			if arrayType, ok := typeExprs[i].(*ast.ArrayType); ok && g.typeNeedsSelfDispatch(arrayType.ElementType) {
-				g.instanceArrays[name.Value] = true
-				continue
-			}
-		}
-		if i < len(values) && values[i] != nil && g.valueNeedsSelfDispatch(values[i]) {
-			g.markSelfReceiver(name.Value)
-		}
-	}
-}
-
-// trackParameterReceivers records parameters that are class instances or strings.
-func (g *Generator) trackParameterReceivers(params []*ast.Parameter) {
-	for _, param := range params {
-		if param == nil || param.Name == nil || param.Type == nil {
-			continue
-		}
-		if g.typeNeedsSelfDispatch(param.Type) {
-			g.markSelfReceiver(param.Name.Value)
-		}
-	}
-}
-
-// usesImplicitSelf decides between Lua's ':' and '.' call syntax for a member
-// call. The type checker's resolution wins when available; otherwise the
-// receiver is inferred from what the generator has seen so far, defaulting to
-// '.' so that library calls like table.insert(t, v) stay correct.
+// usesImplicitSelf decides between Lua's ':' and '.' for a member call. The
+// type checker records which one each member needs; without that, the call
+// is emitted as written: `obj:m()` asks for self, and `obj.m()` does not.
 func (g *Generator) usesImplicitSelf(dotExpr *ast.DotExpression, property string) bool {
-	// obj:method() in the source says exactly what it wants.
 	if dotExpr.IsMethodCall {
 		return true
 	}
-
-	switch dotExpr.MethodDispatch {
-	case ast.DispatchSelf:
-		return true
-	case ast.DispatchPlain:
-		return false
-	}
-
-	// Untyped fallback (--no-typecheck, or a receiver the checker left as 'any').
-	switch left := dotExpr.Left.(type) {
-	case *ast.Identifier:
-		// A static method reached through its class name takes no self.
-		if g.classes[left.Value] {
-			return !(g.staticMethods[left.Value] != nil && g.staticMethods[left.Value][property])
-		}
-		if left.Value == "self" || left.Value == "super" {
-			return true
-		}
-		return g.isSelfReceiver(left.Value)
-	case *ast.StringLiteral, *ast.TemplateLiteral:
-		return true
-	case *ast.DotExpression:
-		// self.field.method(): the field's type is unknown here, but a method
-		// call on an instance field is far more common than a module lookup
-		// through a class instance.
-		if inner, ok := left.Left.(*ast.Identifier); ok && (inner.Value == "self" || inner.Value == "super") {
-			return true
-		}
-	}
-
-	return false
+	return dotExpr.MethodDispatch == ast.DispatchSelf
 }
 
 // generateCallExpression generates code for a function call
@@ -1655,16 +1466,10 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 	// Not a method call - generate normally
 	function := g.generateExpression(node.Function)
 
-	// Check if calling a class constructor. The callee is an identifier, or a
-	// generic instantiation of one as in Stack<number>().
-	callee := node.Function
-	if generic, ok := callee.(*ast.GenericType); ok {
-		callee = generic.BaseType
-	}
-	if ident, ok := callee.(*ast.Identifier); ok {
-		if g.classes[ident.Value] {
-			function = function + ".new"
-		}
+	// The checker marks calls that construct a Lunar class, Enemy(3) or
+	// Stack<number>(), which go through the class's constructor.
+	if node.ConstructorCall {
+		function = function + ".new"
 	}
 
 	// Check if any argument is a spread expression
@@ -1797,10 +1602,6 @@ func (g *Generator) generateIndexExpression(node *ast.IndexExpression) string {
 // generateFunctionExpression generates code for an anonymous function expression
 func (g *Generator) generateFunctionExpression(node *ast.FunctionExpression) string {
 	var output strings.Builder
-
-	g.pushReceiverScope()
-	defer g.popReceiverScope()
-	g.trackParameterReceivers(node.Parameters)
 
 	output.WriteString("function(")
 

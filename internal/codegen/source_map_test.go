@@ -3,6 +3,7 @@ package codegen
 import (
 	"lunar/internal/lexer"
 	"lunar/internal/parser"
+	"lunar/internal/types"
 	"testing"
 )
 
@@ -26,6 +27,7 @@ print(xs[1].get())
 	if len(p.Errors()) > 0 {
 		t.Fatalf("parser errors: %v", p.Errors())
 	}
+	types.NewChecker().Check(statements)
 
 	plain := GenerateWithTarget(statements, "lua54")
 	mapped, sm := GenerateWithSourceMapAndTarget(statements, "items.lunar", "items.lua", "lua54")

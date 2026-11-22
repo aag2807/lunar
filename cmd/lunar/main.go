@@ -9,17 +9,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
 
-	"lunar/internal/ast"
-	"lunar/internal/codegen"
-	"lunar/internal/config"
 	"lunar/internal/diag"
-	"lunar/internal/lexer"
-	"lunar/internal/parser"
-	"lunar/internal/types"
+	"lunar/internal/project"
 	"lunar/internal/version"
 )
 
@@ -31,42 +27,54 @@ const (
 	exitInternal = 3 // an I/O failure or a compiler bug
 )
 
-// supportedTargets are the Lua versions the compiler is tested against.
-var supportedTargets = map[string]bool{"lua53": true, "lua54": true}
-
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
+// stringList is a repeatable flag: --decl a --decl b.
+type stringList []string
+
+func (s *stringList) String() string     { return strings.Join(*s, ",") }
+func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
+
 // run is the whole command: it returns the exit code instead of exiting, so
 // every path out, a panic included, reports the same way.
 func run(args []string, stdout, stderr io.Writer) (code int) {
-	jsonMode := false
+	rep := &reporter{stdout: stdout, stderr: stderr}
 	for _, a := range args {
 		if a == "--json" || a == "-json" {
-			jsonMode = true
+			rep.json = true
 		}
 	}
-	rep := &reporter{json: jsonMode, stdout: stdout, stderr: stderr}
-
 	defer func() {
 		if r := recover(); r != nil {
-			code = rep.internal(fmt.Sprintf("internal compiler error: %v\n%s", r, debug.Stack()))
+			code = rep.failure("internal", fmt.Sprintf("internal compiler error: %v\n%s", r, debug.Stack()))
 		}
 	}()
 
+	buildMode := len(args) > 0 && args[0] == "build"
+	if buildMode {
+		args = args[1:]
+	}
+
 	flags := flag.NewFlagSet("lunar", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	outputFile := flags.String("o", "", "")
+	var decls stringList
+	flags.Var(&decls, "decl", "")
+	target := flags.String("target", "", "")
 	sourceMap := flags.Bool("source-map", false, "")
-	targetLua := flags.String("target", "", "")
-	configFile := flags.String("config", "", "")
-	watchMode := flags.Bool("watch", false, "")
+	watch := flags.Bool("watch", false, "")
 	watchInterval := flags.Int("watch-interval", 500, "")
 	watchClear := flags.Bool("watch-clear", false, "")
 	flags.Bool("json", false, "")
 	showVersion := flags.Bool("version", false, "")
 	showHelp := flags.Bool("help", false, "")
+	// build
+	projectFile := flags.String("project", "", "")
+	outDir := flags.String("out", "", "")
+	// single file
+	outputFile := flags.String("o", "", "")
+	configFile := flags.String("config", "", "")
 
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -75,7 +83,6 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 		}
 		return rep.usage(err.Error())
 	}
-
 	if *showVersion {
 		fmt.Fprintln(stdout, version.String())
 		return exitOK
@@ -85,178 +92,52 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 		return exitOK
 	}
 
-	rest := flags.Args()
-	if len(rest) < 1 {
-		return rep.usage("no input file specified (usage: lunar [options] <input.lunar>)")
+	if *target != "" && *target != "lua53" && *target != "lua54" {
+		return rep.usage(fmt.Sprintf("unsupported target '%s' (supported: lua53, lua54)", *target))
 	}
-	inputFile := rest[0]
-	if _, err := os.Stat(inputFile); err != nil {
-		return rep.usage(fmt.Sprintf("input file '%s' does not exist", inputFile))
-	}
-	if !strings.HasSuffix(inputFile, ".lunar") && !rep.json {
-		fmt.Fprintf(stderr, "Warning: Input file '%s' does not have .lunar extension\n", inputFile)
+	opts := project.Options{Decls: decls, Target: *target}
+	if flagSet(flags, "source-map") {
+		opts.SourceMap = sourceMap
 	}
 
-	var cfg *config.Config
-	var configDir string
-	var err error
-	if *configFile != "" {
-		cfg, err = config.LoadFromFile(*configFile)
-		configDir = filepath.Dir(*configFile)
+	var once func() int
+	if buildMode {
+		if flags.NArg() > 0 {
+			return rep.usage("lunar build takes no file arguments; it compiles the whole project")
+		}
+		opts.ConfigPath, opts.OutDir = *projectFile, *outDir
+		once = func() int { return rep.build(opts) }
 	} else {
-		configDir, cfg, err = config.FindConfig(filepath.Dir(inputFile))
-		if configDir == "" {
-			configDir = filepath.Dir(inputFile)
+		if flags.NArg() < 1 {
+			return rep.usage("no input file specified (usage: lunar [options] <input.lunar>, or lunar build)")
 		}
-	}
-	if err != nil {
-		return rep.usage(fmt.Sprintf("loading config: %v", err))
-	}
-	cfg.Merge(false, *sourceMap, false, *targetLua)
-
-	target := cfg.CompilerOptions.Target
-	if target == "" {
-		target = "lua53"
-	}
-	if !supportedTargets[target] {
-		return rep.usage(fmt.Sprintf("unsupported target '%s' (supported: lua53, lua54)", target))
-	}
-
-	output := *outputFile
-	if output == "" {
-		switch {
-		case cfg.OutFile != "":
-			output = filepath.Join(configDir, cfg.OutFile)
-		case cfg.OutDir != "":
-			output = filepath.Join(configDir, cfg.OutDir, strings.TrimSuffix(filepath.Base(inputFile), ".lunar")+".lua")
-		default:
-			output = strings.TrimSuffix(inputFile, ".lunar") + ".lua"
+		input := flags.Arg(0)
+		if _, err := os.Stat(input); err != nil {
+			return rep.usage(fmt.Sprintf("input file '%s' does not exist", input))
 		}
+		output := *outputFile
+		if output == "" {
+			output = strings.TrimSuffix(input, ".lunar") + ".lua"
+		}
+		opts.ConfigPath, opts.Files = *configFile, []string{input}
+		once = func() int { return rep.compileFile(opts, input, output) }
 	}
 
-	opts := compileOptions{sourceMap: *sourceMap, target: target}
-	if *watchMode {
-		runWatchMode(rep, inputFile, output, opts, *watchInterval, *watchClear)
+	if *watch {
+		watchLoop(rep, opts, once, *watchInterval, *watchClear)
 		return exitOK
 	}
-	return rep.build(inputFile, output, opts)
+	return once()
 }
 
-type compileOptions struct {
-	sourceMap bool
-	target    string
-}
-
-// compileResult is what one compile produced: the diagnostics, the source
-// text of every file they may point into, and any I/O failure.
-type compileResult struct {
-	diags   diag.List
-	sources map[string]string
-	ioErr   error
-}
-
-// compile runs lexer -> parser -> checker -> codegen on one file and writes
-// the Lua. Nothing is written unless the source has no errors, so the last
-// good output stays in place.
-func compile(inputFile, outputFile string, opts compileOptions) compileResult {
-	res := compileResult{sources: map[string]string{}}
-
-	source, err := os.ReadFile(inputFile)
-	if err != nil {
-		res.ioErr = fmt.Errorf("reading %s: %w", inputFile, err)
-		return res
-	}
-	res.sources[inputFile] = string(source)
-
-	// Declarations next to the input are checked first, so their names are
-	// known to the script; they are never emitted.
-	var declarations []ast.Statement
-	declFiles, err := discoverDeclarationFiles(inputFile)
-	if err != nil {
-		res.ioErr = fmt.Errorf("finding declaration files: %w", err)
-		return res
-	}
-	for _, declFile := range declFiles {
-		text, err := os.ReadFile(declFile)
-		if err != nil {
-			res.ioErr = fmt.Errorf("reading %s: %w", declFile, err)
-			return res
+func flagSet(flags *flag.FlagSet, name string) bool {
+	set := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
 		}
-		res.sources[declFile] = string(text)
-		p := parser.New(lexer.NewFile(declFile, string(text)))
-		statements := p.Parse()
-		res.diags = append(res.diags, parseDiagnostics(p.Errors())...)
-		declarations = append(declarations, statements...)
-	}
-
-	p := parser.New(lexer.NewFile(inputFile, string(source)))
-	statements := p.Parse()
-	res.diags = append(res.diags, parseDiagnostics(p.Errors())...)
-	if res.diags.HasErrors() {
-		return res
-	}
-
-	// The checker also decides ':' versus '.' and which calls construct, so
-	// it always runs, and codegen depends on what it records.
-	checker := types.NewCheckerWithOptions(types.Options{Target: opts.target})
-	res.diags = append(res.diags, typeDiagnostics(checker.Check(append(declarations, statements...)))...)
-	if res.diags.HasErrors() {
-		return res
-	}
-
-	var luaCode, mapJSON string
-	if opts.sourceMap {
-		code, sm := codegen.GenerateWithSourceMapAndTarget(statements, inputFile, outputFile, opts.target)
-		luaCode = code + "\n" + sm.GenerateComment(filepath.Base(outputFile)+".map") + "\n"
-		if mapJSON, err = sm.ToJSON(); err != nil {
-			res.ioErr = fmt.Errorf("encoding the source map: %w", err)
-			return res
-		}
-	} else {
-		luaCode = codegen.GenerateWithTarget(statements, opts.target)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(outputFile), 0o755); err != nil {
-		res.ioErr = fmt.Errorf("creating the output directory: %w", err)
-		return res
-	}
-	if opts.sourceMap {
-		if err := os.WriteFile(outputFile+".map", []byte(mapJSON), 0o644); err != nil {
-			res.ioErr = fmt.Errorf("writing %s.map: %w", outputFile, err)
-			return res
-		}
-	}
-	if err := os.WriteFile(outputFile, []byte(luaCode), 0o644); err != nil {
-		res.ioErr = fmt.Errorf("writing %s: %w", outputFile, err)
-	}
-	return res
-}
-
-func parseDiagnostics(errs []*parser.ParseError) diag.List {
-	out := make(diag.List, len(errs))
-	for i, e := range errs {
-		out[i] = diag.Diagnostic{File: e.File, Line: e.Line, Column: e.Column, EndLine: e.EndLine,
-			EndColumn: e.EndColumn, Severity: diag.Error, Code: e.Code, Message: e.Message}
-	}
-	return out
-}
-
-func typeDiagnostics(errs []*types.TypeError) diag.List {
-	out := make(diag.List, len(errs))
-	for i, e := range errs {
-		code := e.Code
-		if code == "" {
-			code = "type"
-		}
-		out[i] = diag.Diagnostic{File: e.File, Line: e.Line, Column: e.Column, EndLine: e.EndLine,
-			EndColumn: e.EndColumn, Severity: diag.Error, Code: code, Message: e.Message}
-	}
-	return out
-}
-
-// discoverDeclarationFiles finds all .d.lunar files in the same directory as the input file.
-func discoverDeclarationFiles(inputFile string) ([]string, error) {
-	return filepath.Glob(filepath.Join(filepath.Dir(inputFile), "*.d.lunar"))
+	})
+	return set
 }
 
 // reporter prints results for people (stderr, with source context) or, with
@@ -267,70 +148,140 @@ type reporter struct {
 	stderr io.Writer
 }
 
-// build compiles once and reports, returning the exit code.
-func (r *reporter) build(inputFile, outputFile string, opts compileOptions) int {
-	res := compile(inputFile, outputFile, opts)
-	res.diags.Sort()
-
-	if res.ioErr != nil {
-		r.emit(res, inputFile, outputFile, opts, false)
-		return r.internalDiag("io", res.ioErr.Error())
+// build compiles the whole project into its output folder.
+func (r *reporter) build(opts project.Options) int {
+	p, diags := project.Open(opts)
+	if diags.HasErrors() {
+		return r.failure("config", diags[0].Message)
 	}
-	written := !res.diags.HasErrors()
-	r.emit(res, inputFile, outputFile, opts, written)
-	if !written {
+	res, diags := project.Build(p)
+	diags.Sort()
+	if code := r.ioOrConfig(diags); code != 0 {
+		return code
+	}
+	r.report(diags, res.Files, res.Written)
+	if res.Written && !r.json {
+		fmt.Fprintf(r.stdout, "Compiled %d file(s) into %s\n", res.Files, p.OutDir)
+	}
+	if !res.Written {
 		return exitErrors
 	}
 	return exitOK
 }
 
-// emit prints a compile's diagnostics and, in JSON mode, its summary line.
-func (r *reporter) emit(res compileResult, inputFile, outputFile string, opts compileOptions, written bool) {
+// compileFile compiles one file (checking what it imports) to output.
+func (r *reporter) compileFile(opts project.Options, input, output string) int {
+	p, diags := project.Open(opts)
+	if diags.HasErrors() {
+		return r.failure("config", diags[0].Message)
+	}
+	prog, diags := p.Check()
+	if !diags.HasErrors() {
+		outs, emitDiags := prog.Emit()
+		diags = append(diags, emitDiags...)
+		if !diags.HasErrors() {
+			if err := writeSingle(outs, output); err != nil {
+				return r.failure("io", err.Error())
+			}
+		}
+	}
+	diags.Sort()
+	if code := r.ioOrConfig(diags); code != 0 {
+		return code
+	}
+	written := !diags.HasErrors()
+	r.report(diags, 1, written)
+	if !written {
+		return exitErrors
+	}
+	if !r.json {
+		fmt.Fprintf(r.stdout, "Successfully compiled %s -> %s\n", input, output)
+		if p.SourceMap {
+			fmt.Fprintf(r.stdout, "Source map: %s.map\n", output)
+		}
+	}
+	return exitOK
+}
+
+// writeSingle writes a one-file build's Lua (and map) to output, staging it
+// next to the target and renaming it over, so a reader never sees half.
+func writeSingle(outs []project.Output, output string) error {
+	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+		return fmt.Errorf("creating the output directory: %w", err)
+	}
+	for _, o := range outs {
+		target := output
+		if strings.HasSuffix(o.Rel, ".map") {
+			target = output + ".map"
+		} else if !strings.HasSuffix(o.Rel, ".lua") {
+			continue
+		}
+		tmp := target + ".lunar-tmp"
+		if err := os.WriteFile(tmp, o.Content, 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", target, err)
+		}
+		if err := os.Rename(tmp, target); err != nil {
+			os.Remove(tmp)
+			return fmt.Errorf("writing %s: %w", target, err)
+		}
+	}
+	return nil
+}
+
+// ioOrConfig turns a failure that is not about the source into its exit
+// code, or returns 0.
+func (r *reporter) ioOrConfig(diags diag.List) int {
+	for _, d := range diags {
+		switch d.Code {
+		case "io":
+			return r.failure("io", d.Message)
+		case "config":
+			return r.failure("config", d.Message)
+		}
+	}
+	return 0
+}
+
+// report prints diagnostics and, in JSON mode, the closing summary.
+func (r *reporter) report(diags diag.List, files int, written bool) {
 	if r.json {
-		for _, d := range res.diags {
+		for _, d := range diags {
 			d.File = absolute(d.File)
 			diag.WriteJSON(r.stdout, d)
 		}
-		if res.ioErr == nil {
-			diag.WriteJSON(r.stdout, diag.Summary{Errors: res.diags.Errors(), Warnings: res.diags.Warnings(), Files: 1, Written: written})
-		}
+		diag.WriteJSON(r.stdout, diag.Summary{Errors: diags.Errors(), Warnings: diags.Warnings(), Files: files, Written: written})
 		return
 	}
-	if len(res.diags) > 0 {
-		fmt.Fprint(r.stderr, formatDiagnostics(res.diags, res.sources))
-	}
-	if written {
-		fmt.Fprintf(r.stdout, "Successfully compiled %s -> %s\n", inputFile, outputFile)
-		if opts.sourceMap {
-			fmt.Fprintf(r.stdout, "Source map: %s.map\n", outputFile)
-		}
+	if len(diags) > 0 {
+		fmt.Fprint(r.stderr, formatDiagnostics(diags))
 	}
 }
 
 // usage reports a problem with how lunar was invoked.
 func (r *reporter) usage(message string) int {
-	if !r.json {
-		fmt.Fprintf(r.stderr, "Error: %s\nRun 'lunar --help' for more information\n", message)
-		return exitUsage
+	return r.fail(exitUsage, "usage", message)
+}
+
+// failure reports an outcome that is not the source's fault: bad
+// configuration (exit 2), I/O failure or compiler bug (exit 3).
+func (r *reporter) failure(code, message string) int {
+	if code == "config" {
+		return r.fail(exitUsage, code, message)
 	}
-	diag.WriteJSON(r.stdout, diag.Diagnostic{Severity: diag.Error, Code: "usage", Message: message})
-	diag.WriteJSON(r.stdout, diag.Summary{Errors: 1})
-	return exitUsage
+	return r.fail(exitInternal, code, message)
 }
 
-// internal reports a compiler failure that is not the source's fault.
-func (r *reporter) internal(message string) int {
-	return r.internalDiag("internal", message)
-}
-
-func (r *reporter) internalDiag(code, message string) int {
+func (r *reporter) fail(exit int, code, message string) int {
 	if !r.json {
 		fmt.Fprintf(r.stderr, "Error: %s\n", message)
-		return exitInternal
+		if code == "usage" {
+			fmt.Fprintln(r.stderr, "Run 'lunar --help' for more information")
+		}
+		return exit
 	}
 	diag.WriteJSON(r.stdout, diag.Diagnostic{Severity: diag.Error, Code: code, Message: message})
 	diag.WriteJSON(r.stdout, diag.Summary{Errors: 1})
-	return exitInternal
+	return exit
 }
 
 // absolute makes a path absolute for JSON output; names such as
@@ -345,22 +296,41 @@ func absolute(path string) string {
 	return path
 }
 
+// displayPath shows a path relative to the working directory when it is
+// inside it, as people typed it.
+func displayPath(path string) string {
+	if wd, err := os.Getwd(); err == nil && filepath.IsAbs(path) {
+		if rel, err := filepath.Rel(wd, path); err == nil && !strings.HasPrefix(rel, "..") {
+			return rel
+		}
+	}
+	return path
+}
+
 // formatDiagnostics renders diagnostics with a line of source context on
 // each side and a caret under the reported column.
-func formatDiagnostics(diags diag.List, sources map[string]string) string {
+func formatDiagnostics(diags diag.List) string {
 	var sb strings.Builder
 	sb.WriteString("Compilation failed:\n")
+	sources := map[string][]string{}
 	for i, d := range diags {
 		sb.WriteString("\n")
-		fmt.Fprintf(&sb, "  Error %d: %s\n", i+1, d.Location())
+		loc := d
+		loc.File = displayPath(d.File)
+		fmt.Fprintf(&sb, "  Error %d: %s\n", i+1, loc.Location())
 		fmt.Fprintf(&sb, "  %s\n", d.Message)
 
-		text, ok := sources[d.File]
-		if !ok || d.Line < 1 {
+		lines, ok := sources[d.File]
+		if !ok {
+			if data, err := os.ReadFile(d.File); err == nil {
+				lines = strings.Split(string(data), "\n")
+			}
+			sources[d.File] = lines
+		}
+		if len(lines) == 0 || d.Line < 1 || d.Line > len(lines) {
 			continue
 		}
 		sb.WriteString("\n")
-		lines := strings.Split(text, "\n")
 		start, end := d.Line-1, d.Line+1
 		if start < 1 {
 			start = 1
@@ -379,70 +349,103 @@ func formatDiagnostics(diags diag.List, sources map[string]string) string {
 	return sb.String()
 }
 
-// runWatchMode recompiles inputFile whenever its modification time changes.
-// In JSON mode every rebuild ends with its own summary line.
-func runWatchMode(rep *reporter, inputFile, outputFile string, opts compileOptions, intervalMs int, clearConsole bool) {
+// watchLoop runs once, then again whenever a file the project reads
+// changes. In JSON mode every rebuild ends with its own summary line.
+func watchLoop(rep *reporter, opts project.Options, once func() int, intervalMs int, clearConsole bool) {
 	status := func(format string, args ...any) {
 		if !rep.json {
 			fmt.Fprintf(rep.stdout, "[%s] "+format+"\n", append([]any{time.Now().Format("15:04:05")}, args...)...)
 		}
 	}
-	status("Watching %s for changes (Ctrl+C to stop)", inputFile)
-	rep.build(inputFile, outputFile, opts)
+	status("Watching for changes (Ctrl+C to stop)")
+	once()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	ticker := time.NewTicker(time.Duration(intervalMs) * time.Millisecond)
 	defer ticker.Stop()
 
-	lastModTime := getFileModTime(inputFile)
+	last := snapshot(opts)
 	for {
 		select {
 		case <-sigChan:
 			status("Stopping watch mode")
 			return
 		case <-ticker.C:
-			if mod := getFileModTime(inputFile); !mod.Equal(lastModTime) {
-				lastModTime = mod
-				// Let the editor finish writing before reading the file.
+			if now := snapshot(opts); now != last {
+				last = now
+				// Let the editor finish writing before reading the files.
 				time.Sleep(200 * time.Millisecond)
 				if clearConsole && !rep.json {
 					fmt.Fprint(rep.stdout, "\033[H\033[2J\033[3J")
 				}
-				status("File changed, recompiling")
-				rep.build(inputFile, outputFile, opts)
+				status("Change detected, recompiling")
+				once()
 			}
 		}
 	}
 }
 
-func getFileModTime(filename string) time.Time {
-	info, err := os.Stat(filename)
-	if err != nil {
-		return time.Time{}
+// snapshot fingerprints every file the project reads: sources, plain Lua
+// and declarations, by path, size and modification time.
+func snapshot(opts project.Options) string {
+	p, diags := project.Open(opts)
+	if diags.HasErrors() {
+		return "config error: " + diags[0].Message
 	}
-	return info.ModTime()
+	files := append(append(append([]string{}, p.Sources...), p.LuaFiles...), p.DeclFiles...)
+	// Modules reached only through imports are not in Sources; watching the
+	// whole root covers them.
+	filepath.WalkDir(p.Root, func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(path, ".lunar") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	sort.Strings(files)
+	var sb strings.Builder
+	for _, f := range files {
+		if info, err := os.Stat(f); err == nil {
+			fmt.Fprintf(&sb, "%s %d %d\n", f, info.Size(), info.ModTime().UnixNano())
+		}
+	}
+	return sb.String()
 }
 
 func printHelp(w io.Writer) {
 	fmt.Fprintf(w, `%s - a statically-typed superset of Lua
 
 Usage:
-  lunar [options] <input.lunar>
+  lunar build [options]          Compile the whole project into its outDir
+  lunar [options] <input.lunar>  Compile one file (and check what it imports)
 
 Options:
-  -o <file>             Output file (default: input with .lua extension)
   --target <version>    Target Lua version: lua53 (default) or lua54
+  --decl <path>         Also load declarations from this file or folder (repeatable)
   --source-map          Also write <output>.map
-  --config <file>       Path to lunar.config.json (default: searched upward)
   --json                Report as JSON lines on stdout (see below)
-  --watch               Recompile when the input file changes
+  --watch               Recompile when a file changes
   --watch-interval <ms> Watch polling interval (default 500)
   --watch-clear         Clear the console before each rebuild
   --version             Print the version
   --help                Print this help
 
-Declaration files (*.d.lunar) next to the input file are loaded automatically.
+lunar build:
+  --project <file>      The lunar.config.json to use (default: searched upward)
+  --out <dir>           Output folder, overriding outDir
+
+Single file:
+  -o <file>             Output file (default: input with .lua extension)
+  --config <file>       The lunar.config.json to use (default: searched upward)
+
+lunar.config.json (paths relative to it):
+  {"rootDir": "scripts", "outDir": "../build/scripts", "target": "lua54",
+   "declarations": ["../engine/api"], "copyLua": true, "sourceMap": false}
+
+Declarations are the bundled Lua standard library, every *.d.lunar under
+rootDir, and the "declarations" and --decl paths. Imports starting with ./
+or ../ are relative to the importing file, others to rootDir; require()
+names are relative to rootDir ("ai/brain.lunar" is require("ai.brain")).
 
 Exit codes: 0 compiled, 1 the source has errors (nothing written),
 2 usage or configuration error, 3 I/O failure or internal error.

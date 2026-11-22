@@ -1719,21 +1719,21 @@ func (g *Generator) generateImportStatement(node *ast.ImportStatement) string {
 	var output strings.Builder
 	output.WriteString(g.generateIndent())
 
-	moduleName := luaModuleName(node.Module)
+	// The project records the root-relative name require() takes; without
+	// one (a snippet compiled on its own) the path is converted locally.
+	moduleName := node.RequireName
+	if moduleName == "" {
+		moduleName = luaModuleName(node.Module)
+	}
 
-	if node.IsWildcard {
-		// import * from "module" -> local module = require("module")
-		// Simple heuristic: use the last part of the path as variable name
-		parts := strings.Split(strings.TrimSuffix(node.Module, ".lunar"), "/")
-		varName := parts[len(parts)-1]
-		output.WriteString(fmt.Sprintf("local %s = require(\"%s\")\n", varName, moduleName))
+	if node.IsWildcard && node.Alias != nil {
+		// import * as m from "module" -> local m = require("module")
+		output.WriteString(fmt.Sprintf("local %s = require(\"%s\")\n", node.Alias.Value, moduleName))
 	} else {
 		// import { name1, name2 } from "module"
-		// -> local _module = require("module")
-		// -> local name1 = _module.name1
-		// -> local name2 = _module.name2
-		tempVar := "_" + strings.ReplaceAll(node.Module, "/", "_")
-		tempVar = strings.ReplaceAll(tempVar, ".", "_")
+		// -> local __module = require("module")
+		// -> local name1 = __module.name1
+		tempVar := "__" + strings.NewReplacer(".", "_", "/", "_", "-", "_").Replace(moduleName)
 
 		output.WriteString(fmt.Sprintf("local %s = require(\"%s\")\n", tempVar, moduleName))
 

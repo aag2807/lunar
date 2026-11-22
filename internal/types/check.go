@@ -259,6 +259,17 @@ type Checker struct {
 	declaredFuncs map[*FunctionType]bool
 	funcDefs      map[*FunctionType]lexer.Token
 
+	// importResolver finds the module an import names; without one, every
+	// import is unresolved. boundImports are those pass zero has bound.
+	importResolver ImportResolver
+	boundImports   map[*ast.ImportStatement]bool
+
+	// ambient maps each name a declaration bound (the stdlib, .d.lunar
+	// files) to its type; globalUses are the identifiers that resolved to
+	// one of those bindings, which is what a data file may not do.
+	ambient    map[string]Type
+	globalUses []lexer.Token
+
 	// exprTypes records the type computed for each expression checked.
 	exprTypes map[ast.Expression]Type
 
@@ -281,6 +292,22 @@ type Checker struct {
 type ModuleInfo struct {
 	Path    string
 	Exports map[string]Type
+}
+
+// ImportResolver returns the module an import statement names, or an error
+// whose message is reported at the import.
+type ImportResolver func(node *ast.ImportStatement) (*ModuleInfo, error)
+
+// SetImportResolver installs how this checker finds imported modules. The
+// project resolves them against the module graph, relative to the importing
+// file; nothing else in the checker looks at the file system.
+func (c *Checker) SetImportResolver(r ImportResolver) {
+	c.importResolver = r
+}
+
+// Exports returns the names the checked module exports and their types.
+func (c *Checker) Exports() map[string]Type {
+	return c.exports
 }
 
 // NewChecker creates a new type checker
@@ -407,6 +434,14 @@ func (c *Checker) loadStdlib() {
 
 // Check performs type checking on a list of statements
 func (c *Checker) Check(statements []ast.Statement) []*TypeError {
+	// Imports come first, so imported types can be named in annotations and
+	// `extends` clauses that the next passes resolve.
+	for _, stmt := range statements {
+		if imp, ok := stmt.(*ast.ImportStatement); ok {
+			c.bindImport(imp)
+		}
+	}
+
 	// Pass zero: publish every interface, class and enum name, so a
 	// declaration can refer to itself or to one further down.
 	c.predeclareTypeNames(statements)
@@ -672,7 +707,9 @@ func (c *Checker) registerTypeDefinition(stmt ast.Statement) {
 	case *ast.DeclareStatement:
 		// Ambient declarations - register the underlying declaration
 		if ns, ok := node.Declaration.(*ast.NamespaceDeclaration); ok {
-			c.env.Set(ns.Name.Value, c.registerAmbientNamespace(ns))
+			nsType := c.registerAmbientNamespace(ns)
+			c.env.Set(ns.Name.Value, nsType)
+			c.markAmbient(ns.Name.Value, nsType)
 		} else if node.Declaration != nil {
 			c.registerTypeDefinition(node.Declaration)
 		}
@@ -3799,6 +3836,9 @@ func (c *Checker) checkExpressionKind(expr ast.Expression) Type {
 // checkIdentifier checks an identifier and returns its type
 func (c *Checker) checkIdentifier(node *ast.Identifier) Type {
 	typ, ok := c.env.Get(node.Value)
+	if ok && c.ambient[node.Value] == typ {
+		c.globalUses = append(c.globalUses, node.Token)
+	}
 	if !ok {
 		// Build error message with suggestions
 		errorMsg := fmt.Sprintf("Undefined variable '%s'", node.Value)
@@ -5268,40 +5308,75 @@ func (c *Checker) checkExportStatement(node *ast.ExportStatement) {
 
 // checkImportStatement checks an import statement
 func (c *Checker) checkImportStatement(node *ast.ImportStatement) {
-	// Try to load the module
-	moduleInfo, err := c.loadModule(node.Module)
-	if err != nil {
-		// Module not found - for now, just add names as 'any' type
-		// This allows for gradual typing and external modules
-		if node.IsWildcard {
-			// For wildcard imports, we can't add anything without knowing module exports
-			c.addError(fmt.Sprintf("Cannot resolve module '%s'", node.Module), node.Token)
-			return
-		}
+	if !c.boundImports[node] {
+		c.bindImport(node)
+	}
+}
 
+// bindImport resolves an import and puts the names it brings in into scope.
+// An unresolved module or a missing export is an error; the names are then
+// bound as 'any' so they do not cascade into more errors.
+func (c *Checker) bindImport(node *ast.ImportStatement) {
+	if c.boundImports == nil {
+		c.boundImports = make(map[*ast.ImportStatement]bool)
+	}
+	c.boundImports[node] = true
+
+	var info *ModuleInfo
+	var err error
+	if c.importResolver != nil {
+		info, err = c.importResolver(node)
+	} else {
+		err = fmt.Errorf("Cannot find module '%s'", node.Module)
+	}
+	if err != nil {
+		c.addErrorCode("import", err.Error(), node.Token)
+		if node.Alias != nil {
+			c.env.Set(node.Alias.Value, Any)
+		}
 		for _, name := range node.Names {
 			c.env.Set(name.Value, Any)
 		}
 		return
 	}
 
-	// Module loaded successfully - import the requested names
-	if node.IsWildcard {
-		// Import all exports
-		for name, typ := range moduleInfo.Exports {
-			c.env.Set(name, typ)
+	if node.Alias != nil {
+		c.env.Set(node.Alias.Value, &NamespaceType{Name: node.Alias.Value, Members: info.Exports, Ambient: true})
+		return
+	}
+	for _, name := range node.Names {
+		typ, ok := info.Exports[name.Value]
+		if !ok {
+			c.addErrorCode("import", fmt.Sprintf("Module '%s' does not export '%s'", node.Module, name.Value), name.Token)
+			c.env.Set(name.Value, Any)
+			continue
 		}
-	} else {
-		// Import specific names
-		for _, name := range node.Names {
-			if typ, ok := moduleInfo.Exports[name.Value]; ok {
-				c.env.Set(name.Value, typ)
-			} else {
-				c.addError(fmt.Sprintf("Module '%s' does not export '%s'", node.Module, name.Value), name.Token)
-				c.env.Set(name.Value, Any) // Add as 'any' to prevent cascading errors
-			}
+		c.env.Set(name.Value, typ)
+		// Imported types are named like local ones.
+		switch t := typ.(type) {
+		case *ClassType:
+			c.classes[name.Value] = t
+		case *InterfaceType:
+			c.interfaces[name.Value] = t
+		case *EnumType:
+			c.enums[name.Value] = t
 		}
 	}
+}
+
+// markAmbient records that a declaration bound name to typ.
+func (c *Checker) markAmbient(name string, typ Type) {
+	if c.ambient == nil {
+		c.ambient = make(map[string]Type)
+	}
+	c.ambient[name] = typ
+}
+
+// GlobalUses returns the identifiers that referred to something a
+// declaration provides, such as tostring or the engine's API: globals the
+// Lua state has to supply at run time.
+func (c *Checker) GlobalUses() []lexer.Token {
+	return c.globalUses
 }
 
 // declaredFunctionType builds the type of an ambient function signature.
@@ -5371,6 +5446,7 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 			} else {
 				c.env.Set(name.Value, varType)
 			}
+			c.markAmbient(name.Value, varType)
 		}
 
 	case *ast.FunctionDeclaration:
@@ -5389,9 +5465,11 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 			} else {
 				// Name exists but is not a function - just set the new function type
 				c.env.Set(decl.Name.Value, funcType)
+				c.markAmbient(decl.Name.Value, funcType)
 			}
 		} else {
 			c.env.Set(decl.Name.Value, funcType)
+			c.markAmbient(decl.Name.Value, funcType)
 		}
 
 		// Class, Interface, Enum, Type declarations are already handled in registerTypeDefinition
@@ -5405,68 +5483,6 @@ func Check(statements []ast.Statement) []*TypeError {
 }
 
 // loadModule loads a module and returns its type information
-func (c *Checker) loadModule(modulePath string) (*ModuleInfo, error) {
-	// Check if module is already loaded
-	if mod, ok := c.modules[modulePath]; ok {
-		return mod, nil
-	}
-
-	// Try to find and parse the module file
-	// Support both relative and absolute paths
-	possiblePaths := []string{
-		modulePath,
-		modulePath + ".lunar",
-		"./" + modulePath + ".lunar",
-		"./" + modulePath,
-	}
-
-	var moduleFile string
-	var found bool
-	for _, path := range possiblePaths {
-		if _, err := os.Stat(path); err == nil {
-			moduleFile = path
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return nil, fmt.Errorf("module not found: %s", modulePath)
-	}
-
-	// Parse the module file
-	source, err := os.ReadFile(moduleFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read module: %w", err)
-	}
-
-	l := lexer.New(string(source))
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		return nil, fmt.Errorf("parse errors in module %s", modulePath)
-	}
-
-	// Create a new checker for the module
-	moduleChecker := NewChecker()
-	moduleChecker.currentModule = modulePath
-
-	// Check the module and collect exports
-	for _, stmt := range statements {
-		moduleChecker.checkStatement(stmt)
-	}
-
-	// Store module info
-	moduleInfo := &ModuleInfo{
-		Path:    modulePath,
-		Exports: moduleChecker.exports,
-	}
-	c.modules[modulePath] = moduleInfo
-
-	return moduleInfo, nil
-}
-
 // getFunctionType extracts the function type from a function declaration
 func (c *Checker) getFunctionType(stmt *ast.FunctionDeclaration) Type {
 	paramTypes := make([]Type, 0, len(stmt.Parameters))

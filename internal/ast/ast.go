@@ -1366,6 +1366,11 @@ type ImportStatement struct {
 	Names      []*Identifier // names being imported
 	Module     string        // module path (string literal)
 	IsWildcard bool          // true if using * import
+	// Alias names the module in `import * as Alias from "..."`.
+	Alias *Identifier
+	// RequireName is the name require() loads the module by, relative to
+	// the project root ("ai.brain"); the project fills it in.
+	RequireName string
 }
 
 func (is *ImportStatement) statementNode()       {}

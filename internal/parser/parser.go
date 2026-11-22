@@ -3230,8 +3230,18 @@ func (p *Parser) parseImportStatement() *ast.ImportStatement {
 
 	// Check for wildcard import (import * from "module")
 	if p.curTokenIs(lexer.ASTERISK) {
+		// import * as name from "module": the module's exports through a name.
 		importStmt.IsWildcard = true
-		p.nextToken() // move past '*'
+		if !p.peekTokenIs(lexer.AS) {
+			p.addError("import * needs a name: import * as name from \"...\"", p.curToken)
+			return nil
+		}
+		p.nextToken() // move to 'as'
+		if !p.expectPeekIdentOrContextual() {
+			return nil
+		}
+		importStmt.Alias = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		p.nextToken() // move past the name
 	} else if p.curTokenIs(lexer.LBRACE) {
 		// Named imports: import { name1, name2 } from "module"
 		p.nextToken() // move past '{'

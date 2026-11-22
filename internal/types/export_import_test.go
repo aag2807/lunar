@@ -3,6 +3,7 @@ package types
 import (
 	"lunar/internal/lexer"
 	"lunar/internal/parser"
+	"strings"
 	"testing"
 )
 
@@ -244,64 +245,33 @@ end
 	}
 }
 
+// An import that does not resolve is an error; it used to bind its names
+// as 'any' silently, so a cross-file mistake compiled clean. The names are
+// still bound as 'any' so they do not cascade into more errors.
 func TestImportNonExistentModule(t *testing.T) {
-	input := `
-import { greet } from "nonexistent_module"
-`
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
-
 	checker := NewChecker()
-	_ = checker.Check(statements)
-
-	// Should not error - module not found is allowed for gradual typing
-	// The imported name should be added as 'any' type
-	typ, ok := checker.env.Get("greet")
-	if !ok {
-		t.Error("Expected greet to be in environment")
+	errs := checker.Check(parseFile(t, "main.lunar", "import { greet } from \"nonexistent_module\"\ngreet()\n"))
+	if len(errs) != 1 || errs[0].Message != "Cannot find module 'nonexistent_module'" {
+		t.Fatalf("got %v", messages(errs))
 	}
-
-	if typ != Any {
-		t.Errorf("Expected greet to have type 'any', got %s", typ.String())
+	if typ, ok := checker.env.Get("greet"); !ok || typ != Any {
+		t.Errorf("greet should be bound as any, got %v", typ)
 	}
 }
 
 func TestImportWildcardNonExistentModule(t *testing.T) {
-	input := `
-import * from "nonexistent_module"
-`
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
+	errs := NewChecker().Check(parseFile(t, "main.lunar", "import * as m from \"nonexistent_module\"\n"))
+	if len(errs) != 1 || errs[0].Message != "Cannot find module 'nonexistent_module'" {
+		t.Fatalf("got %v", messages(errs))
 	}
+}
 
-	checker := NewChecker()
-	typeErrors := checker.Check(statements)
-
-	// Should error for wildcard imports when module not found
-	if len(typeErrors) == 0 {
-		t.Error("Expected error for wildcard import of non-existent module")
-	}
-
-	foundError := false
-	for _, err := range typeErrors {
-		if err.Message == "Cannot resolve module 'nonexistent_module'" {
-			foundError = true
-			break
-		}
-	}
-
-	if !foundError {
-		t.Error("Expected 'Cannot resolve module' error")
+// `import * from` named nothing to bind the module to; the checker bound
+// every export while codegen bound one local, so the two disagreed.
+func TestWildcardImportNeedsAName(t *testing.T) {
+	p := parser.New(lexer.New("import * from \"mod\"\n"))
+	p.Parse()
+	if len(p.Errors()) == 0 || !strings.Contains(p.Errors()[0].Message, "import * as name") {
+		t.Fatalf("got %v", p.Errors())
 	}
 }

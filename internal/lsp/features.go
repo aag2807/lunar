@@ -177,7 +177,7 @@ func paramLabels(fn *types.FunctionType) []string {
 			}
 			labels[i] = "..." + name + ": " + typeString(p)
 		case optional:
-			labels[i] = name + "?: " + typeString(p)
+			labels[i] = name + "?: " + typeString(types.WithoutNil(p))
 		default:
 			labels[i] = name + ": " + typeString(p)
 		}

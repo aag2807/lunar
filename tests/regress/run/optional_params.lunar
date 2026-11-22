@@ -1,0 +1,9 @@
+-- name?: T is T or nil in the body; nil may be passed for it.
+local function opt(a: number, b?: number): number
+    if b == nil then
+        return a
+    end
+    return a + b
+end
+local maybe: number? = nil
+assert(opt(1) == 1 and opt(1, 2) == 3 and opt(1, nil) == 1 and opt(1, maybe) == 1)

@@ -36,8 +36,11 @@ func (e *TypeError) Error() string {
 type Environment struct {
 	store     map[string]Type
 	constVars map[string]bool // tracks which variables are const
-	outer     *Environment
-	syms      map[string]*Symbol // definitions made in this scope, for the index
+	// narrow holds what a check has refined a variable to in this scope
+	// (x ~= nil, not x, x and ...), over its declared type in store.
+	narrow map[string]Type
+	outer  *Environment
+	syms   map[string]*Symbol // definitions made in this scope, for the index
 }
 
 // NewEnvironment creates a new environment
@@ -58,6 +61,9 @@ func NewEnclosedEnvironment(outer *Environment) *Environment {
 
 // Get retrieves a type from the environment
 func (e *Environment) Get(name string) (Type, bool) {
+	if typ, ok := e.narrow[name]; ok {
+		return typ, true
+	}
 	typ, ok := e.store[name]
 	if !ok && e.outer != nil {
 		return e.outer.Get(name)
@@ -65,9 +71,30 @@ func (e *Environment) Get(name string) (Type, bool) {
 	return typ, ok
 }
 
+// Narrow records what a variable is known to be from here on in this
+// scope, without changing what it was declared as.
+func (e *Environment) Narrow(name string, typ Type) {
+	if e.narrow == nil {
+		e.narrow = map[string]Type{}
+	}
+	e.narrow[name] = typ
+}
+
+// DeclaredType is a variable's type as declared, ignoring narrowing: what
+// an assignment to it has to fit.
+func (e *Environment) DeclaredType(name string) (Type, bool) {
+	for env := e; env != nil; env = env.outer {
+		if typ, ok := env.store[name]; ok {
+			return typ, true
+		}
+	}
+	return nil, false
+}
+
 // Set sets a type in the environment
 func (e *Environment) Set(name string, typ Type) {
 	e.store[name] = typ
+	delete(e.narrow, name)
 }
 
 // SetConst sets a variable as const in the environment
@@ -729,7 +756,7 @@ func (c *Checker) hoistedSignature(fn *ast.FunctionDeclaration) *FunctionType {
 	hasRestParam := false
 
 	for i, param := range fn.Parameters {
-		paramType := c.resolveTypeExpression(param.Type)
+		paramType := c.paramType(param)
 		if param.IsRest {
 			hasRestParam = true
 			if _, ok := paramType.(*ArrayType); !ok {
@@ -1006,7 +1033,7 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		ctorHasRest := false
 		for i, param := range node.Constructor.Parameters {
 			if param.Type != nil {
-				params[i] = c.resolveTypeExpression(param.Type)
+				params[i] = c.paramType(param)
 			} else {
 				params[i] = Any
 			}
@@ -1052,7 +1079,7 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		optionalParams := make([]bool, len(method.Parameters))
 		hasRestParam := false
 		for i, param := range method.Parameters {
-			params[i] = c.resolveTypeExpression(param.Type)
+			params[i] = c.paramType(param)
 			if param.IsRest {
 				hasRestParam = true
 				if _, ok := params[i].(*ArrayType); !ok {
@@ -1319,7 +1346,7 @@ func (c *Checker) buildInterface(node *ast.InterfaceDeclaration, name string, sy
 	for _, method := range node.Methods {
 		params := make([]Type, len(method.Parameters))
 		for i, param := range method.Parameters {
-			params[i] = c.resolveTypeExpression(param.Type)
+			params[i] = c.paramType(param)
 		}
 		var returnType Type = Void
 		if method.ReturnType != nil {
@@ -1383,7 +1410,9 @@ func (c *Checker) registerEnum(node *ast.EnumDeclaration) {
 	for _, member := range node.Members {
 		if member.Value != nil {
 			// Validate the value expression (should be number or string)
-			_ = c.checkExpression(member.Value)
+			if IsStringType(c.checkExpression(member.Value)) {
+				enumType.Strings = true
+			}
 		}
 		// All enum members have the enum type itself, not the value type
 		// This ensures type safety: Color.Red has type Color, not number
@@ -1420,6 +1449,11 @@ func (c *Checker) addInterfaceProperty(iface *InterfaceType, prop *ast.PropertyD
 // withNil returns t | nil, or t itself when it already admits nil.
 func withNil(t Type) Type {
 	if _, admitsNil := removeNil(t); admitsNil {
+		return t
+	}
+	// any and unknown already include nil.
+	switch t.(type) {
+	case *AnyType, *UnknownType, *NilType:
 		return t
 	}
 	return &UnionType{Types: []Type{t, Nil}}
@@ -1584,7 +1618,7 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		optionalParams := make([]bool, len(node.Parameters))
 		hasRestParam := false
 		for i, param := range node.Parameters {
-			paramType := c.resolveTypeExpression(param.Type)
+			paramType := c.paramType(param)
 			if param.IsRest {
 				hasRestParam = true
 				if _, ok := paramType.(*ArrayType); !ok {
@@ -2839,7 +2873,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 			// or with the array it collects (...n: number[]); function type
 			// annotations already accept both, so declarations do too.
 			if param.Type != nil {
-				paramType := c.resolveTypeExpression(param.Type)
+				paramType := c.paramType(param)
 				if _, ok := paramType.(*ArrayType); !ok {
 					paramType = &ArrayType{ElementType: paramType}
 				}
@@ -2852,7 +2886,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 			// Validate optional parameter ordering. Only `name?:` says a
 			// parameter may be left out; `name: T?` may be nil, and before a
 			// required parameter it still has to be passed.
-			if paramIsOptional(param, c.resolveTypeExpression(param.Type)) {
+			if paramIsOptional(param, c.paramType(param)) {
 				hasOptional = hasOptional || param.IsOptional
 				optionalParams[i] = true
 			} else if hasOptional && !param.IsRest {
@@ -2861,7 +2895,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 			}
 
 			if param.Type != nil {
-				params[i] = c.resolveTypeExpression(param.Type)
+				params[i] = c.paramType(param)
 			} else {
 				params[i] = Any
 			}
@@ -3367,25 +3401,43 @@ func (c *Checker) checkIfWithNilNarrowing(node *ast.IfStatement, check nilCheck)
 	}
 
 	c.env = NewEnclosedEnvironment(prevEnv)
-	c.env.Set(check.varName, thenType)
+	c.env.Narrow(check.varName, thenType)
 	c.checkBlockStatement(node.Consequence)
 	c.env = prevEnv
 
 	if node.Alternative != nil {
 		c.env = NewEnclosedEnvironment(prevEnv)
-		c.env.Set(check.varName, elseType)
+		c.env.Narrow(check.varName, elseType)
 		c.checkBlockStatement(node.Alternative)
 		c.env = prevEnv
 	}
 
-	// `if x == nil then return end` leaves x non-nil for everything after it.
+	// `if x == nil then return end`, and `if not x then x = default end`,
+	// leave x non-nil for everything after the statement.
 	nilBranch := node.Alternative
 	if check.nilInThen {
 		nilBranch = node.Consequence
 	}
-	if nilBranch != nil && blockAlwaysExits(nilBranch) {
-		c.env.Set(check.varName, check.nonNil)
+	if nilBranch != nil && (blockAlwaysExits(nilBranch) || blockAssigns(nilBranch, check.varName)) {
+		c.env.Narrow(check.varName, check.nonNil)
 	}
+}
+
+// blockAssigns reports whether a block assigns name a value other than nil
+// as one of its own statements, as `if not x then x = default end` does.
+func blockAssigns(block *ast.BlockStatement, name string) bool {
+	for _, stmt := range block.Statements {
+		as, ok := stmt.(*ast.AssignmentStatement)
+		if !ok || len(as.Targets) != 1 || len(as.Values) != 1 {
+			continue
+		}
+		if ident, ok := as.Targets[0].(*ast.Identifier); ok && ident.Value == name {
+			if _, isNil := as.Values[0].(*ast.NilLiteral); !isNil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // blockAlwaysExits reports whether a block ends in a statement that leaves the
@@ -3762,6 +3814,19 @@ func (c *Checker) checkAssignmentStatement(node *ast.AssignmentStatement) {
 // checkAssignmentTarget checks one target of an assignment. A nil valueType
 // means the target is filled from a multi-value expression and is not checked.
 func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target ast.Expression, valueType Type) {
+	// Assigning a name defined nowhere defines a global, as in Lua:
+	// counter = 0.
+	if ident, ok := target.(*ast.Identifier); ok {
+		if _, found := c.env.Get(ident.Value); !found {
+			root := c.env
+			for root.outer != nil {
+				root = root.outer
+			}
+			root.Set(ident.Value, Any)
+			c.define(ident.Token, SymVariable, Any)
+		}
+	}
+
 	// Check if trying to assign to a const variable
 	if ident, ok := target.(*ast.Identifier); ok {
 		if c.env.IsConst(ident.Value) {
@@ -3808,8 +3873,14 @@ func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target as
 	if dot, ok := target.(*ast.DotExpression); ok && !dot.IsOptional {
 		if field, ok := dot.Right.(*ast.Identifier); ok {
 			if rec, ok := c.checkExpression(dot.Left).(*InterfaceType); ok && rec.Open {
-				_, hasProp := rec.Properties[field.Value]
+				current, hasProp := rec.Properties[field.Value]
 				_, hasMethod := rec.Methods[field.Value]
+				// A field given a literal (n = 1) takes other values of its
+				// kind (t.n = 2), as an unannotated local does.
+				if hasProp && valueType != nil && isLiteralType(current) &&
+					widenLiteralType(valueType).Equals(widenLiteralType(current)) {
+					rec.Properties[field.Value] = widenLiteralType(current)
+				}
 				if !hasProp && !hasMethod {
 					added := Type(Any)
 					if valueType != nil {
@@ -3822,6 +3893,13 @@ func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target as
 	}
 
 	targetType := c.checkExpression(target)
+	// A variable takes values of the type it was declared with, whatever a
+	// check has narrowed it to: `if not name then name = "x" end`.
+	if ident, ok := target.(*ast.Identifier); ok {
+		if declared, ok := c.env.DeclaredType(ident.Value); ok {
+			targetType = declared
+		}
+	}
 	if valueType == nil {
 		return
 	}
@@ -3916,7 +3994,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		for _, param := range node.Constructor.Parameters {
 			var paramType Type = Any
 			if param.Type != nil {
-				paramType = c.resolveTypeExpression(param.Type)
+				paramType = c.paramType(param)
 			}
 			c.env.Set(param.Name.Value, paramType)
 			c.define(param.Name.Token, SymParameter, paramType)
@@ -3985,7 +4063,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		for _, param := range method.Parameters {
 			var paramType Type = Any
 			if param.Type != nil {
-				paramType = c.resolveTypeExpression(param.Type)
+				paramType = c.paramType(param)
 			}
 			c.env.Set(param.Name.Value, paramType)
 			c.define(param.Name.Token, SymParameter, paramType)
@@ -4347,6 +4425,25 @@ func classNameOf(e ast.Expression) string {
 	return ""
 }
 
+// paramType is a parameter's annotated type; `name?: T` may be left out,
+// so in the body, and to a caller passing nil, it is T or nil.
+func (c *Checker) paramType(param *ast.Parameter) Type {
+	t := c.resolveTypeExpression(param.Type)
+	if param.IsOptional && !param.IsRest {
+		return withNil(t)
+	}
+	return t
+}
+
+// WithoutNil is t with nil taken out, for showing an optional parameter
+// as `name?: T` rather than `name?: T | nil`.
+func WithoutNil(t Type) Type {
+	if base, ok := removeNil(t); ok {
+		return base
+	}
+	return t
+}
+
 // withoutFirstParameter is fn as called with ':', which supplies the first
 // argument itself.
 func withoutFirstParameter(fn *FunctionType) *FunctionType {
@@ -4646,7 +4743,7 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 	hasRestParam := false
 	optionalParams := make([]bool, len(node.Parameters))
 	for i, param := range node.Parameters {
-		paramType := c.resolveTypeExpression(param.Type)
+		paramType := c.paramType(param)
 		if param.IsRest {
 			hasRestParam = true
 			if _, ok := paramType.(*ArrayType); !ok {
@@ -4737,7 +4834,7 @@ func (c *Checker) checkLogical(node *ast.InfixExpression, isAnd bool) Type {
 			narrowed = Nil
 		}
 		c.env = NewEnclosedEnvironment(prevEnv)
-		c.env.Set(check.varName, narrowed)
+		c.env.Narrow(check.varName, narrowed)
 	}
 	rightType := c.checkExpression(node.Right)
 	c.env = prevEnv
@@ -6170,7 +6267,7 @@ func (c *Checker) buildNamespace(node *ast.NamespaceDeclaration) *NamespaceType 
 			params := make([]Type, len(s.Parameters))
 			for i, param := range s.Parameters {
 				if param.Type != nil {
-					params[i] = c.resolveTypeExpression(param.Type)
+					params[i] = c.paramType(param)
 				} else {
 					params[i] = Any
 				}
@@ -6456,7 +6553,7 @@ func (c *Checker) declaredFunctionType(decl *ast.FunctionDeclaration) *FunctionT
 	hasRestParam := false
 	for i, param := range decl.Parameters {
 		if param.Type != nil {
-			paramType := c.resolveTypeExpression(param.Type)
+			paramType := c.paramType(param)
 			optionalParams[i] = !param.IsRest && paramIsOptional(param, paramType)
 			// If this is a rest parameter, wrap in array type if not already
 			if param.IsRest {
@@ -6561,7 +6658,7 @@ func (c *Checker) getFunctionType(stmt *ast.FunctionDeclaration) Type {
 	paramTypes := make([]Type, 0, len(stmt.Parameters))
 	for _, param := range stmt.Parameters {
 		if param.Type != nil {
-			paramTypes = append(paramTypes, c.resolveTypeExpression(param.Type))
+			paramTypes = append(paramTypes, c.paramType(param))
 		} else {
 			paramTypes = append(paramTypes, Any)
 		}

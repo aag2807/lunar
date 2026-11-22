@@ -1,0 +1,15 @@
+-- Assigning in a narrowed branch: if not name then name = "default" end
+local function greet(name: string?): string
+    if not name then
+        name = "default"
+    end
+    return "hi " .. name
+end
+assert(greet(nil) == "hi default" and greet("x") == "hi x")
+local function size(n: number?): number
+    if n == nil then
+        n = 0
+    end
+    return n + 1
+end
+assert(size(nil) == 1)

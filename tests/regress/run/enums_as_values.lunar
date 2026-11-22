@@ -1,0 +1,9 @@
+-- An enum member is its value: numbers add, strings concatenate.
+enum Color
+    Red
+    Green
+end
+local function plus(n: number): number
+    return n + 1
+end
+assert(Color.Green + 1 == 2 and plus(Color.Red) == 1)

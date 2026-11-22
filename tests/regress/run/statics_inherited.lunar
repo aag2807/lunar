@@ -1,0 +1,10 @@
+-- Static members are inherited, as at run time.
+class A
+    static count: number = 3
+    static f(): number
+        return 1
+    end
+end
+class B extends A
+end
+assert(B.f() == 1 and B.count == 3)

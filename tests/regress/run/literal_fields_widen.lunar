@@ -1,0 +1,6 @@
+-- Fields of an unannotated literal take values of the same kind later.
+local t = { n = 1, phase = "idle", on = false }
+t.n = 2
+t.phase = "running"
+t.on = true
+assert(t.n == 2 and t.phase == "running" and t.on)

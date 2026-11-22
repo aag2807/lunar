@@ -400,6 +400,9 @@ func (t *ArrayType) IsAssignableTo(other Type) bool {
 	if t.Equals(other) {
 		return true
 	}
+	if fitsUnionMember(t, other) {
+		return true
+	}
 	if _, isAny := other.(*AnyType); isAny {
 		return true
 	}
@@ -442,6 +445,9 @@ func (t *TableType) Equals(other Type) bool {
 	return t.KeyType.Equals(otherTable.KeyType) && t.ValueType.Equals(otherTable.ValueType)
 }
 func (t *TableType) IsAssignableTo(other Type) bool {
+	if fitsUnionMember(t, other) {
+		return true
+	}
 	if t.Equals(other) {
 		return true
 	}
@@ -493,6 +499,9 @@ func (t *FunctionType) Equals(other Type) bool {
 	return t.ReturnType.Equals(otherFunc.ReturnType)
 }
 func (t *FunctionType) IsAssignableTo(other Type) bool {
+	if fitsUnionMember(t, other) {
+		return true
+	}
 	if t.Equals(other) {
 		return true
 	}
@@ -765,6 +774,9 @@ func (t *TupleType) Equals(other Type) bool {
 	return true
 }
 func (t *TupleType) IsAssignableTo(other Type) bool {
+	if fitsUnionMember(t, other) {
+		return true
+	}
 	if t.Equals(other) {
 		return true
 	}
@@ -857,13 +869,89 @@ func (t *ClassType) IsAssignableTo(other Type) bool {
 			current = current.Parent
 		}
 	}
-	// Class is assignable to interfaces it implements
+	// Class is assignable to interfaces it implements, a parent implements,
+	// or one of those extends, and to any interface whose shape it has.
 	if otherInterface, ok := other.(*InterfaceType); ok {
-		for _, impl := range t.Implements {
-			if impl.Equals(otherInterface) {
+		for cl := t; cl != nil; cl = cl.Parent {
+			for _, impl := range cl.Implements {
+				if interfaceExtends(impl, otherInterface) {
+					return true
+				}
+			}
+		}
+		return classHasShape(t, otherInterface)
+	}
+	return false
+}
+
+// interfaceExtends says whether i is target or extends it, at any depth.
+func interfaceExtends(i, target *InterfaceType) bool {
+	if i.Equals(target) {
+		return true
+	}
+	for _, parent := range i.Extends {
+		if interfaceExtends(parent, target) {
+			return true
+		}
+	}
+	return false
+}
+
+// classHasShape says whether instances of cl have every field and method
+// iface requires, with fitting types.
+func classHasShape(cl *ClassType, iface *InterfaceType) bool {
+	if iface.Name == "" || len(iface.Properties)+len(iface.Methods) == 0 {
+		return false
+	}
+	for name, want := range iface.Properties {
+		if iface.OptionalProps[name] {
+			continue
+		}
+		got, ok := cl.GetProperty(name)
+		if !ok {
+			if getter, has := cl.GetGetter(name); has {
+				got, ok = getter.ReturnType, true
+			}
+		}
+		if !ok || !got.IsAssignableTo(want) {
+			return false
+		}
+	}
+	for name, want := range iface.Methods {
+		got, ok := cl.GetMethod(name)
+		if !ok || !got.IsAssignableTo(want) {
+			return false
+		}
+	}
+	for _, parent := range iface.Extends {
+		if !classHasShape(cl, parent) && !cl.IsAssignableTo(parent) {
+			return false
+		}
+	}
+	return true
+}
+
+// fitsUnionMember says whether t fits a union or optional target because
+// it fits one of its members.
+func fitsUnionMember(t, other Type) bool {
+	switch o := other.(type) {
+	case *UnionType:
+		for _, m := range o.Types {
+			if m != nil && t.IsAssignableTo(m) {
 				return true
 			}
 		}
+	case *OptionalType:
+		return t.IsAssignableTo(o.BaseType)
+	}
+	return false
+}
+
+// isLiteralType says whether t is a literal type such as "a" or 1.
+func isLiteralType(t Type) bool {
+	switch t.(type) {
+	case *StringLiteralType, *NumberLiteralType, *BooleanLiteralType:
+		return true
 	}
 	return false
 }
@@ -959,14 +1047,23 @@ func (t *ClassType) MemberNames() []string {
 
 // GetStaticProperty returns the type of a static property
 func (t *ClassType) GetStaticProperty(name string) (Type, bool) {
-	typ, ok := t.StaticProperties[name]
-	return typ, ok
+	for cl := t; cl != nil; cl = cl.Parent {
+		if typ, ok := cl.StaticProperties[name]; ok {
+			return typ, true
+		}
+	}
+	return nil, false
 }
 
-// GetStaticMethod returns the type of a static method
+// GetStaticMethod returns the type of a static method, inherited ones
+// included: a subclass's table falls back to its parent's.
 func (t *ClassType) GetStaticMethod(name string) (*FunctionType, bool) {
-	typ, ok := t.StaticMethods[name]
-	return typ, ok
+	for cl := t; cl != nil; cl = cl.Parent {
+		if typ, ok := cl.StaticMethods[name]; ok {
+			return typ, true
+		}
+	}
+	return nil, false
 }
 
 // IsReadonly checks if a property is readonly (including inherited properties)
@@ -1152,6 +1249,9 @@ func (t *InterfaceType) Equals(other Type) bool {
 	return t.Name == otherInterface.Name
 }
 func (t *InterfaceType) IsAssignableTo(other Type) bool {
+	if fitsUnionMember(t, other) {
+		return true
+	}
 	if t.Equals(other) {
 		return true
 	}
@@ -1344,6 +1444,9 @@ type EnumType struct {
 	Name       string
 	Members    map[string]Type
 	MemberSyms map[string]*Symbol // where each member is defined, for editors
+	// Strings is set when the members' values are strings; otherwise they
+	// are numbers. A member is its value, so it fits that base type.
+	Strings bool
 }
 
 func (t *EnumType) String() string {
@@ -1358,6 +1461,14 @@ func (t *EnumType) Equals(other Type) bool {
 }
 func (t *EnumType) IsAssignableTo(other Type) bool {
 	if t.Equals(other) {
+		return true
+	}
+	// Color.Red is a number (or a string), and passes for one; not for
+	// another enum.
+	if _, isString := other.(*StringType); isString && t.Strings {
+		return true
+	}
+	if _, isNumber := other.(*NumberType); isNumber && !t.Strings {
 		return true
 	}
 	if _, isAny := other.(*AnyType); isAny {
@@ -1433,6 +1544,8 @@ func IsNumericType(t Type) bool {
 	switch typ := t.(type) {
 	case *NumberType, *NumberLiteralType:
 		return true
+	case *EnumType:
+		return !typ.Strings
 	case *UnionType:
 		// 1 | 2 | 3 is a number whichever it is.
 		for _, m := range typ.Types {

@@ -1,0 +1,8 @@
+-- An array literal fits T[]? and a union with an array.
+local a: number[]? = { 4 }
+local function total(xs: number[]?): number
+    local s = 0
+    for _, v in ipairs(xs or {}) do s = s + v end
+    return s
+end
+assert(total({ 1, 2 }) == 3 and total(nil) == 0 and a ~= nil)

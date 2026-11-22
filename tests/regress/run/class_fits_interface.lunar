@@ -1,0 +1,22 @@
+-- A class fits an interface its parent implements, or one that is
+-- extended by an interface it implements, or whose shape it has.
+interface Named
+    name: string
+end
+interface Pet extends Named
+    speak(): string
+end
+class Animal implements Pet
+    constructor(public name: string)
+    end
+    speak(): string
+        return "..."
+    end
+end
+class Dog extends Animal
+end
+local function call(n: Named): string
+    return n.name
+end
+local p: Pet = Dog("rex")
+assert(call(Dog("rex")) == "rex" and call(p) == "rex")

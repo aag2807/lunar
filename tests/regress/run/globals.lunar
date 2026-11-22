@@ -1,0 +1,8 @@
+-- A global assigned in a script is defined there, as in Lua.
+counter = 0
+local function bump()
+    counter = counter + 1
+end
+bump()
+bump()
+assert(counter == 2)

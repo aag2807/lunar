@@ -310,3 +310,15 @@ print(e.hit(1), f.hit(1))
 		}
 	}
 }
+
+// Lua written into the root would be read back as hand-written scripts by
+// the next build.
+func TestOutDirMayNotBeTheRoot(t *testing.T) {
+	for _, cfg := range []string{`{"outDir": "."}`, `{"rootDir": "scripts", "outDir": "scripts"}`} {
+		root := tree(t, map[string]string{"lunar.config.json": cfg, "scripts/main.lunar": "print(1)\n", "main.lunar": "print(1)\n"})
+		_, diags := Open(Options{Dir: root})
+		if len(diags) != 1 || diags[0].Code != "config" || !strings.Contains(diags[0].Message, "outDir is the same folder as rootDir") {
+			t.Errorf("%s: %v", cfg, messagesOf(diags))
+		}
+	}
+}

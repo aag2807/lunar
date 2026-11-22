@@ -198,6 +198,11 @@ func Open(opts Options) (*Project, diag.List) {
 	if info, err := os.Stat(p.Root); err != nil || !info.IsDir() {
 		return nil, configError("rootDir '%s' is not a folder", p.Root)
 	}
+	// The next build would read the Lua it wrote back in as hand-written
+	// scripts. (Single-file compiles write next to the source instead.)
+	if p.OutDir != "" && len(opts.Files) == 0 && filepath.Clean(p.OutDir) == filepath.Clean(p.Root) {
+		return nil, configError("outDir is the same folder as rootDir (%s); put the Lua in a folder of its own, such as \"../build\"", p.Root)
+	}
 
 	// Declarations: everything under the root, plus the configured and
 	// flagged paths, which may be anywhere.

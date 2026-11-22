@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -42,9 +43,19 @@ func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
 // every path out, a panic included, reports the same way.
 func run(args []string, stdout, stderr io.Writer) (code int) {
 	rep := &reporter{stdout: stdout, stderr: stderr}
+	// JSON mode applies from the first line, so even a usage error comes
+	// out as JSON. --json=false turns it back off, as the flag would.
 	for _, a := range args {
-		if a == "--json" || a == "-json" {
-			rep.json = true
+		if a == "--" {
+			break
+		}
+		name, value, hasValue := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		if strings.HasPrefix(a, "-") && name == "json" {
+			on := true
+			if hasValue {
+				on, _ = strconv.ParseBool(value)
+			}
+			rep.json = on
 		}
 	}
 	defer func() {
@@ -86,12 +97,27 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 	outputFile := flags.String("o", "", "")
 	configFile := flags.String("config", "", "")
 
-	if err := flags.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			printHelp(stdout)
-			return exitOK
+	// Flags may come before or after the file name: parse up to each
+	// argument that is not a flag, keep it, and carry on after it.
+	var positional []string
+	for rest := args; ; {
+		if err := flags.Parse(rest); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				printHelp(stdout)
+				return exitOK
+			}
+			return rep.usage(err.Error())
 		}
-		return rep.usage(err.Error())
+		left := flags.Args()
+		if consumed := len(rest) - len(left); consumed > 0 && rest[consumed-1] == "--" {
+			positional = append(positional, left...) // everything after -- is a file
+			break
+		}
+		if len(left) == 0 {
+			break
+		}
+		positional = append(positional, left[0])
+		rest = left[1:]
 	}
 	if *showVersion {
 		fmt.Fprintln(stdout, version.String())
@@ -112,16 +138,19 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 
 	var once func() int
 	if buildMode {
-		if flags.NArg() > 0 {
+		if len(positional) > 0 {
 			return rep.usage("lunar build takes no file arguments; it compiles the whole project")
 		}
 		opts.ConfigPath, opts.OutDir = *projectFile, *outDir
 		once = func() int { return rep.build(opts) }
 	} else {
-		if flags.NArg() < 1 {
+		if len(positional) < 1 {
 			return rep.usage("no input file specified (usage: lunar [options] <input.lunar>, or lunar build)")
 		}
-		input := flags.Arg(0)
+		if len(positional) > 1 {
+			return rep.usage(fmt.Sprintf("one input file at a time (got %s); use lunar build for a project", strings.Join(positional, ", ")))
+		}
+		input := positional[0]
 		if _, err := os.Stat(input); err != nil {
 			return rep.usage(fmt.Sprintf("input file '%s' does not exist", input))
 		}

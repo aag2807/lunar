@@ -3,6 +3,7 @@
 package diag
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -66,7 +67,7 @@ type jsonDiagnostic struct {
 }
 
 func (d Diagnostic) MarshalJSON() ([]byte, error) {
-	return json.Marshal(jsonDiagnostic{
+	return marshalReadable(jsonDiagnostic{
 		Kind: "diagnostic", File: d.File, Line: d.Line, Column: d.Column,
 		EndLine: d.EndLine, EndColumn: d.EndColumn, Severity: d.Severity.String(),
 		Code: d.Code, Message: d.Message,
@@ -91,7 +92,19 @@ type jsonSummary struct {
 }
 
 func (s Summary) MarshalJSON() ([]byte, error) {
-	return json.Marshal(jsonSummary{Kind: "summary", Errors: s.Errors, Warnings: s.Warnings, Files: s.Files, Written: s.Written})
+	return marshalReadable(jsonSummary{Kind: "summary", Errors: s.Errors, Warnings: s.Warnings, Files: s.Files, Written: s.Written})
+}
+
+// marshalReadable is json.Marshal without escaping '<', '>' and '&', which
+// messages use ('<table literal>', '<stdlib>/lua.d.lunar').
+func marshalReadable(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
 // WriteJSON writes v as one line of JSON. HTML characters are not escaped,

@@ -3733,10 +3733,17 @@ func (c *Checker) checkAbstractMethodsImplemented(class *ClassType, parent *Clas
 		return
 	}
 
-	// Check this parent's abstract methods
+	// Check this parent's abstract methods: the class, or any class between
+	// it and this parent, has to implement each one.
 	for methodName := range parent.AbstractMethods {
-		// Check if child class has this method
-		if _, ok := class.Methods[methodName]; !ok {
+		implemented := false
+		for cl := class; cl != nil && cl != parent; cl = cl.Parent {
+			if _, ok := cl.Methods[methodName]; ok && !cl.AbstractMethods[methodName] {
+				implemented = true
+				break
+			}
+		}
+		if !implemented {
 			c.addError(
 				fmt.Sprintf("Class '%s' must implement abstract method '%s' from parent class '%s'",
 					class.Name, methodName, parent.Name),

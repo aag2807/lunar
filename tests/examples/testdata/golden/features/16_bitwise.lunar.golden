@@ -12,12 +12,12 @@ print(a << 2)
 
 print(a >> 2)
 
-assert((a & b) == 8)
+assert(a & b == 8)
 
-assert((a | b) == 14)
+assert(a | b == 14)
 
-assert((a ~ b) == 6)
+assert(a ~ b == 6)
 
-assert((a << 2) == 48)
+assert(a << 2 == 48)
 
-assert((a >> 2) == 3)
+assert(a >> 2 == 3)

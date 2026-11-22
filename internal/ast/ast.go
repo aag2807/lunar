@@ -132,6 +132,9 @@ type CallExpression struct {
 	// ConstructorCall is set by the type checker when the callee is a Lunar
 	// class, as in Enemy(3); codegen then calls its constructor, Enemy.new.
 	ConstructorCall bool
+	// Parenthesized is set for (f()), which in Lua keeps only the first of
+	// the values f returns.
+	Parenthesized bool
 }
 
 func (ce *CallExpression) expressionNode()      {}

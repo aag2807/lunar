@@ -4037,6 +4037,20 @@ func literalKeyName(key ast.Expression) (*ast.Identifier, bool) {
 	return nil, false
 }
 
+// withoutFirstParameter is fn as called with ':', which supplies the first
+// argument itself.
+func withoutFirstParameter(fn *FunctionType) *FunctionType {
+	rest := *fn
+	rest.Parameters = fn.Parameters[1:]
+	if len(fn.OptionalParams) > 0 {
+		rest.OptionalParams = fn.OptionalParams[1:]
+	}
+	if len(fn.ParamNames) > 0 {
+		rest.ParamNames = fn.ParamNames[1:]
+	}
+	return &rest
+}
+
 // isNilNode reports whether a node is absent, including a nil pointer of a
 // concrete node type inside the interface, as a failed parse leaves.
 func isNilNode(n any) bool {
@@ -4077,7 +4091,15 @@ func (c *Checker) checkExpressionKind(expr ast.Expression) Type {
 	case *ast.InfixExpression:
 		return c.checkInfixExpression(node)
 	case *ast.CallExpression:
-		return c.checkCallExpression(node)
+		result := c.checkCallExpression(node)
+		// (f()) is f's first value only.
+		if tuple, ok := result.(*TupleType); ok && node.Parenthesized {
+			if len(tuple.Elements) == 0 {
+				return Nil
+			}
+			return tuple.Elements[0]
+		}
+		return result
 	case *ast.DotExpression:
 		return c.checkDotExpression(node)
 	case *ast.IndexExpression:
@@ -4322,20 +4344,15 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 		}
 	}
 
-	// Resolve return type
+	// Resolve return type. Without an annotation it is inferred from the
+	// body's own returns, as for a function declaration; a function nested
+	// in this one collects its returns for itself.
 	var returnType Type = Void
+	prevInferring, prevInferred := c.inferringReturn, c.inferredReturns
+	c.inferringReturn = node.ReturnType == nil
+	c.inferredReturns = nil
 	if node.ReturnType != nil {
 		returnType = c.resolveTypeExpression(node.ReturnType)
-	} else {
-		// Try to infer return type for arrow functions with single expression body
-		if len(node.Body.Statements) == 1 {
-			if retStmt, ok := node.Body.Statements[0].(*ast.ReturnStatement); ok {
-				if len(retStmt.ReturnValues) == 1 {
-					// Infer from the single return expression
-					returnType = c.checkExpression(retStmt.ReturnValues[0])
-				}
-			}
-		}
 	}
 
 	// Set currentFunctionReturnType for return statement checking
@@ -4349,6 +4366,10 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 	}
 	c.checkBlockStatement(node.Body)
 	c.scopeEnd = prevScopeEnd
+	if c.inferringReturn {
+		returnType = combineReturnTypes(c.inferredReturns)
+	}
+	c.inferringReturn, c.inferredReturns = prevInferring, prevInferred
 
 	// Restore environment and return type
 	c.env = prevEnv
@@ -4440,6 +4461,14 @@ func (c *Checker) checkInfixExpression(node *ast.InfixExpression) Type {
 func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 	c.callee = node.Function
 	funcType := c.checkExpression(node.Function)
+
+	// obj:f(x) on a function stored in a field passes obj as f's first
+	// argument, so the arguments written fill the parameters after it.
+	if dot, ok := node.Function.(*ast.DotExpression); ok && dot.IsMethodCall && dot.MethodDispatch == ast.DispatchPlain {
+		if fn, ok := funcType.(*FunctionType); ok && len(fn.Parameters) > 0 {
+			funcType = withoutFirstParameter(fn)
+		}
+	}
 
 	// An optional call tolerates a missing callee, so unwrap the optional before
 	// checking the signature and make the result optional in turn.
@@ -4885,10 +4914,10 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 	// Record how the member resolved so codegen knows whether a call through
 	// this expression needs Lua's implicit-self ':' or a plain '.'.
 	resolved := func(dispatch string, resultType Type) Type {
-		// An explicit obj:method() in the source already states its intent.
-		if !node.IsMethodCall {
-			node.MethodDispatch = dispatch
-		}
+		// An explicit obj:method() in the source already states its intent
+		// for codegen; the dispatch is still recorded, so the call can count
+		// obj as the first argument of a plain function field.
+		node.MethodDispatch = dispatch
 		return wrapIfOptional(resultType)
 	}
 

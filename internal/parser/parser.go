@@ -9,21 +9,24 @@ import (
 	"strings"
 )
 
+// Lua's operator precedence, lowest first (Lua 5.4 manual, 3.4.8). '..'
+// and '^' are right associative.
 const (
 	_ int = iota
 	LOWEST
 	PIPE_PREC   // |> pipeline operator
-	OR_PREC     // or
-	BITWISE_OR  // |
-	BITWISE_XOR // ^
-	BITWISE_AND // &
+	OR_PREC     // or, ??
 	AND_PREC    // and
-	EQUALS      // ==
-	LESSGREATER // > OR <
+	COMPARE     // < > <= >= ~= ==
+	BITWISE_OR  // |
+	BITWISE_XOR // ~
+	BITWISE_AND // &
 	SHIFT       // << >>
-	SUM         // +
-	PRODUCT     // * / %
-	PREFIX      // -X OR !X OR not OR ~X
+	CONCAT      // ..
+	SUM         // + -
+	PRODUCT     // * / // %
+	PREFIX      // not # - ~ (unary), as
+	POWER       // ^
 	DOT         // foo.bar
 	CALL        // function(x)
 )
@@ -31,40 +34,50 @@ const (
 var precedences = map[lexer.TokenType]int{
 	lexer.AS:               PREFIX,    // type assertions have same precedence as prefix operators
 	lexer.PIPE_OP:          PIPE_PREC, // |> pipeline operator
-	lexer.NULLISH_COALESCE: OR_PREC,   // ?? has same precedence as ||
+	lexer.NULLISH_COALESCE: OR_PREC,   // ?? has same precedence as or
 	lexer.OR:               OR_PREC,
+	lexer.AND:              AND_PREC,
+	lexer.EQ:               COMPARE,
+	lexer.NOT_EQ:           COMPARE,
+	lexer.NOT_EQ_LUA:       COMPARE,
+	lexer.LT:               COMPARE,
+	lexer.GT:               COMPARE,
+	lexer.LT_EQ:            COMPARE,
+	lexer.GT_EQ:            COMPARE,
 	lexer.PIPE:             BITWISE_OR,
-	lexer.CARET:            PRODUCT, // exponentiation, as in Lua
 	lexer.TILDE:            BITWISE_XOR,
 	lexer.AMPERSAND:        BITWISE_AND,
-	lexer.AND:              AND_PREC,
-	lexer.EQ:               EQUALS,
-	lexer.NOT_EQ:           EQUALS,
-	lexer.NOT_EQ_LUA:       EQUALS,
-	lexer.LT:               LESSGREATER,
-	lexer.GT:               LESSGREATER,
-	lexer.LT_EQ:            LESSGREATER,
-	lexer.GT_EQ:            LESSGREATER,
 	lexer.LEFT_SHIFT:       SHIFT,
 	lexer.RIGHT_SHIFT:      SHIFT,
+	lexer.CONCAT:           CONCAT,
 	lexer.PLUS:             SUM,
 	lexer.MINUS:            SUM,
 	lexer.ASTERISK:         PRODUCT,
 	lexer.SLASH:            PRODUCT,
 	lexer.FLOOR_DIV:        PRODUCT,
 	lexer.MODULO:           PRODUCT,
+	lexer.CARET:            POWER,
 	lexer.DOT:              DOT,
 	lexer.OPTIONAL_CHAIN:   DOT,  // ?. has same precedence as .
 	lexer.LBRACKET:         CALL, // index has same precedence as function call
 	lexer.LPAREN:           CALL,
-	lexer.CONCAT:           SUM,
+	lexer.LBRACE:           CALL, // f{...}, a call with one table
+	lexer.STRING:           CALL, // f"...", a call with one string
 }
+
+// rightAssociative operators group from the right: a .. b .. c is
+// a .. (b .. c), and 2 ^ 3 ^ 2 is 2 ^ 9.
+var rightAssociative = map[lexer.TokenType]bool{lexer.CONCAT: true, lexer.CARET: true}
 
 type prefixParseFn func() ast.Expression
 type infixParseFn func(ast.Expression) ast.Expression
 
 type Parser struct {
 	l *lexer.Lexer
+
+	// stopAtPipe is set while a match arm's body is parsed, where a bare '|'
+	// begins the next arm; brackets and blocks clear it (clearStopAtPipe).
+	stopAtPipe bool
 
 	// bodilessDeclare is the last `declare function` written without an
 	// `end`, so a stray `end` after it can be explained as its body.
@@ -160,6 +173,8 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.OR, p.parseInfixExpression)
 	p.registerInfix(lexer.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(lexer.LPAREN, p.parseCallExpression)
+	p.registerInfix(lexer.LBRACE, p.parseSingleArgumentCall)
+	p.registerInfix(lexer.STRING, p.parseSingleArgumentCall)
 	p.registerInfix(lexer.DOT, p.parseDotExpression)
 	p.registerInfix(lexer.OPTIONAL_CHAIN, p.parseDotExpression)
 	p.registerInfix(lexer.COLON, p.parseMethodCallExpression)
@@ -332,6 +347,15 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	}
 
 	for precedence < p.peekPrecedence() {
+		// Inside a match arm, a bare '|' starts the next arm.
+		if p.stopAtPipe && p.peekTokenIs(lexer.PIPE) {
+			return leftExp
+		}
+		// f{...} and f"..." call only what Lua can call: a name, a field,
+		// an index, a call or a parenthesised expression.
+		if (p.peekTokenIs(lexer.LBRACE) || p.peekTokenIs(lexer.STRING)) && !isCallable(leftExp) {
+			return leftExp
+		}
 		infix := p.infixParseFns[p.peekToken.Type]
 		if infix == nil {
 			return leftExp
@@ -348,6 +372,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 }
 
 func (p *Parser) parseGroupedExpression() ast.Expression {
+	defer p.clearStopAtPipe()()
 	// We're at '('. Need to disambiguate between:
 	// - Grouped expression: (a + b)
 	// - Arrow function: (x: number) => x * 2
@@ -366,11 +391,18 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 	if p.peekTokenIs(lexer.IDENT) {
 		p.nextToken() // move from '(' to ident
 
-		// Now curToken = ident, check what follows
+		// Now curToken = ident, check what follows. (x: number) => and
+		// (a, b) => are arrow functions, but so does (s:len() + 1) begin:
+		// try the arrow function, and parse a grouped expression instead
+		// if that fails.
 		if p.peekTokenIs(lexer.COLON) || p.peekTokenIs(lexer.COMMA) {
-			// (ident : ...) or (ident , ...) - arrow function
 			p.RestoreState(savedState)
-			return p.parseArrowFunction()
+			errorsBefore := len(p.errors)
+			if arrow := p.parseArrowFunction(); !isNilNode(arrow) && len(p.errors) == errorsBefore {
+				return arrow
+			}
+			p.RestoreState(savedState)
+			return p.parseGroupedInner()
 		}
 
 		if p.peekTokenIs(lexer.RPAREN) {
@@ -386,12 +418,21 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 
 	// Restore state and parse as grouped expression
 	p.RestoreState(savedState)
+	return p.parseGroupedInner()
+}
+
+// parseGroupedInner parses ( expression ), starting on the '('.
+func (p *Parser) parseGroupedInner() ast.Expression {
 	p.nextToken() // consume '('
 
 	exp := p.parseExpression(LOWEST)
 
 	if !p.expectPeek(lexer.RPAREN) {
 		return nil
+	}
+	// (f()) keeps only f's first value, so these parentheses stay.
+	if call, ok := exp.(*ast.CallExpression); ok {
+		call.Parenthesized = true
 	}
 
 	return exp
@@ -528,6 +569,7 @@ func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
 }
 
 func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
+	defer p.clearStopAtPipe()()
 	list := []ast.Expression{}
 
 	if p.peekToken.Type == end {
@@ -617,7 +659,8 @@ func (p *Parser) isColonMethodCall() bool {
 	}
 
 	p.nextToken() // curToken = method name
-	return p.peekTokenIs(lexer.LPAREN)
+	// obj:m(...), obj:m{...} and obj:m"..."
+	return p.peekTokenIs(lexer.LPAREN) || p.peekTokenIs(lexer.LBRACE) || p.peekTokenIs(lexer.STRING)
 }
 
 // isOptionalIndex reports whether a '?' in peek position starts an optional
@@ -754,6 +797,7 @@ func (p *Parser) Parse() []ast.Statement {
 // Lua, a return has to be the last statement of its block; anything after it
 // is reported once, since the emitted Lua would not load.
 func (p *Parser) parseStatements(terminator lexer.TokenType) []ast.Statement {
+	defer p.clearStopAtPipe()()
 	statements := []ast.Statement{}
 	var returned *ast.ReturnStatement
 	reported := false
@@ -786,6 +830,9 @@ func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 	}
 
 	precedence := p.curPrecedence()
+	if rightAssociative[p.curToken.Type] {
+		precedence-- // the right side may hold the same operator again
+	}
 	p.nextToken()
 	expression.Right = p.parseExpression(precedence)
 
@@ -2616,6 +2663,7 @@ func (p *Parser) parseBreakStatement() *ast.BreakStatement {
 }
 
 func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
+	defer p.clearStopAtPipe()()
 	exp := &ast.IndexExpression{
 		Token: p.curToken,
 		Left:  left,
@@ -2632,6 +2680,7 @@ func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 }
 
 func (p *Parser) parseTableLiteral() ast.Expression {
+	defer p.clearStopAtPipe()()
 	table := &ast.TableLiteral{
 		Token:  p.curToken,
 		Pairs:  make(map[ast.Expression]ast.Expression),
@@ -3701,8 +3750,12 @@ func (p *Parser) parseMatchCase() *ast.MatchCase {
 	p.nextToken() // move to body expression
 
 	// Parse the body expression
-	// Use BITWISE_OR precedence to prevent consuming the next '|' as an operator
-	matchCase.Body = p.parseExpression(BITWISE_OR)
+	// The body ends at the next '|', which starts the next arm; a bitwise
+	// or inside an arm goes in parentheses.
+	saved := p.stopAtPipe
+	p.stopAtPipe = true
+	matchCase.Body = p.parseExpression(LOWEST)
+	p.stopAtPipe = saved
 	if matchCase.Body == nil {
 		p.addError("expected expression after '->' in match case", p.curToken)
 		return nil
@@ -3865,4 +3918,44 @@ func (p *Parser) parseStructPattern() ast.Pattern {
 	}
 
 	return pattern
+}
+
+// clearStopAtPipe makes '|' an operator again inside brackets or a block,
+// even within a match arm, and returns what restores the arm's setting:
+// defer p.clearStopAtPipe()().
+func (p *Parser) clearStopAtPipe() func() {
+	saved := p.stopAtPipe
+	p.stopAtPipe = false
+	return func() { p.stopAtPipe = saved }
+}
+
+// parseSingleArgumentCall parses Lua's f{...} and f"...": a call whose one
+// argument is a table constructor or a string, written without parentheses.
+func (p *Parser) parseSingleArgumentCall(left ast.Expression) ast.Expression {
+	call := &ast.CallExpression{Token: p.curToken, Function: left}
+	var arg ast.Expression
+	if p.curTokenIs(lexer.LBRACE) {
+		arg = p.parseTableLiteral()
+	} else {
+		arg = p.parseStringLiteral()
+	}
+	if isNilNode(arg) {
+		return nil
+	}
+	call.Arguments = []ast.Expression{arg}
+	return call
+}
+
+// isCallable says whether Lua allows a call on e without parentheses
+// around it: a name, a field or method, an index, or a call.
+func isCallable(e ast.Expression) bool {
+	switch n := e.(type) {
+	case *ast.Identifier, *ast.DotExpression, *ast.IndexExpression, *ast.SuperExpression:
+		return true
+	case *ast.CallExpression:
+		return true
+	default:
+		_ = n
+		return false
+	}
 }

@@ -1093,6 +1093,9 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 	case *ast.InfixExpression:
 		return g.generateInfixExpression(node)
 	case *ast.CallExpression:
+		if node.Parenthesized {
+			return "(" + g.generateCallExpression(node) + ")"
+		}
 		return g.generateCallExpression(node)
 	case *ast.DotExpression:
 		return g.generateDotExpression(node)
@@ -1303,6 +1306,9 @@ func (g *Generator) generatePrefixExpression(node *ast.PrefixExpression) string 
 	if operator == "~" {
 		if g.target == "lua53" || g.target == "lua54" {
 			// Lua 5.3+ supports ~ natively
+			if needsUnaryParens(node.Right) {
+				return fmt.Sprintf("~(%s)", right)
+			}
 			return fmt.Sprintf("~%s", right)
 		} else if g.target == "lua52" {
 			// Lua 5.2 uses bit32 library
@@ -1313,8 +1319,9 @@ func (g *Generator) generatePrefixExpression(node *ast.PrefixExpression) string 
 		}
 	}
 
-	// Only add parentheses if the right side is a complex expression
-	if needsParentheses(node.Right) {
+	// The operand needs parentheses unless it binds tighter than a unary
+	// operator (only '^' does): -(2 + 3), but -2 ^ 2.
+	if needsUnaryParens(node.Right) {
 		return fmt.Sprintf("%s (%s)", operator, right)
 	}
 	return fmt.Sprintf("%s %s", operator, right)
@@ -1332,44 +1339,8 @@ func (g *Generator) generateInfixExpression(node *ast.InfixExpression) string {
 		return fmt.Sprintf("(function() local __temp = %s; if __temp ~= nil then return __temp else return %s end end)()", left, right)
 	}
 
-	// Handle integer division for LuaJIT compatibility
-	if operator == "//" {
-		if g.IsLuaJIT() {
-			// LuaJIT doesn't support //, use math.floor(a/b)
-			return fmt.Sprintf("math.floor(%s / %s)", left, right)
-		}
-		// Lua 5.3+ supports // natively
-		return fmt.Sprintf("%s // %s", left, right)
-	}
-
-	// Handle bitwise operators for Lua 5.1/5.2/LuaJIT compatibility
-	bitwiseOp := ""
-	switch operator {
-	case "&":
-		bitwiseOp = "band"
-	case "|":
-		bitwiseOp = "bor"
-	case "~":
-		// Binary '~' is XOR in Lua; '^' stays exponentiation on every target.
-		bitwiseOp = "bxor"
-	case "<<":
-		bitwiseOp = "lshift"
-	case ">>":
-		bitwiseOp = "rshift"
-	}
-
-	if bitwiseOp != "" {
-		if g.target == "lua53" || g.target == "lua54" {
-			// Lua 5.3+ supports bitwise operators natively
-			return fmt.Sprintf("%s %s %s", left, operator, right)
-		} else if g.target == "lua52" {
-			// Lua 5.2 uses bit32 library
-			return fmt.Sprintf("bit32.%s(%s, %s)", bitwiseOp, left, right)
-		} else {
-			// LuaJIT and Lua 5.1 use bit library
-			return fmt.Sprintf("bit.%s(%s, %s)", bitwiseOp, left, right)
-		}
-	}
+	// '//' and the bitwise operators are Lua 5.3's own, so they go through
+	// the same parenthesisation as every other operator.
 
 	// Convert operators to Lua equivalents
 	switch operator {
@@ -1792,35 +1763,42 @@ func needsParentheses(expr ast.Expression) bool {
 	}
 }
 
-// needsParensInInfix determines if parentheses are needed for an operand in an infix expression
+// needsUnaryParens says whether a unary operator's operand needs
+// parentheses: any binary operation but '^'.
+func needsUnaryParens(expr ast.Expression) bool {
+	infix, ok := expr.(*ast.InfixExpression)
+	return ok && getOperatorPrecedence(infix.Operator) <= unaryPrecedence
+}
+
+// needsParensInInfix says whether an operand of an infix operator needs
+// parentheses in Lua: an operator that binds less tightly always does; one
+// of the same level does on the right of a left-associative operator and on
+// the left of a right-associative one ('..', '^'). A unary operand on the
+// left of '^' does too, since -2 ^ 2 is -(2 ^ 2).
 func needsParensInInfix(expr ast.Expression, parentOp string, isLeft bool) bool {
+	parentPrec := getOperatorPrecedence(parentOp)
+	if _, unary := expr.(*ast.PrefixExpression); unary {
+		return isLeft && parentPrec > unaryPrecedence
+	}
 	infixExpr, ok := expr.(*ast.InfixExpression)
 	if !ok {
 		return false
 	}
-
-	childOp := infixExpr.Operator
-	parentPrec := getOperatorPrecedence(parentOp)
-	childPrec := getOperatorPrecedence(childOp)
-
-	// Need parentheses if child has lower precedence
-	if childPrec < parentPrec {
-		return true
+	childPrec := getOperatorPrecedence(infixExpr.Operator)
+	if childPrec != parentPrec {
+		return childPrec < parentPrec
 	}
-
-	// For same precedence, need parentheses on right for non-associative/right-associative operators
-	if childPrec == parentPrec && !isLeft {
-		// Most operators in Lua are left-associative, so right operand needs parentheses
-		// Exception: power operator ^ is right-associative
-		if parentOp != "^" {
-			return true
-		}
+	if parentOp == ".." || parentOp == "^" {
+		return isLeft
 	}
-
-	return false
+	return !isLeft
 }
 
-// getOperatorPrecedence returns the precedence level of an operator (higher = tighter binding)
+// unaryPrecedence is the level of not, #, - and ~ as prefixes.
+const unaryPrecedence = 11
+
+// getOperatorPrecedence returns the level of a binary operator in Lua
+// (higher binds tighter), as in the Lua 5.4 manual, section 3.4.8.
 func getOperatorPrecedence(op string) int {
 	switch op {
 	case "or", "||":
@@ -1829,16 +1807,22 @@ func getOperatorPrecedence(op string) int {
 		return 2
 	case "<", ">", "<=", ">=", "~=", "!=", "==":
 		return 3
-	case "..":
+	case "|":
 		return 4
-	case "+", "-":
+	case "~":
 		return 5
-	case "*", "/", "%":
+	case "&":
 		return 6
-	case "not", "!", "unary-":
+	case "<<", ">>":
 		return 7
-	case "^":
+	case "..":
 		return 8
+	case "+", "-":
+		return 9
+	case "*", "/", "//", "%":
+		return 10
+	case "^":
+		return 12
 	default:
 		return 0
 	}

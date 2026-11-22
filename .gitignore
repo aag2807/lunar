@@ -8,6 +8,7 @@
 !examples/nvim-lsp-config.lua
 !editors/**/*.lua
 !tests/**/testdata/**/*.lua
+!tests/luacompat/*.lua
 
 # Test files (root directory only)
 /*test*.lunar

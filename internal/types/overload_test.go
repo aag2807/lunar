@@ -1,5 +1,9 @@
 package types
 
+// Overloads describe external APIs, so they are written as declare
+// function signatures; an implementation has one body (see
+// TestImplementationOverloadIsAnError).
+
 import (
 	"lunar/internal/lexer"
 	"lunar/internal/parser"
@@ -8,13 +12,9 @@ import (
 
 func TestBasicFunctionOverloading(t *testing.T) {
 	input := `
-function add(a: number, b: number): number
-	return a + b
-end
+declare function add(a: number, b: number): number
 
-function add(a: string, b: string): string
-	return a .. b
-end
+declare function add(a: string, b: string): string
 
 local numResult: number = add(1, 2)
 local strResult: string = add("hello", "world")
@@ -41,13 +41,9 @@ local strResult: string = add("hello", "world")
 
 func TestOverloadWithDifferentArityNumber(t *testing.T) {
 	input := `
-function format(value: number): string
-	return tostring(value)
-end
+declare function format(value: number): string
 
-function format(value: number, decimals: number): string
-	return tostring(value)
-end
+declare function format(value: number, decimals: number): string
 
 local result1: string = format(42)
 local result2: string = format(3.14, 2)
@@ -74,13 +70,9 @@ local result2: string = format(3.14, 2)
 
 func TestOverloadNoMatchError(t *testing.T) {
 	input := `
-function process(x: number): number
-	return x
-end
+declare function process(x: number): number
 
-function process(x: string): string
-	return x
-end
+declare function process(x: string): string
 
 local result = process(true)
 `
@@ -117,13 +109,9 @@ local result = process(true)
 
 func TestOverloadWithReturnTypeSelection(t *testing.T) {
 	input := `
-function getValue(key: number): number
-	return key
-end
+declare function getValue(key: number): number
 
-function getValue(key: string): string
-	return key
-end
+declare function getValue(key: string): string
 
 local numVal: number = getValue(42)
 local strVal: string = getValue("test")
@@ -150,13 +138,9 @@ local strVal: string = getValue("test")
 
 func TestOverloadWrongReturnType(t *testing.T) {
 	input := `
-function transform(x: number): number
-	return x
-end
+declare function transform(x: number): number
 
-function transform(x: string): string
-	return x
-end
+declare function transform(x: string): string
 
 -- This should error: number overload returns number, not string
 local result: string = transform(42)
@@ -180,17 +164,11 @@ local result: string = transform(42)
 
 func TestOverloadWithThreeSignatures(t *testing.T) {
 	input := `
-function parse(value: number): number
-	return value
-end
+declare function parse(value: number): number
 
-function parse(value: string): string
-	return value
-end
+declare function parse(value: string): string
 
-function parse(value: boolean): boolean
-	return value
-end
+declare function parse(value: boolean): boolean
 
 local num: number = parse(42)
 local str: string = parse("hello")
@@ -218,13 +196,9 @@ local bool: boolean = parse(true)
 
 func TestOverloadWithOptionalParameter(t *testing.T) {
 	input := `
-function greet(name: string): string
-	return "Hello, " .. name
-end
+declare function greet(name: string): string
 
-function greet(name: string, formal: boolean): string
-	return "Greetings, " .. name
-end
+declare function greet(name: string, formal: boolean): string
 
 local casual: string = greet("World")
 local formal: string = greet("World", true)
@@ -251,13 +225,9 @@ local formal: string = greet("World", true)
 
 func TestOverloadSpecificitySelection(t *testing.T) {
 	input := `
-function handle(x: any): any
-	return x
-end
+declare function handle(x: any): any
 
-function handle(x: number): number
-	return x
-end
+declare function handle(x: number): number
 
 -- Should select the number overload (more specific)
 local result: number = handle(42)
@@ -284,13 +254,9 @@ local result: number = handle(42)
 
 func TestOverloadWithUnionTypes(t *testing.T) {
 	input := `
-function stringify(value: number | string): string
-	return tostring(value)
-end
+declare function stringify(value: number | string): string
 
-function stringify(value: boolean): string
-	return tostring(value)
-end
+declare function stringify(value: boolean): string
 
 local num: string = stringify(42)
 local str: string = stringify("hello")
@@ -348,13 +314,9 @@ print(true)
 
 func TestOverloadArgumentCountError(t *testing.T) {
 	input := `
-function calc(a: number): number
-	return a
-end
+declare function calc(a: number): number
 
-function calc(a: number, b: number): number
-	return a + b
-end
+declare function calc(a: number, b: number): number
 
 -- Should error: no overload takes 3 arguments
 local result = calc(1, 2, 3)

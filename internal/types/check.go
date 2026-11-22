@@ -243,6 +243,12 @@ type Checker struct {
 	// treated as an overload of itself.
 	hoisted map[string]*FunctionType
 
+	// declaredFuncs are the function types that came from `declare`, which
+	// an implementation may provide; funcDefs records where each
+	// implemented function was defined.
+	declaredFuncs map[*FunctionType]bool
+	funcDefs      map[*FunctionType]lexer.Token
+
 	// exprTypes records the type computed for each expression checked.
 	exprTypes map[ast.Expression]Type
 
@@ -459,12 +465,24 @@ func (c *Checker) checkModuleShape(statements []ast.Statement) {
 // normal; without this, forward references and mutual recursion both fail with
 // "Undefined variable".
 func (c *Checker) hoistFunctionSignatures(statements []ast.Statement) {
+	// A name the file declares is published by its declaration, which an
+	// implementation is then checked against; a placeholder would get in
+	// the way.
+	declared := map[string]bool{}
+	for _, stmt := range statements {
+		if ds, ok := stmt.(*ast.DeclareStatement); ok {
+			if fn, ok := ds.Declaration.(*ast.FunctionDeclaration); ok && fn.Name != nil {
+				declared[fn.Name.Value] = true
+			}
+		}
+	}
+
 	for _, stmt := range statements {
 		if exp, ok := stmt.(*ast.ExportStatement); ok {
 			stmt = exp.Statement
 		}
 		fn, ok := stmt.(*ast.FunctionDeclaration)
-		if !ok || fn.Name == nil {
+		if !ok || fn.Name == nil || declared[fn.Name.Value] {
 			continue
 		}
 
@@ -2383,6 +2401,10 @@ func isConstAssertion(expr ast.Expression) bool {
 
 // checkFunctionDeclaration checks a function declaration
 func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
+	if node.IsAsync {
+		c.addError("'async' functions are not supported: nothing would resume them. Use coroutine.create and coroutine.resume", node.Token)
+	}
+
 	// Check decorators
 	for _, decorator := range node.Decorators {
 		c.checkDecorator(decorator)
@@ -2480,23 +2502,40 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		}
 	}
 
-	// Check if function with same name already exists (for method overloading)
+	// A name can have one implementation. Overloads describe external APIs
+	// and are written as `declare function` signatures; two bodies for one
+	// global would leave only the last at run time.
 	if existingType, ok := c.env.Get(node.Name.Value); ok && existingType != Type(funcType) {
-		if existingFunc, ok := existingType.(*FunctionType); ok {
-			// Add this as an overload to the existing function
-			existingFunc.Overloads = append(existingFunc.Overloads, funcType)
-			// Don't re-set in environment, the existing function reference is updated
-		} else {
-			// Name exists but is not a function - error
+		existingFunc, isFunc := existingType.(*FunctionType)
+		_, inThisScope := c.env.store[node.Name.Value]
+		switch {
+		case isFunc && c.declaredFuncs[existingFunc]:
+			// Implementing a declared function: it has to fit the declaration,
+			// which stays the type callers see.
+			if len(existingFunc.Overloads) == 0 && !funcType.IsAssignableTo(existingFunc) {
+				c.addError(fmt.Sprintf("Function '%s' does not match its declaration '%s'",
+					node.Name.Value, existingFunc.String()), node.Name.Token)
+			}
+		case isFunc && inThisScope && !node.IsLocal && c.funcDefs[existingFunc].Line > 0:
+			c.addError(fmt.Sprintf("Function '%s' is already defined at line %d. Overloads can only be declared with 'declare function'",
+				node.Name.Value, c.funcDefs[existingFunc].Line), node.Name.Token)
+		case !isFunc && inThisScope:
 			c.addError(
 				fmt.Sprintf("Cannot overload '%s' - it is not a function", node.Name.Value),
 				node.Token,
 			)
 			c.env.Set(node.Name.Value, funcType)
+		default:
+			// A new binding, possibly shadowing one from an outer scope.
+			c.env.Set(node.Name.Value, funcType)
 		}
 	} else {
 		c.env.Set(node.Name.Value, funcType)
 	}
+	if c.funcDefs == nil {
+		c.funcDefs = make(map[*FunctionType]lexer.Token)
+	}
+	c.funcDefs[funcType] = node.Name.Token
 
 	// Check function body in new scope
 	prevReturnType := c.currentFunctionReturnType
@@ -4986,6 +5025,8 @@ func (c *Checker) applyConstToTableLiteral(node *ast.TableLiteral) Type {
 
 // checkAwaitExpression checks an await expression
 func (c *Checker) checkAwaitExpression(node *ast.AwaitExpression) Type {
+	c.addError("'await' is not supported: use coroutine.yield inside a coroutine", node.Token)
+
 	// Check the expression being awaited
 	exprType := c.checkExpression(node.Expression)
 
@@ -5329,6 +5370,10 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 
 	case *ast.FunctionDeclaration:
 		funcType := c.declaredFunctionType(decl)
+		if c.declaredFuncs == nil {
+			c.declaredFuncs = make(map[*FunctionType]bool)
+		}
+		c.declaredFuncs[funcType] = true
 
 		// Check if function with same name already exists (for method overloading)
 		if existingType, ok := c.env.Get(decl.Name.Value); ok {

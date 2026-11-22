@@ -194,9 +194,9 @@ interface Repository
     findById: function(id: number): any
 end
 
-async function loadUser(repo: any, id: number): string
-    -- Combine optional chaining, nullish coalescing, and async
-    const user = await repo?.findById?.(id)
+function loadUser(repo: any, id: number): string
+    -- Combine optional chaining and nullish coalescing
+    const user = repo?.findById?.(id)
     const name = user?.name ?? "Unknown User"
     const status = user?.active ?? false
 

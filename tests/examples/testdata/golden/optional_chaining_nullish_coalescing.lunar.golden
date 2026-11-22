@@ -75,10 +75,8 @@ function calculateTotal(order)
 end
 
 function loadUser(repo, id)
-    return coroutine.create(function()
-        local user = coroutine.yield((function() local __fn = (function() local __temp = repo; if __temp ~= nil then return __temp.findById else return nil end end)(); if __fn ~= nil then return __fn(id) else return nil end end)())
-        local name = (function() local __temp = (function() local __temp = user; if __temp ~= nil then return __temp.name else return nil end end)(); if __temp ~= nil then return __temp else return "Unknown User" end end)()
-        local status = (function() local __temp = (function() local __temp = user; if __temp ~= nil then return __temp.active else return nil end end)(); if __temp ~= nil then return __temp else return false end end)()
-        return name .. " (Active: " .. tostring(status) .. ")"
-    end)
+    local user = (function() local __fn = (function() local __temp = repo; if __temp ~= nil then return __temp.findById else return nil end end)(); if __fn ~= nil then return __fn(id) else return nil end end)()
+    local name = (function() local __temp = (function() local __temp = user; if __temp ~= nil then return __temp.name else return nil end end)(); if __temp ~= nil then return __temp else return "Unknown User" end end)()
+    local status = (function() local __temp = (function() local __temp = user; if __temp ~= nil then return __temp.active else return nil end end)(); if __temp ~= nil then return __temp else return false end end)()
+    return name .. " (Active: " .. tostring(status) .. ")"
 end

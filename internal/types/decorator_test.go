@@ -3,6 +3,7 @@ package types
 import (
 	"lunar/internal/lexer"
 	"lunar/internal/parser"
+	"strings"
 	"testing"
 )
 
@@ -205,9 +206,9 @@ end
 	}
 }
 
-// Test decorator on async function
+// A decorated async function is still an async function, which is refused.
 func TestDecoratorOnAsyncFunction(t *testing.T) {
-	input := `
+	errs := checkSource(t, `
 function cache(fn: any): any
 	return fn
 end
@@ -216,23 +217,8 @@ end
 async function fetchData(): string
 	return "data"
 end
-`
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
-
-	checker := NewChecker()
-	errors := checker.Check(statements)
-
-	if len(errors) > 0 {
-		t.Errorf("Expected no errors, got %d:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %s", err.Message)
-		}
+`)
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, "'async' functions are not supported") {
+		t.Fatalf("got %v", messages(errs))
 	}
 }

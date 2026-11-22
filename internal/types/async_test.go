@@ -1,202 +1,40 @@
 package types
 
 import (
-	"lunar/internal/lexer"
-	"lunar/internal/parser"
+	"strings"
 	"testing"
 )
 
-// Test basic async function declaration
-func TestAsyncFunctionBasic(t *testing.T) {
-	input := `
+// async/await compiled to a coroutine that nothing ever resumed, so the body
+// never ran. Until there is a scheduler to run them, both are refused.
+func TestAsyncFunctionIsRefused(t *testing.T) {
+	errs := checkSource(t, `
 async function fetchData(): string
 	return "data"
 end
-`
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
-
-	checker := NewChecker()
-	errors := checker.Check(statements)
-
-	if len(errors) > 0 {
-		t.Errorf("Expected no errors, got %d:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %s", err.Message)
-		}
+`)
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, "'async' functions are not supported") ||
+		!strings.Contains(errs[0].Message, "coroutine") {
+		t.Fatalf("got %v", messages(errs))
 	}
 }
 
-// Test async function with await
-func TestAsyncFunctionWithAwait(t *testing.T) {
-	input := `
-async function fetchData(): string
-	return "user data"
+func TestAwaitIsRefused(t *testing.T) {
+	errs := checkSource(t, `
+function load(): any
+	return nil
 end
-
-async function fetchUser(): string
-	local data = await fetchData()
-	return data
+function run(): void
+	local x = await load()
 end
-`
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
-
-	checker := NewChecker()
-	errors := checker.Check(statements)
-
-	if len(errors) > 0 {
-		t.Errorf("Expected no errors, got %d:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %s", err.Message)
+`)
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Message, "'await' is not supported") {
+			found = true
 		}
 	}
-}
-
-// Test await expression
-func TestAwaitExpression(t *testing.T) {
-	input := `
-async function computeValue(): number
-	return 42
-end
-
-async function loadData(): number
-	local result = await computeValue()
-	return result + 1
-end
-`
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
-
-	checker := NewChecker()
-	errors := checker.Check(statements)
-
-	if len(errors) > 0 {
-		t.Errorf("Expected no errors, got %d:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %s", err.Message)
-		}
-	}
-}
-
-// Test multiple async functions
-func TestMultipleAsyncFunctions(t *testing.T) {
-	input := `
-async function fetchUsers(): string
-	return "users"
-end
-
-async function fetchPosts(): string
-	return "posts"
-end
-
-async function loadAll(): string
-	local users = await fetchUsers()
-	local posts = await fetchPosts()
-	return users
-end
-`
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
-
-	checker := NewChecker()
-	errors := checker.Check(statements)
-
-	if len(errors) > 0 {
-		t.Errorf("Expected no errors, got %d:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %s", err.Message)
-		}
-	}
-}
-
-// Test async function with parameters
-func TestAsyncFunctionWithParams(t *testing.T) {
-	input := `
-async function fetchById(id: number): string
-	return "item"
-end
-
-async function processData(data: string, count: number): boolean
-	local result = await fetchById(count)
-	return true
-end
-`
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
-
-	checker := NewChecker()
-	errors := checker.Check(statements)
-
-	if len(errors) > 0 {
-		t.Errorf("Expected no errors, got %d:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %s", err.Message)
-		}
-	}
-}
-
-// Test await in control flow
-func TestAwaitInControlFlow(t *testing.T) {
-	input := `
-async function checkCondition(): boolean
-	return true
-end
-
-async function process(): number
-	if await checkCondition() then
-		return 1
-	else
-		return 0
-	end
-end
-`
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
-
-	checker := NewChecker()
-	errors := checker.Check(statements)
-
-	if len(errors) > 0 {
-		t.Errorf("Expected no errors, got %d:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %s", err.Message)
-		}
+	if !found {
+		t.Fatalf("got %v", messages(errs))
 	}
 }

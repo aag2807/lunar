@@ -28,6 +28,23 @@ end
 
 print(localFn(1))
 
+local spins = 0
+
+while true do
+    spins = spins + 1
+    if spins == 3 then
+        break
+    end
+end
+
+local maybe = nil
+
+local seen = "none"
+
+if maybe then
+    seen = "some " .. tostring(maybe + 1)
+end
+
 assert(t.a == 1 and t.b == 2)
 
 assert(i == 3)
@@ -37,3 +54,7 @@ assert(s == "xy")
 assert(nested.list[2] == 2)
 
 assert(localFn(1) == 2)
+
+assert(spins == 3)
+
+assert(seen == "none")

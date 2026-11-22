@@ -2477,15 +2477,19 @@ func (c *Checker) checkReturnStatement(node *ast.ReturnStatement) {
 	}
 }
 
+// checkCondition accepts any value as a condition, as Lua does: everything
+// but nil and false is true. Only an expression with no value at all, such as
+// a call to a function returning void, cannot be tested.
+func (c *Checker) checkCondition(condType Type, kind string, tok lexer.Token) {
+	if IsVoidType(condType) {
+		c.addError(fmt.Sprintf("%s condition has no value: the expression returns nothing", kind), tok)
+	}
+}
+
 // checkIfStatement checks an if statement
 func (c *Checker) checkIfStatement(node *ast.IfStatement) {
 	condType := c.checkExpression(node.Condition)
-	if !IsBooleanType(condType) && !condType.Equals(Any) {
-		c.addError(
-			fmt.Sprintf("If condition must be boolean, got '%s'", condType.String()),
-			node.Token,
-		)
-	}
+	c.checkCondition(condType, "If", node.Token)
 
 	// A nil check refines an optional in both branches, and when the nil branch
 	// always exits it refines the rest of the enclosing block too.
@@ -2550,6 +2554,18 @@ type nilCheck struct {
 // each branch refines it. Without this an optional parameter stays 'T | nil'
 // after its own nil check and cannot be used.
 func (c *Checker) nilNarrowing(expr ast.Expression) (nilCheck, bool) {
+	// `if x then` and `if not x then` test truthiness, which for an optional
+	// is the same as testing it against nil.
+	switch e := expr.(type) {
+	case *ast.Identifier:
+		return c.optionalNamed(e, false)
+	case *ast.PrefixExpression:
+		if ident, ok := e.Right.(*ast.Identifier); ok && e.Operator == "not" {
+			return c.optionalNamed(ident, true)
+		}
+		return nilCheck{}, false
+	}
+
 	infix, ok := expr.(*ast.InfixExpression)
 	if !ok {
 		return nilCheck{}, false
@@ -2574,6 +2590,12 @@ func (c *Checker) nilNarrowing(expr ast.Expression) (nilCheck, bool) {
 		return nilCheck{}, false
 	}
 
+	return c.optionalNamed(ident, equality)
+}
+
+// optionalNamed describes the refinement of ident when it holds an optional;
+// nilInThen says which branch sees nil.
+func (c *Checker) optionalNamed(ident *ast.Identifier, nilInThen bool) (nilCheck, bool) {
 	current, exists := c.env.Get(ident.Value)
 	if !exists {
 		return nilCheck{}, false
@@ -2584,7 +2606,7 @@ func (c *Checker) nilNarrowing(expr ast.Expression) (nilCheck, bool) {
 		return nilCheck{}, false
 	}
 
-	return nilCheck{varName: ident.Value, nonNil: nonNil, nilInThen: equality}, true
+	return nilCheck{varName: ident.Value, nonNil: nonNil, nilInThen: nilInThen}, true
 }
 
 // identComparedToNil returns the identifier when one side of a comparison is a
@@ -2857,24 +2879,14 @@ func (c *Checker) checkRepeatStatement(node *ast.RepeatStatement) {
 	}
 
 	condType := c.checkExpression(node.Condition)
-	if !IsBooleanType(condType) && !condType.Equals(Any) {
-		c.addError(
-			fmt.Sprintf("Repeat condition must be boolean, got '%s'", condType.String()),
-			node.Token,
-		)
-	}
+	c.checkCondition(condType, "Repeat", node.Token)
 
 	c.env = prevEnv
 }
 
 func (c *Checker) checkWhileStatement(node *ast.WhileStatement) {
 	condType := c.checkExpression(node.Condition)
-	if !IsBooleanType(condType) && !condType.Equals(Any) {
-		c.addError(
-			fmt.Sprintf("While condition must be boolean, got '%s'", condType.String()),
-			node.Token,
-		)
-	}
+	c.checkCondition(condType, "While", node.Token)
 
 	c.checkBlockStatement(node.Body)
 }

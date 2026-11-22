@@ -43,3 +43,18 @@ func TestFlagsAfterTheFileName(t *testing.T) {
 		t.Error("game.lua written; -o was ignored")
 	}
 }
+
+// -o may name a device or a pipe: the Lua is written to it directly.
+func TestOutputToADevice(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err != nil {
+		t.Skip("no /dev/null here")
+	}
+	dir := writeFiles(t, map[string]string{"game.lunar": "print(\"from lunar\")\n"})
+	if _, stderr, code := runLunar(t, dir, "game.lunar", "-o", "/dev/null"); code != 0 {
+		t.Errorf("-o /dev/null: exit %d: %s", code, stderr)
+	}
+	stdout, stderr, code := runLunar(t, dir, "game.lunar", "-o", "/dev/stdout")
+	if code != 0 || strings.TrimSpace(stdout) != `print("from lunar")` {
+		t.Errorf("-o /dev/stdout: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}

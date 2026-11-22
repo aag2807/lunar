@@ -234,8 +234,14 @@ func (r *reporter) compileFile(opts project.Options, input, output string) int {
 		return exitErrors
 	}
 	if !r.json {
-		fmt.Fprintf(r.stdout, "Successfully compiled %s -> %s\n", input, output)
-		if p.SourceMap {
+		// When the Lua itself went to a device or pipe (-o /dev/stdout),
+		// the message goes to stderr so it does not mix with it.
+		msg := r.stdout
+		if info, err := os.Stat(output); err == nil && !info.Mode().IsRegular() {
+			msg = r.stderr
+		}
+		fmt.Fprintf(msg, "Successfully compiled %s -> %s\n", input, output)
+		if p.SourceMap && msg == r.stdout {
 			fmt.Fprintf(r.stdout, "Source map: %s.map\n", output)
 		}
 	}
@@ -245,6 +251,27 @@ func (r *reporter) compileFile(opts project.Options, input, output string) int {
 // writeSingle writes a one-file build's Lua (and map) to output, staging it
 // next to the target and renaming it over, so a reader never sees half.
 func writeSingle(outs []project.Output, output string) error {
+	// A device or a pipe (/dev/null, /dev/stdout) is written to directly:
+	// there is no file to stage a replacement next to, and no source map.
+	if info, err := os.Stat(output); err == nil && !info.Mode().IsRegular() && !info.IsDir() {
+		for _, o := range outs {
+			if !strings.HasSuffix(o.Rel, ".lua") {
+				continue
+			}
+			f, err := os.OpenFile(output, os.O_WRONLY, 0)
+			if err != nil {
+				return fmt.Errorf("writing %s: %w", output, err)
+			}
+			_, werr := f.Write(o.Content)
+			if cerr := f.Close(); werr == nil {
+				werr = cerr
+			}
+			if werr != nil {
+				return fmt.Errorf("writing %s: %w", output, werr)
+			}
+		}
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
 		return fmt.Errorf("creating the output directory: %w", err)
 	}

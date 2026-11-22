@@ -282,6 +282,9 @@ type Checker struct {
 
 	// exprTypes records the type computed for each expression checked.
 	exprTypes map[ast.Expression]Type
+	// callee is the expression a call is about to check as its function,
+	// so a method named there is known to be called, not read as a value.
+	callee ast.Expression
 
 	// chunkReturns are the return statements of the chunk itself, outside
 	// any function.
@@ -4280,6 +4283,7 @@ func (c *Checker) checkInfixExpression(node *ast.InfixExpression) Type {
 
 // checkCallExpression checks a function call
 func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
+	c.callee = node.Function
 	funcType := c.checkExpression(node.Function)
 
 	// An optional call tolerates a missing callee, so unwrap the optional before
@@ -4695,6 +4699,7 @@ func (c *Checker) isMoreSpecific(sig1, sig2 *FunctionType, argTypes []Type) bool
 
 // checkDotExpression checks a dot expression (property access)
 func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
+	called := c.callee == node
 	leftType := c.checkExpression(node.Left)
 
 	// Right side must be an identifier
@@ -4734,8 +4739,33 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 
 	c.reference(rightIdent.Token, memberSymbol(actualLeftType, propertyName))
 
+	// A method named without a call loses its receiver: `local f = e.hit`
+	// then f(3) passes 3 as self. Lunar has no bound methods, so refuse it.
+	method := func(owner string, methodType Type) Type {
+		if !called && !node.IsMethodCall {
+			c.addErrorCode("method-value", fmt.Sprintf("Method '%s' of '%s' has to be called where it is named (%s.%s(...)): read as a value it loses its receiver; wrap it in a function to pass it around",
+				propertyName, owner, exprText(node.Left), propertyName), rightIdent.Token)
+		}
+		return resolved(ast.DispatchSelf, methodType)
+	}
+
+	// A string literal type (const s = "abc") is still a string receiver.
+	if _, ok := actualLeftType.(*StringLiteralType); ok {
+		actualLeftType = String
+	}
+
 	// Check if left type has the property
 	switch typ := actualLeftType.(type) {
+	case *UnionType:
+		dispatch, member, ok := c.unionMember(typ, propertyName, rightIdent.Token)
+		switch {
+		case !ok:
+			return wrapIfOptional(Any)
+		case dispatch == ast.DispatchSelf:
+			return method(typ.String(), member)
+		default:
+			return resolved(dispatch, member)
+		}
 	case *NamespaceType:
 		if member, ok := typ.Members[propertyName]; ok {
 			return resolved(ast.DispatchPlain, member)
@@ -4825,7 +4855,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 					node.Token,
 				)
 			}
-			return resolved(ast.DispatchSelf, methodType)
+			return method(typ.Name, methodType)
 		}
 		// Accessors read and write like fields.
 		if getter, ok := typ.GetGetter(propertyName); ok {
@@ -4855,7 +4885,7 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		}
 		// Check methods
 		if methodType, ok := typ.GetMethod(propertyName); ok {
-			return resolved(ast.DispatchSelf, methodType)
+			return method(typ.String(), methodType)
 		}
 		c.addError(
 			fmt.Sprintf("Type '%s' has no property or method '%s'", typ.String(), propertyName),
@@ -4894,6 +4924,108 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		// For other types, allow any property access (could be table access)
 		return wrapIfOptional(Any)
 	}
+}
+
+// unionMember resolves a member on every type in a union. ok is false when
+// some type's members are not known (any, a table, a type parameter...): the
+// expression is then emitted as written. When the types disagree, or one
+// lacks the member, that is reported, since no one Lua call fits them all.
+func (c *Checker) unionMember(u *UnionType, name string, tok lexer.Token) (dispatch string, member Type, ok bool) {
+	type part struct {
+		owner    string
+		dispatch string
+		member   Type
+	}
+	var parts []part
+	for _, t := range u.Types {
+		if opt, isOpt := t.(*OptionalType); isOpt {
+			t = opt.BaseType
+		}
+		if _, isNil := t.(*NilType); isNil || t == nil {
+			continue
+		}
+		d, m, known, has := c.memberOf(t, name)
+		if !known {
+			return "", nil, false
+		}
+		if !has {
+			c.addErrorCode("unknown-member", fmt.Sprintf("'%s' has no member '%s' (in '%s')", t.String(), name, u.String()), tok)
+			return "", nil, false
+		}
+		parts = append(parts, part{t.String(), d, m})
+	}
+	if len(parts) == 0 {
+		return "", nil, false
+	}
+	first := parts[0]
+	member = first.member
+	for _, p := range parts[1:] {
+		if p.dispatch != first.dispatch {
+			describe := func(p part) string {
+				if p.dispatch == ast.DispatchSelf {
+					return "a method of '" + p.owner + "'"
+				}
+				return "a plain field of '" + p.owner + "'"
+			}
+			c.addErrorCode("union-dispatch", fmt.Sprintf("'%s' is %s but %s, so no one call works for '%s'",
+				name, describe(first), describe(p), u.String()), tok)
+			return "", nil, false
+		}
+		if member != nil && !p.member.Equals(member) {
+			member = nil
+		}
+	}
+	if member == nil {
+		member = Any
+	}
+	return first.dispatch, member, true
+}
+
+// memberOf looks a member up on one type without reporting anything. known
+// is false for types whose members cannot be listed.
+func (c *Checker) memberOf(t Type, name string) (dispatch string, member Type, known, has bool) {
+	switch typ := t.(type) {
+	case *ClassType:
+		if m, ok := typ.GetMethod(name); ok {
+			return ast.DispatchSelf, m, true, true
+		}
+		if p, ok := typ.GetProperty(name); ok {
+			return ast.DispatchPlain, p, true, true
+		}
+		if g, ok := typ.GetGetter(name); ok {
+			return ast.DispatchPlain, g.ReturnType, true, true
+		}
+		if typ.Ambient {
+			return "", nil, false, false
+		}
+		return "", nil, true, false
+	case *InterfaceType:
+		if p, ok := typ.GetProperty(name); ok {
+			return ast.DispatchPlain, p, true, true
+		}
+		if m, ok := typ.GetMethod(name); ok {
+			return ast.DispatchSelf, m, true, true
+		}
+		return "", nil, true, false
+	case *StringType, *StringLiteralType:
+		if lib, ok := c.interfaces["StringLib"]; ok {
+			_, isProp := lib.GetProperty(name)
+			_, isMethod := lib.GetMethod(name)
+			return ast.DispatchSelf, Any, true, isProp || isMethod
+		}
+	}
+	return "", nil, false, false
+}
+
+// exprText is a short rendering of a receiver for messages.
+func exprText(e ast.Expression) string {
+	switch n := e.(type) {
+	case *ast.Identifier:
+		return n.Value
+	case *ast.DotExpression:
+		return exprText(n.Left) + "." + exprText(n.Right)
+	}
+	return "obj"
 }
 
 // subclassMember finds a property, method or getter on some class that

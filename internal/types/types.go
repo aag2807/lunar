@@ -829,6 +829,18 @@ func (t *ClassType) IsAssignableTo(other Type) bool {
 	if _, isUnknown := other.(*UnknownType); isUnknown {
 		return true
 	}
+	// A class fits a union that has a member it fits.
+	if u, ok := other.(*UnionType); ok {
+		for _, member := range u.Types {
+			if member != nil && t.IsAssignableTo(member) {
+				return true
+			}
+		}
+		return false
+	}
+	if opt, ok := other.(*OptionalType); ok {
+		return t.IsAssignableTo(opt.BaseType)
+	}
 	// Class is assignable to its parent class (inheritance)
 	if otherClass, ok := other.(*ClassType); ok {
 		current := t.Parent

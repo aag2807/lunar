@@ -92,3 +92,35 @@ print(M.greet("bob"))
 	assertContains(t, out, `M.greet("bob")`)
 	assertNotContains(t, out, "M:greet")
 }
+
+// A const string keeps its literal type, and is still a string receiver.
+func TestConstStringReceiverUsesColon(t *testing.T) {
+	out := generateChecked(t, `const s = "abc"
+print(s.upper())
+`)
+	assertContains(t, out, "s:upper()")
+}
+
+// Every class in the union has the method, so the call takes self.
+func TestUnionOfClassesReceiverUsesColon(t *testing.T) {
+	out := generateChecked(t, `class A
+    hit(n: number): number
+        return n
+    end
+end
+class B
+    hit(n: number): number
+        return n * 2
+    end
+end
+local function pick(flag: boolean): A | B
+    if flag then
+        return A()
+    end
+    return B()
+end
+local x = pick(true)
+print(x.hit(3))
+`)
+	assertContains(t, out, "x:hit(3)")
+}

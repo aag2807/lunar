@@ -75,8 +75,6 @@ that CI compiles and **runs** under Lua 5.3 and 5.4, asserting its own results
 
 Being fixed, in this order:
 
-- Errors are human-readable only; there is no JSON output yet, and an error
-  in a declaration file can be reported against the file being compiled
 - Declarations are only found next to the input file, and the standard
   library only next to the binary (or a few folders above the current one)
 - Imports resolve relative to the working directory, not the importing file,
@@ -101,8 +99,30 @@ lunar -o out/game.lua game.lunar    # choose the output file
 lunar --target lua54 game.lunar     # lua53 (default) or lua54
 lunar --source-map game.lunar       # also writes game.lua.map
 lunar --watch game.lunar            # recompile on change
+lunar --json game.lunar             # errors as JSON lines, for tools
 lunar --version
 ```
+
+### Errors for tools
+
+With `--json`, stdout carries one JSON object per line and stderr stays
+empty, so a program that runs the compiler can list errors and jump to them:
+
+```
+{"kind":"diagnostic","file":"/game/scripts/enemy.lunar","line":5,"column":37,"endLine":5,"endColumn":42,"severity":"error","code":"field-type","message":"Field 'hp' of 'Enemy' must be 'number', got 'string'"}
+{"kind":"summary","errors":1,"warnings":0,"files":1,"written":false}
+```
+
+Lines and columns are 1-based, columns count bytes, and the end is just past
+the span. `file` is absolute; errors in the bundled declarations read
+`<stdlib>/lua.d.lunar`. `code` names the kind of error and does not change
+between releases: `syntax`, `type`, `field-type`, `unknown-field`,
+`missing-fields`, `unknown-member`, `duplicate-function`, `not-supported`,
+`usage`, `io`, `internal`. In watch mode every rebuild ends with a summary.
+
+Exit codes: `0` compiled, `1` the source has errors and nothing was written
+(the previous output is left as it was), `2` usage or configuration error,
+`3` I/O failure or internal error.
 
 The type checker decides whether a member call needs Lua's `:` (an instance
 method) or `.` (a function in a table). When it cannot know, because a value

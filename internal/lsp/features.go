@@ -120,8 +120,15 @@ func (s *Server) hover(uri string, pos Position) (interface{}, error) {
 		return nil, nil
 	}
 	r := s.tokenRange(occ.Tok)
+	sym := occ.Sym
+	// A member used on an instance (Slot<number>) has the instance's type.
+	if occ.Type != nil && (sym.Kind == types.SymProperty || sym.Kind == types.SymMethod) {
+		shown := *sym
+		shown.Type = occ.Type
+		sym = &shown
+	}
 	return Hover{
-		Contents: MarkupContent{Kind: "markdown", Value: "```lunar\n" + describe(occ.Sym) + "\n```"},
+		Contents: MarkupContent{Kind: "markdown", Value: "```lunar\n" + describe(sym) + "\n```"},
 		Range:    &r,
 	}, nil
 }
@@ -142,6 +149,9 @@ func describe(sym *types.Symbol) string {
 			return "(method) " + signature(qualified, fn)
 		}
 	case types.SymProperty:
+		if sym.Optional {
+			return fmt.Sprintf("(property) %s?: %s", qualified, typeString(types.WithoutNil(sym.Type)))
+		}
 		return fmt.Sprintf("(property) %s: %s", qualified, typeString(sym.Type))
 	case types.SymParameter:
 		return fmt.Sprintf("(parameter) %s: %s", sym.Name, typeString(sym.Type))

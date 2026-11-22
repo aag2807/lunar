@@ -43,6 +43,8 @@ type Symbol struct {
 	// ScopeEnd is the byte offset where a local's scope ends; -1 for
 	// symbols visible to the whole file and beyond.
 	ScopeEnd int
+	// Optional is set for a property that may be left out (scale?: T).
+	Optional bool
 }
 
 // Key identifies a symbol across checkers: its declaring file and offset,
@@ -70,6 +72,9 @@ type Occurrence struct {
 	Tok  lexer.Token
 	Sym  *Symbol
 	Decl bool
+	// Type is what the member has at this use, when it differs from its
+	// declaration: s.item on a Slot<number> is a number, not T.
+	Type Type
 }
 
 // Index is every symbol a check defined and every occurrence it resolved.

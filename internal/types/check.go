@@ -1282,7 +1282,11 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		setterName := setter.Name.Value
 		classType.Setters[setterName] = funcType
 		if classType.MemberSyms[setterName] == nil {
-			setMemberSym(&classType.MemberSyms, setterName, c.defineMember(setter.Name.Token, SymProperty, Any, classType.Name))
+			var valueType Type = Any
+			if len(funcType.Parameters) > 0 {
+				valueType = funcType.Parameters[0]
+			}
+			setMemberSym(&classType.MemberSyms, setterName, c.defineMember(setter.Name.Token, SymProperty, valueType, classType.Name))
 		}
 
 		// Track setter visibility (default to public if not specified)
@@ -1585,7 +1589,11 @@ func (c *Checker) addInterfaceProperty(iface *InterfaceType, prop *ast.PropertyD
 		}
 		iface.ReadonlyProps[name] = true
 	}
-	setMemberSym(&iface.MemberSyms, name, c.memberSym(prop.Name.Token, SymProperty, propType, iface.Name))
+	propSym := c.memberSym(prop.Name.Token, SymProperty, propType, iface.Name)
+	if prop.IsOptional && propSym != nil {
+		propSym.Optional = true
+	}
+	setMemberSym(&iface.MemberSyms, name, propSym)
 	if prop.IsStatic {
 		if iface.StaticProps == nil {
 			iface.StaticProps = make(map[string]bool)
@@ -6646,14 +6654,26 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 
 	// Record how the member resolved so codegen knows whether a call through
 	// this expression needs Lua's implicit-self ':' or a plain '.'.
+	// The member's type here, as hover shows it: an instance's, not the
+	// declaration's T.
+	occAt := -1
+	recordUseType := func(t Type) {
+		if occAt >= 0 && occAt < len(c.index.Occurrences) && c.index.Occurrences[occAt].Tok == rightIdent.Token {
+			if sym := c.index.Occurrences[occAt].Sym; sym != nil && sym.Type != nil && t != nil && t.String() != sym.Type.String() {
+				c.index.Occurrences[occAt].Type = t
+			}
+		}
+	}
 	resolved := func(dispatch string, resultType Type) Type {
 		// An explicit obj:method() in the source already states its intent
 		// for codegen; the dispatch is still recorded, so the call can count
 		// obj as the first argument of a plain function field.
 		node.MethodDispatch = dispatch
+		recordUseType(resultType)
 		return wrapIfOptional(resultType)
 	}
 
+	occAt = len(c.index.Occurrences)
 	c.reference(rightIdent.Token, memberSymbol(actualLeftType, propertyName))
 
 	// A method named without a call loses its receiver: `local f = e.hit`

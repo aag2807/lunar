@@ -111,3 +111,28 @@ func TestWorkspaceSymbolsIncludeDeclarations(t *testing.T) {
 		t.Errorf("workspace symbols for spawn: %v", names)
 	}
 }
+
+// Hover shows a property as declared (scale?:), a generic member with the
+// instance's type, and a setter-only property with the setter's type.
+func TestHoverDetails(t *testing.T) {
+	text := "interface Opts\n    scale?: number\nend\nlocal o: Opts = {}\nprint(o.scale)\n" +
+		"class Slot<T>\n    item: T\n    constructor(item: T)\n        self.item = item\n    end\nend\nlocal s = Slot<number>(1)\nprint(s.item)\n" +
+		"class Knob\n    set level(v: number)\n    end\nend\nlocal k = Knob()\nk.level = 3\n"
+	root := writeTree(t, map[string]string{"lunar.config.json": `{"outDir": "../out"}`, "a.lunar": text})
+	c := newClientAt(t, root)
+	c.open("a.lunar")
+	hover := func(word string, nth, delta int) string {
+		h := decode[Hover](t, c.request("textDocument/hover", map[string]any{
+			"textDocument": map[string]any{"uri": c.uri("a.lunar")}, "position": at(t, text, word, nth, delta)}))
+		return h.Contents.Value
+	}
+	if got := hover("o.scale", 1, 2); !strings.Contains(got, "scale?: number") {
+		t.Errorf("o.scale: %q", got)
+	}
+	if got := hover("s.item", 1, 2); !strings.Contains(got, "item: number") {
+		t.Errorf("s.item: %q", got)
+	}
+	if got := hover("k.level", 1, 2); !strings.Contains(got, "level: number") {
+		t.Errorf("k.level: %q", got)
+	}
+}

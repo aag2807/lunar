@@ -51,26 +51,39 @@ that CI compiles and **runs** under Lua 5.3 and 5.4, asserting its own results
 - Array and table spread (`{...a, 4}`, `{...defaults, ...overrides}`)
 - Template strings (`` `Hello, ${name}!` ``)
 - Bitwise operators `& | ~ << >>`; `^` is exponentiation, as in Lua
-- `import { a } from "./mod"` / `export function`, function decorators,
-  `namespace`
+- `import { a } from "./mod"` / `export function` (exports stay out of the
+  global environment), function decorators, `namespace`
+- Getters and setters (`get amount(): number`), inherited by subclasses
+- Lua numerals in every form (`0xFF`, `1e-9`, `.5`); conditions test
+  truthiness as in Lua, so `while true do` and `if enemy then` work
+- Data files that end in `return { ... }`, loaded with no libraries opened
+  (`examples/data/`, checked by `tests/host`)
+- Optional fields (`speed: number?` or `speed?: number`) may be left out of a
+  table literal, and a literal that does not fit names the field at fault:
+
+  ```
+  Field 'hp' of 'Enemy' must be 'number', got 'string'
+  'hpp' is not a field of 'Enemy'. Did you mean 'hp'?
+  Missing field(s) 'hp' required by 'Enemy'
+  ```
+- `Enemy.new(3)` and `Enemy(3)` both construct
+- Declarations: `declare function` (the trailing `end` is optional),
+  `declare class`, `declare namespace`, interfaces that refer to themselves
+  or to each other
 
 ## Known gaps
 
-Being fixed, in this order (see the change log as each lands):
+Being fixed, in this order:
 
-- A file cannot end in a top-level `return { ... }`; `field: T?` in an
-  interface is not treated as optional; table-literal errors do not name the
-  offending field; `Enemy.new(3)` miscompiles to `Enemy:new(3)`
-- `declare function` without a trailing `end` swallows the next declarations
+- Errors are human-readable only; there is no JSON output yet, and an error
+  in a declaration file can be reported against the file being compiled
 - Declarations are only found next to the input file, and the standard
   library only next to the binary (or a few folders above the current one)
-- Errors are human-readable only; there is no JSON output yet
-- `while true do` is rejected; enum members after an explicit value are
-  numbered wrongly; getters/setters do not work at runtime
-- Function overloading and `async`/`await` compile but do not work; they will
-  be refused with an error
-- Imports resolve relative to the working directory, not the importing file
-- Number literals with exponents or in hex (`1e-9`, `0xFF`) do not lex
+- Imports resolve relative to the working directory, not the importing file,
+  and a class cannot be imported from another module yet
+
+Function overloading is for `declare function` only, and `async`/`await` are
+refused with an error: Lua's coroutines do that job.
 
 ## Install
 
@@ -91,12 +104,21 @@ lunar --watch game.lunar            # recompile on change
 lunar --version
 ```
 
+The type checker decides whether a member call needs Lua's `:` (an instance
+method) or `.` (a function in a table). When it cannot know, because a value
+is typed `any`, the call is emitted as written: write `obj:method()` to pass
+`self`.
+
 Declaration files (`*.d.lunar`) describe existing Lua or C APIs to the type
 checker. Those in the same folder as the input are loaded automatically, along
 with the standard library declarations in [`stdlib/`](stdlib/).
 
 ```lunar
-declare function spawn(name: string, x?: number): number end
+declare function spawn(name: string, x?: number): number
+
+declare namespace audio
+    function play(name: string, volume?: number): void
+end
 ```
 
 ## Editor support

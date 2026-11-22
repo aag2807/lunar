@@ -203,6 +203,34 @@ end
   declare `static new(...)` if the engine's constructor is `Sprite.new`.
 - Overloads are written as several `declare function` signatures with the
   same name.
+- Declaring an interface again adds to it, so one file can extend another's.
+
+## Sharing code between scripts
+
+Each script is checked on its own, so a global one script defines is unknown
+to the others. Two ways to share a helper:
+
+- **Modules (recommended).** `export function ring_run(n: number): number` in
+  one script, `import { ring_run } from "./rings"` in the others. The compiler
+  follows the import, checks every call against the definition, and emits a
+  `require`, so load order takes care of itself.
+- **A declared global.** For a function the engine calls by name (an
+  `update`, an `on_hit`), or Lua that still shares globals through an
+  include: describe it in a declaration file and define it in one script.
+
+  ```lunar fragment
+  -- shared.d.lunar
+  declare function ring_run(n: number, speed?: number): number
+
+  -- rings.lunar: untyped parameters take the declared types
+  function ring_run(n, speed)
+      return n * (speed or 1)
+  end
+  ```
+
+  The defining script is checked against the declaration, and every other
+  script's calls against it. The engine still has to load rings.lua before
+  the scripts that call it.
 
 ## Calling methods
 

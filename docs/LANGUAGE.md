@@ -18,6 +18,17 @@ calls with `:`, calls with a table or a string and no parentheses
 Lunar file: the files in [`tests/luacompat/`](../tests/luacompat/) are
 compiled unchanged and must print what they print under Lua.
 
+Code without annotations is checked as Lua: a local declared empty (`local
+x`) takes whatever it is given later; a table made from a literal gains the
+fields assigned to it, and a field it lacks reads as `any`; a parameter
+without a type may be left out; `a or b` and `a and b` have the type of the
+operand they return (`(c.attempt or 0) + 1` is a number), and `a and a.x`
+knows `a` is not nil on the right; values are adjusted to names as in Lua
+(`local ok = pcall(f)`, `local a, b = 1`); `function M.add(a, b)` and
+`function Point:len()` define functions into tables. Once you annotate
+something, it is checked strictly: an interface you write down has exactly
+its fields, and a typed parameter must be passed.
+
 Only Lua's own reserved words are reserved. The words Lunar adds (`class`,
 `match`, `from`, `import`, `get`, `set`, `number`, ...) are names wherever a
 declaration of Lunar's cannot begin: `local from = 1`, `t.class`,

@@ -62,6 +62,18 @@ their changelog described features that did not work.
   as a name, since only Lua's reserved words are reserved.
 - A statement that is only an expression, not a call, is an error, as in
   Lua.
+- Untyped Lua is checked as Lua: `and`/`or` have the type of the operand they
+  return; empty locals, tables grown field by field, left-out untyped
+  parameters, values adjusted to names, and `function M.f()` /
+  `function t:m()` are accepted. Annotated code stays strict.
+- A script may define a function a declaration file declares; untyped
+  parameters and return take the declared types.
+- Repeated interface declarations merge. The standard library declarations
+  gain `table.pack/unpack/move`, `string.pack/unpack/packsize/dump`,
+  `math.tointeger/type/ult/maxinteger/mininteger`, `coroutine.isyieldable`
+  (and `close` for lua54), `rawlen`, `collectgarbage`, and Lua's full
+  signatures for `error`, `tonumber`, `next`, `loadfile` and `dofile`;
+  `table.maxn` and the global `unpack`, absent from 5.3 and 5.4, are gone.
 - Tables are written in source order; fields with no value write no line.
 
 - A file may end in a top-level `return`.

@@ -26,27 +26,13 @@ type Generator struct {
 	instanceArrays   map[string]bool            // Locals holding a collection of class instances
 }
 
-// New creates a new code generator
-func New() *Generator {
-	return &Generator{
-		indent:         0,
-		classes:        make(map[string]bool),
-		classParents:   make(map[string]string),
-		staticMethods:  make(map[string]map[string]bool),
-		exports:        make([]string, 0),
-		target:         "lua53",
-		selfReceivers:  []map[string]bool{make(map[string]bool)},
-		instanceArrays: make(map[string]bool),
-	}
-}
-
-// NewWithTarget creates a new code generator with specified target
-func NewWithTarget(target string) *Generator {
+// newGenerator is the one constructor every public variant goes through, so
+// the plain and source-mapped generators can never drift apart in state.
+func newGenerator(target string, sm *sourcemap.Builder, sourceFile string) *Generator {
 	if target == "" {
 		target = "lua53"
 	}
-	return &Generator{
-		indent:         0,
+	g := &Generator{
 		classes:        make(map[string]bool),
 		classParents:   make(map[string]string),
 		staticMethods:  make(map[string]map[string]bool),
@@ -55,6 +41,22 @@ func NewWithTarget(target string) *Generator {
 		selfReceivers:  []map[string]bool{make(map[string]bool)},
 		instanceArrays: make(map[string]bool),
 	}
+	if sm != nil {
+		g.sourceMapBuilder = sm
+		g.currentLine = 1
+		g.sourceFile = sourceFile
+	}
+	return g
+}
+
+// New creates a new code generator
+func New() *Generator {
+	return newGenerator("", nil, "")
+}
+
+// NewWithTarget creates a new code generator with specified target
+func NewWithTarget(target string) *Generator {
+	return newGenerator(target, nil, "")
 }
 
 // IsLuaJIT returns true if targeting LuaJIT or Lua 5.1
@@ -69,21 +71,7 @@ func NewWithSourceMap(sourceFile, generatedFile string) *Generator {
 
 // NewWithSourceMapAndTarget creates a new code generator with source map support and target
 func NewWithSourceMapAndTarget(sourceFile, generatedFile string, target string) *Generator {
-	if target == "" {
-		target = "lua53"
-	}
-	return &Generator{
-		indent:           0,
-		sourceMapBuilder: sourcemap.NewBuilder(sourceFile, generatedFile),
-		currentLine:      1,
-		currentColumn:    0,
-		sourceFile:       sourceFile,
-		classes:          make(map[string]bool),
-		classParents:     make(map[string]string),
-		staticMethods:    make(map[string]map[string]bool),
-		exports:          make([]string, 0),
-		target:           target,
-	}
+	return newGenerator(target, sourcemap.NewBuilder(sourceFile, generatedFile), sourceFile)
 }
 
 // GetSourceMap returns the built source map (if enabled)

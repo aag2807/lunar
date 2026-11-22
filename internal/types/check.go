@@ -7107,6 +7107,27 @@ func (c *Checker) checkGenericInstantiation(node *ast.GenericType) Type {
 	// Get the base type (should be an identifier)
 	baseIdent, ok := node.BaseType.(*ast.Identifier)
 	if !ok {
+		// m.Box<string>, through import * as m or a namespace.
+		if dot, isDot := node.BaseType.(*ast.DotExpression); isDot {
+			baseType := c.checkExpression(dot)
+			typeArgs := make([]Type, len(node.TypeArguments))
+			for i, arg := range node.TypeArguments {
+				typeArgs[i] = c.resolveTypeExpression(arg)
+			}
+			switch b := baseType.(type) {
+			case *ClassType:
+				if len(b.GenericParams) == len(typeArgs) && len(typeArgs) > 0 {
+					return c.instantiateGenericClass(b, typeArgs)
+				}
+				c.addError(fmt.Sprintf("Class '%s' expects %d type arguments, got %d", b.Name, len(b.GenericParams), len(typeArgs)), node.Token)
+				return b
+			case *FunctionType:
+				if len(b.GenericParams) == len(typeArgs) && len(typeArgs) > 0 {
+					return c.instantiateGenericFunction(b, typeArgs)
+				}
+			}
+			return baseType
+		}
 		c.addError("Generic instantiation base must be an identifier", node.Token)
 		return Any
 	}
@@ -7414,6 +7435,90 @@ func (c *Checker) registerNamespace(node *ast.NamespaceDeclaration) {
 	c.env.Set(node.Name.Value, nsType)
 }
 
+// namespaceTypeNames lists the types a namespace declares itself.
+func namespaceTypeNames(node *ast.NamespaceDeclaration) []string {
+	var names []string
+	for _, stmt := range node.Statements {
+		if exp, ok := stmt.(*ast.ExportStatement); ok {
+			stmt = exp.Statement
+		}
+		switch s := stmt.(type) {
+		case *ast.ClassDeclaration:
+			names = append(names, s.Name.Value)
+		case *ast.InterfaceDeclaration:
+			names = append(names, s.Name.Value)
+		case *ast.EnumDeclaration:
+			names = append(names, s.Name.Value)
+		case *ast.TypeDeclaration:
+			if s.Name != nil {
+				names = append(names, s.Name.Value)
+			}
+		}
+	}
+	return names
+}
+
+// saveTypeNames records what each name means as a type (and as a value
+// in the current scope) and returns what puts it all back.
+func (c *Checker) saveTypeNames(names []string) func() {
+	type saved struct {
+		class    *ClassType
+		iface    *InterfaceType
+		enum     *EnumType
+		alias    Type
+		sym      *Symbol
+		value    Type
+		has      [6]bool
+		valueEnv *Environment
+	}
+	env := c.env
+	old := make(map[string]saved, len(names))
+	for _, n := range names {
+		var sv saved
+		sv.class, sv.has[0] = c.classes[n]
+		sv.iface, sv.has[1] = c.interfaces[n]
+		sv.enum, sv.has[2] = c.enums[n]
+		sv.alias, sv.has[3] = c.typeAliases[n]
+		sv.sym, sv.has[4] = c.typeSyms[n]
+		sv.value, sv.has[5] = env.store[n]
+		old[n] = sv
+	}
+	return func() {
+		for n, sv := range old {
+			if sv.has[0] {
+				c.classes[n] = sv.class
+			} else {
+				delete(c.classes, n)
+			}
+			if sv.has[1] {
+				c.interfaces[n] = sv.iface
+			} else {
+				delete(c.interfaces, n)
+			}
+			if sv.has[2] {
+				c.enums[n] = sv.enum
+			} else {
+				delete(c.enums, n)
+			}
+			if sv.has[3] {
+				c.typeAliases[n] = sv.alias
+			} else {
+				delete(c.typeAliases, n)
+			}
+			if sv.has[4] {
+				c.typeSyms[n] = sv.sym
+			} else {
+				delete(c.typeSyms, n)
+			}
+			if sv.has[5] {
+				env.store[n] = sv.value
+			} else {
+				delete(env.store, n)
+			}
+		}
+	}
+}
+
 // buildNamespace makes the type of a namespace from its declarations: its
 // exported members, with the types their declarations give. Functions and
 // variables get their checked types when the body is checked.
@@ -7425,6 +7530,12 @@ func (c *Checker) buildNamespace(node *ast.NamespaceDeclaration) *NamespaceType 
 		Name:    nsName,
 		Members: make(map[string]Type),
 	}
+
+	// The namespace's own types are its members, not names around it: a
+	// Geo.Point replaced a top-level Point everywhere. What the names were
+	// is put back once the namespace is built.
+	restore := c.saveTypeNames(namespaceTypeNames(node))
+	defer restore()
 
 	// Register all declarations in the namespace with prefixed names
 	for _, stmt := range node.Statements {
@@ -7556,9 +7667,19 @@ func (c *Checker) checkNamespaceDeclaration(node *ast.NamespaceDeclaration) {
 	prevEnv := c.env
 	c.env = NewEnclosedEnvironment(prevEnv)
 	defer func() { c.env = prevEnv }()
+	// Inside the body its own types are the ones its names mean.
+	defer c.saveTypeNames(namespaceTypeNames(node))()
 	if nsType != nil {
 		for name, t := range nsType.Members {
 			c.env.Set(name, t)
+			switch typ := t.(type) {
+			case *ClassType:
+				c.classes[name] = typ
+			case *InterfaceType:
+				c.interfaces[name] = typ
+			case *EnumType:
+				c.enums[name] = typ
+			}
 		}
 	}
 	c.hoistFunctions(node.Statements, true)

@@ -208,3 +208,14 @@ func TestUnreadableFolderIsAnIOError(t *testing.T) {
 		t.Errorf("diagnostics: %+v", diags)
 	}
 }
+
+// A generic class reached through import * as m is instantiated there
+// too: m.Box<string>(...).
+func TestGenericClassThroughImportStar(t *testing.T) {
+	root := tree(t, map[string]string{
+		"lunar.config.json": `{"outDir": "../build"}`,
+		"box.lunar":         "export class Box<T>\n    v: T\n    constructor(v: T)\n        self.v = v\n    end\nend\n",
+		"main.lunar":        "import * as m from \"./box\"\nlocal b = m.Box<string>(\"s\")\nlocal s: string = b.v\nprint(s)\n",
+	})
+	build(t, root)
+}

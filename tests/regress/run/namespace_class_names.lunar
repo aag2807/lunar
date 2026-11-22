@@ -1,0 +1,17 @@
+-- A class in a namespace and one outside it may share a name.
+class Point
+    x: number = 1
+end
+namespace Geo
+    export class Point
+        name: string = "geo"
+    end
+    export function make(): Point
+        return Point()
+    end
+end
+local a = Point()
+local b = Geo.Point()
+local n: number = a.x
+local s: string = b.name
+assert(n == 1 and s == "geo" and Geo.make().name == "geo")

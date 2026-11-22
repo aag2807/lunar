@@ -1,0 +1,42 @@
+-- Narrowing that the docs promise, or that ordinary Lua relies on.
+local function isStr(v: any): v is string
+    return type(v) == "string"
+end
+
+local function lenOrPlus(v: string | number): number
+    if isStr(v) then
+        return #v
+    end
+    return v + 1
+end
+assert(lenOrPlus("abc") == 3 and lenOrPlus(1) == 2)
+
+local function both(x: number?, y: number?): number
+    if x == nil or y == nil then
+        return 0
+    end
+    return x + y
+end
+assert(both(1, 2) == 3 and both(nil, 2) == 0)
+
+local function pair(x: number?, y: number?): number
+    if x and y then
+        return x * y
+    end
+    return -1
+end
+assert(pair(2, 3) == 6 and pair(nil, 3) == -1)
+
+local function kind(v: string | number): string
+    if type(v) == "string" then
+        return v:upper()
+    end
+    return tostring(v + 1)
+end
+assert(kind("a") == "A" and kind(1) == "2")
+
+local function checked(n: number?): number
+    assert(n)
+    return n + 1
+end
+assert(checked(1) == 2)

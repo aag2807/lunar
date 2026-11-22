@@ -2618,6 +2618,12 @@ func (c *Checker) checkStatement(stmt ast.Statement) {
 		c.checkFunctionDeclaration(node)
 	case *ast.ExpressionStatement:
 		c.checkExpression(node.Expression)
+		// assert(x) leaves x what a true x proves for the rest of the block.
+		if call, ok := node.Expression.(*ast.CallExpression); ok && len(call.Arguments) > 0 {
+			if fn, ok := call.Function.(*ast.Identifier); ok && fn.Value == "assert" {
+				c.applyFacts(c.narrowings(call.Arguments[0], true))
+			}
+		}
 	case *ast.ReturnStatement:
 		c.checkReturnStatement(node)
 	case *ast.IfStatement:
@@ -3268,54 +3274,266 @@ func (c *Checker) checkIfStatement(node *ast.IfStatement) {
 	condType := c.checkExpression(node.Condition)
 	c.checkCondition(condType, "If", node.Token)
 
-	// A nil check refines an optional in both branches, and when the nil branch
-	// always exits it refines the rest of the enclosing block too.
-	if nilCheck, ok := c.nilNarrowing(node.Condition); ok {
-		c.checkIfWithNilNarrowing(node, nilCheck)
-		return
+	// What the condition proves holds in its branch, and its opposite in
+	// the other; a branch that always exits leaves the other's facts for
+	// the rest of the block: `if x == nil then return end`.
+	whenTrue := c.narrowings(node.Condition, true)
+	whenFalse := c.narrowings(node.Condition, false)
+
+	prevEnv := c.env
+	c.env = NewEnclosedEnvironment(prevEnv)
+	c.applyFacts(whenTrue)
+	c.checkBlockStatement(node.Consequence)
+	c.env = prevEnv
+	if node.Alternative != nil {
+		c.env = NewEnclosedEnvironment(prevEnv)
+		c.applyFacts(whenFalse)
+		c.checkBlockStatement(node.Alternative)
+		c.env = prevEnv
 	}
 
-	// Check for type narrowing from type guard functions
-	varName, narrowedType := c.extractTypeNarrowing(node.Condition)
+	thenExits := blockAlwaysExits(node.Consequence)
+	elseExits := node.Alternative != nil && blockAlwaysExits(node.Alternative)
+	switch {
+	case thenExits && !elseExits:
+		c.applyFacts(whenFalse)
+	case elseExits && !thenExits:
+		c.applyFacts(whenTrue)
+	case node.Alternative == nil:
+		// `if not x then x = default end`: either x was set, or the branch
+		// assigned it a value; x is what the false side proves.
+		for name, t := range whenFalse {
+			if blockAssigns(node.Consequence, name) {
+				c.env.Narrow(name, t)
+			}
+		}
+	}
+}
 
-	if varName != "" && narrowedType != nil {
-		// Type narrowing applies: create new scope with narrowed type
-		prevEnv := c.env
+// facts are what a condition proves about variables: their narrowed types.
+type facts map[string]Type
 
-		// Then block: apply narrowed type
-		c.env = NewEnclosedEnvironment(prevEnv)
-		originalType, _ := prevEnv.Get(varName)
-		c.env.Set(varName, narrowedType)
-		c.checkBlockStatement(node.Consequence)
-		c.env = prevEnv
+// applyFacts narrows the variables in the current scope.
+func (c *Checker) applyFacts(f facts) {
+	for name, t := range f {
+		c.env.Narrow(name, t)
+	}
+}
 
-		// Else block: apply complementary type if possible
-		if node.Alternative != nil {
-			c.env = NewEnclosedEnvironment(prevEnv)
-			if unionType, ok := originalType.(*UnionType); ok {
-				// Remove the narrowed type from the union
-				remainingTypes := []Type{}
-				for _, t := range unionType.Types {
-					if !t.Equals(narrowedType) {
-						remainingTypes = append(remainingTypes, t)
-					}
-				}
-				if len(remainingTypes) == 1 {
-					c.env.Set(varName, remainingTypes[0])
-				} else if len(remainingTypes) > 1 {
-					c.env.Set(varName, &UnionType{Types: remainingTypes})
+// narrowings works out what cond proves when it is truthy (when) or falsy:
+// x, not x, x == nil, x ~= nil, a and b, a or b, a type guard isT(x),
+// type(x) == "string", and a discriminant field s.kind == "circle".
+func (c *Checker) narrowings(cond ast.Expression, when bool) facts {
+	switch e := cond.(type) {
+	case *ast.Identifier:
+		t, ok := c.env.Get(e.Value)
+		if !ok {
+			return nil
+		}
+		if when {
+			if base, optional := removeNil(t); optional {
+				return facts{e.Value: base}
+			}
+		} else if falsyPart(t) != nil && truthyPart(t) != nil {
+			if f := falsyPart(t); f != nil && IsNilType(f) {
+				return facts{e.Value: Nil}
+			}
+		}
+		return nil
+	case *ast.PrefixExpression:
+		if e.Operator == "not" || e.Operator == "!" {
+			return c.narrowings(e.Right, !when)
+		}
+		return nil
+	case *ast.CallExpression:
+		name, narrowed := c.extractTypeNarrowing(e)
+		if name == "" || narrowed == nil {
+			return nil
+		}
+		if when {
+			return facts{name: narrowed}
+		}
+		if original, ok := c.env.Get(name); ok {
+			if rest := subtractType(original, narrowed); rest != nil {
+				return facts{name: rest}
+			}
+		}
+		return nil
+	case *ast.InfixExpression:
+		switch e.Operator {
+		case "and", "&&":
+			if !when {
+				return nil
+			}
+			left := c.narrowings(e.Left, true)
+			prev := c.env
+			c.env = NewEnclosedEnvironment(prev)
+			c.applyFacts(left)
+			right := c.narrowings(e.Right, true)
+			c.env = prev
+			return mergeFacts(left, right)
+		case "or", "||":
+			if when {
+				return nil
+			}
+			left := c.narrowings(e.Left, false)
+			prev := c.env
+			c.env = NewEnclosedEnvironment(prev)
+			c.applyFacts(left)
+			right := c.narrowings(e.Right, false)
+			c.env = prev
+			return mergeFacts(left, right)
+		case "==", "~=", "!=":
+			holds := (e.Operator == "==") == when
+			if ident, ok := identComparedToNil(e.Left, e.Right); ok {
+				return c.nilFacts(ident, holds)
+			}
+			if ident, ok := identComparedToNil(e.Right, e.Left); ok {
+				return c.nilFacts(ident, holds)
+			}
+			if f := c.typeofFacts(e.Left, e.Right, holds); f != nil {
+				return f
+			}
+			if f := c.typeofFacts(e.Right, e.Left, holds); f != nil {
+				return f
+			}
+			if name, narrowed := c.extractDiscriminantNarrowing(e.Left, e.Right, holds); name != "" && narrowed != nil {
+				return facts{name: narrowed}
+			}
+			if name, narrowed := c.extractTypeNarrowing(e); name != "" && narrowed != nil && holds {
+				return facts{name: narrowed}
+			}
+		}
+	}
+	return nil
+}
+
+// nilFacts is what x == nil (holds) or x ~= nil (not holds) proves.
+func (c *Checker) nilFacts(ident *ast.Identifier, isNil bool) facts {
+	t, ok := c.env.Get(ident.Value)
+	if !ok {
+		return nil
+	}
+	base, optional := removeNil(t)
+	if !optional {
+		return nil
+	}
+	if isNil {
+		return facts{ident.Value: Nil}
+	}
+	return facts{ident.Value: base}
+}
+
+// typeofFacts is what type(x) == "name" proves, when call is type(x) and
+// lit the string.
+func (c *Checker) typeofFacts(call, lit ast.Expression, holds bool) facts {
+	ce, ok := call.(*ast.CallExpression)
+	if !ok || len(ce.Arguments) != 1 {
+		return nil
+	}
+	fn, ok := ce.Function.(*ast.Identifier)
+	if !ok || fn.Value != "type" {
+		return nil
+	}
+	ident, ok := ce.Arguments[0].(*ast.Identifier)
+	str, okStr := lit.(*ast.StringLiteral)
+	if !ok || !okStr {
+		return nil
+	}
+	t, found := c.env.Get(ident.Value)
+	if !found {
+		return nil
+	}
+	isKind := func(m Type) bool {
+		switch str.Value {
+		case "string":
+			return IsStringType(m)
+		case "number":
+			return IsNumericType(m)
+		case "boolean":
+			switch m.(type) {
+			case *BooleanType, *BooleanLiteralType:
+				return true
+			}
+		case "nil":
+			return IsNilType(m)
+		case "function":
+			_, isFn := m.(*FunctionType)
+			return isFn
+		case "table":
+			switch m.(type) {
+			case *ArrayType, *TableType, *InterfaceType, *ClassType, *TupleType:
+				return true
+			}
+		}
+		return false
+	}
+	var members []Type
+	if u, ok := t.(*UnionType); ok {
+		members = u.Types
+	} else if opt, ok := t.(*OptionalType); ok {
+		members = []Type{opt.BaseType, Nil}
+	} else {
+		switch t.(type) {
+		case *AnyType, *UnknownType:
+			if holds {
+				switch str.Value {
+				case "string":
+					return facts{ident.Value: String}
+				case "number":
+					return facts{ident.Value: Number}
+				case "boolean":
+					return facts{ident.Value: Boolean}
 				}
 			}
-			c.checkBlockStatement(node.Alternative)
-			c.env = prevEnv
+			return nil
 		}
-	} else {
-		// No type narrowing: check blocks normally
-		c.checkBlockStatement(node.Consequence)
-		if node.Alternative != nil {
-			c.checkBlockStatement(node.Alternative)
+		members = []Type{t}
+	}
+	var kept []Type
+	for _, m := range members {
+		if isKind(m) == holds {
+			kept = append(kept, m)
 		}
 	}
+	if len(kept) == 0 || len(kept) == len(members) {
+		return nil
+	}
+	return facts{ident.Value: unionOf(kept...)}
+}
+
+// subtractType is t without the members that fit taken (nil if none
+// remain, or t is not a union).
+func subtractType(t, taken Type) Type {
+	u, ok := t.(*UnionType)
+	if !ok {
+		return nil
+	}
+	var rest []Type
+	for _, m := range u.Types {
+		if m != nil && !m.IsAssignableTo(taken) {
+			rest = append(rest, m)
+		}
+	}
+	if len(rest) == 0 || len(rest) == len(u.Types) {
+		return nil
+	}
+	return unionOf(rest...)
+}
+
+// mergeFacts joins two sets of facts; later ones win.
+func mergeFacts(a, b facts) facts {
+	if len(a) == 0 {
+		return b
+	}
+	out := facts{}
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
 }
 
 // nilCheck describes an `x == nil` / `x ~= nil` test on an optional variable.
@@ -4937,16 +5155,10 @@ func (c *Checker) checkPrefixExpression(node *ast.PrefixExpression) Type {
 func (c *Checker) checkLogical(node *ast.InfixExpression, isAnd bool) Type {
 	leftType := c.checkExpression(node.Left)
 
+	// The right side runs where the left is truthy (and) or falsy (or).
 	prevEnv := c.env
-	if check, ok := c.nilNarrowing(node.Left); ok {
-		// The right side runs where the left is truthy (and) or falsy (or).
-		narrowed := check.nonNil
-		if check.nilInThen == isAnd {
-			narrowed = Nil
-		}
-		c.env = NewEnclosedEnvironment(prevEnv)
-		c.env.Narrow(check.varName, narrowed)
-	}
+	c.env = NewEnclosedEnvironment(prevEnv)
+	c.applyFacts(c.narrowings(node.Left, isAnd))
 	rightType := c.checkExpression(node.Right)
 	c.env = prevEnv
 

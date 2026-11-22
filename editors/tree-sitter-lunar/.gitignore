@@ -1,0 +1,8 @@
+# Generated parser sources are committed (editors install from them), but
+# not the compiled libraries tree-sitter builds while testing.
+*.so
+*.dylib
+*.dll
+*.wasm
+build/
+node_modules/

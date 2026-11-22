@@ -1,0 +1,44 @@
+==================
+Imports and exports
+==================
+
+import { Enemy, Stats } from "./actors/enemy"
+import * as m from "lib/math"
+export function double(n: number): number
+    return n * 2
+end
+export const VERSION: string = "1.0"
+
+---
+
+(chunk
+  (import_statement
+    (identifier)
+    (identifier)
+    (string))
+  (import_statement
+    (identifier)
+    (string))
+  (export_statement
+    (function_declaration
+      (function_name
+        (identifier))
+      (parameters
+        (parameter
+          (identifier)
+          (type_identifier
+            (identifier))))
+      (type_identifier
+        (identifier))
+      (block
+        (return_statement
+          (binary_expression
+            (identifier)
+            (number))))))
+  (export_statement
+    (variable_declaration
+      (typed_name
+        (identifier)
+        (type_identifier
+          (identifier)))
+      (string))))

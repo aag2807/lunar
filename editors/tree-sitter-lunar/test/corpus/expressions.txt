@@ -1,0 +1,125 @@
+==================
+Generic call versus comparison
+==================
+
+local b = Box<string>("boxed")
+if n < 0 then
+    print(a < b, c > d)
+end
+
+---
+
+(chunk
+  (variable_declaration
+    (typed_name
+      (identifier))
+    (generic_call
+      (identifier)
+      (type_arguments
+        (type_identifier
+          (identifier)))
+      (arguments
+        (string))))
+  (if_statement
+    (binary_expression
+      (identifier)
+      (number))
+    (block
+      (call_statement
+        (call
+          (identifier)
+          (arguments
+            (binary_expression
+              (identifier)
+              (identifier))
+            (binary_expression
+              (identifier)
+              (identifier))))))))
+
+==================
+Optional chaining, nullish and template strings
+==================
+
+local port = cfg?.server?.port ?? 8080
+local tag = cfg?.tags?[1]
+local msg = `hp is ${e.hp}!`
+
+---
+
+(chunk
+  (variable_declaration
+    (typed_name
+      (identifier))
+    (binary_expression
+      (dot_index
+        (dot_index
+          (identifier)
+          (identifier))
+        (identifier))
+      (number)))
+  (variable_declaration
+    (typed_name
+      (identifier))
+    (bracket_index
+      (dot_index
+        (identifier)
+        (identifier))
+      (number)))
+  (variable_declaration
+    (typed_name
+      (identifier))
+    (template_string
+      (template_chars)
+      (template_substitution
+        (dot_index
+          (identifier)
+          (identifier)))
+      (template_chars))))
+
+==================
+Match expression
+==================
+
+return match shape with
+    | { kind: "circle", radius: r } -> 3.14 * r * r
+    | n: number -> n
+    | s when s > 9 -> "big"
+    | _ -> 0
+end
+
+---
+
+(chunk
+  (return_statement
+    (match_expression
+      (identifier)
+      (match_arm
+        (pattern
+          (table_pattern
+            (identifier)
+            (pattern
+              (string))
+            (identifier)
+            (pattern
+              (identifier))))
+        (binary_expression
+          (binary_expression
+            (number)
+            (identifier))
+          (identifier)))
+      (match_arm
+        (pattern
+          (identifier)
+          (type_identifier
+            (identifier)))
+        (identifier))
+      (match_arm
+        (pattern
+          (identifier))
+        (binary_expression
+          (identifier)
+          (number))
+        (string))
+      (match_arm
+        (pattern)
+        (number)))))

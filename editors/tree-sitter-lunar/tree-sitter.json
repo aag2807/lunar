@@ -1,0 +1,21 @@
+{
+  "grammars": [
+    {
+      "name": "lunar",
+      "camelcase": "Lunar",
+      "scope": "source.lunar",
+      "path": ".",
+      "file-types": ["lunar"],
+      "highlights": "queries/highlights.scm",
+      "locals": "queries/locals.scm",
+      "injection-regex": "^lunar$"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Lunar, a statically-typed superset of Lua",
+    "links": { "repository": "https://github.com/aag2807/lunar" }
+  },
+  "bindings": { "c": true }
+}

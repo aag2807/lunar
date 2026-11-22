@@ -1,0 +1,236 @@
+==================
+Class with members
+==================
+
+class Enemy extends Actor implements Hittable
+    private hp: number = 10
+    speed?: number
+    constructor(hp: number)
+        self.hp = hp
+    end
+    hit(n: number): void
+        self.hp = self.hp - n
+    end
+    get alive(): boolean
+        return self.hp > 0
+    end
+    abstract kind(): string
+end
+
+---
+
+(chunk
+  (class_declaration
+    (identifier)
+    (type_identifier
+      (identifier))
+    (type_identifier
+      (identifier))
+    (class_property
+      (modifier)
+      (identifier)
+      (type_identifier
+        (identifier))
+      (number))
+    (class_property
+      (identifier)
+      (type_identifier
+        (identifier)))
+    (constructor_definition
+      (parameters
+        (parameter
+          (identifier)
+          (type_identifier
+            (identifier))))
+      (block
+        (assignment_statement
+          (dot_index
+            (identifier)
+            (identifier))
+          (identifier))))
+    (class_method
+      (identifier)
+      (parameters
+        (parameter
+          (identifier)
+          (type_identifier
+            (identifier))))
+      (type_identifier
+        (identifier))
+      (block
+        (assignment_statement
+          (dot_index
+            (identifier)
+            (identifier))
+          (binary_expression
+            (dot_index
+              (identifier)
+              (identifier))
+            (identifier)))))
+    (getter
+      (identifier)
+      (type_identifier
+        (identifier))
+      (block
+        (return_statement
+          (binary_expression
+            (dot_index
+              (identifier)
+              (identifier))
+            (number)))))
+    (abstract_method
+      (identifier)
+      (parameters)
+      (type_identifier
+        (identifier)))))
+
+==================
+Interface, enum and type alias
+==================
+
+interface Stats
+    atk: number
+    def?: number
+end
+
+enum Rank
+    Grunt
+    Elite = 10
+end
+
+type Id = string | number
+type Point
+    x: number
+    y: number
+end
+
+---
+
+(chunk
+  (interface_declaration
+    (identifier)
+    (property_signature
+      (identifier)
+      (type_identifier
+        (identifier)))
+    (property_signature
+      (identifier)
+      (type_identifier
+        (identifier))))
+  (enum_declaration
+    (identifier)
+    (enum_member
+      (identifier))
+    (enum_member
+      (identifier)
+      (number)))
+  (type_alias
+    (identifier)
+    (union_type
+      (type_identifier
+        (identifier))
+      (type_identifier
+        (identifier))))
+  (type_alias
+    (identifier)
+    (property_signature
+      (identifier)
+      (type_identifier
+        (identifier)))
+    (property_signature
+      (identifier)
+      (type_identifier
+        (identifier)))))
+
+==================
+Declarations
+==================
+
+declare function spawn(kind: string, count?: number): number
+declare function tick(dt: number): void end
+
+declare namespace audio
+    function play(name: string, volume?: number): void
+    const masterVolume: number
+end
+
+declare class Sprite
+    x: number
+    constructor(path: string)
+    draw(): void
+    static load(path: string): Sprite
+end
+
+---
+
+(chunk
+  (declare_statement
+    (function_name
+      (identifier))
+    (parameters
+      (parameter
+        (identifier)
+        (type_identifier
+          (identifier)))
+      (parameter
+        (identifier)
+        (type_identifier
+          (identifier))))
+    (type_identifier
+      (identifier)))
+  (declare_statement
+    (function_name
+      (identifier))
+    (parameters
+      (parameter
+        (identifier)
+        (type_identifier
+          (identifier))))
+    (type_identifier
+      (identifier)))
+  (declare_statement
+    (declare_namespace
+      (identifier)
+      (identifier)
+      (parameters
+        (parameter
+          (identifier)
+          (type_identifier
+            (identifier)))
+        (parameter
+          (identifier)
+          (type_identifier
+            (identifier))))
+      (type_identifier
+        (identifier))
+      (typed_name
+        (identifier)
+        (type_identifier
+          (identifier)))))
+  (declare_statement
+    (declare_class
+      (identifier)
+      (property_signature
+        (identifier)
+        (type_identifier
+          (identifier)))
+      (parameters
+        (parameter
+          (identifier)
+          (type_identifier
+            (identifier))))
+      (method_signature
+        (identifier)
+        (parameters)
+        (type_identifier
+          (identifier)))
+      (method_signature
+        (modifier)
+        (identifier)
+        (parameters
+          (parameter
+            (identifier)
+            (type_identifier
+              (identifier))))
+        (type_identifier
+          (identifier))))))

@@ -1,0 +1,79 @@
+==================
+Lua constructs
+==================
+
+local function f(...: any): number
+    return select("#", ...)
+end
+repeat
+    i = i + 1
+until i >= 3
+for k, v in pairs(t) do
+    t[k] = nil
+end
+local long = [[two
+lines]]
+--[[ a
+block comment ]]
+local x = 0xFF + 1e-9 + .5; local y = 1
+
+---
+
+(chunk
+  (variable_declaration
+    (identifier)
+    (parameters
+      (parameter
+        (type_identifier
+          (identifier))))
+    (type_identifier
+      (identifier))
+    (block
+      (return_statement
+        (call
+          (identifier)
+          (arguments
+            (string)
+            (vararg_expression))))))
+  (repeat_statement
+    (block
+      (assignment_statement
+        (identifier)
+        (binary_expression
+          (identifier)
+          (number))))
+    (binary_expression
+      (identifier)
+      (number)))
+  (for_generic_statement
+    (typed_name
+      (identifier))
+    (typed_name
+      (identifier))
+    (call
+      (identifier)
+      (arguments
+        (identifier)))
+    (block
+      (assignment_statement
+        (bracket_index
+          (identifier)
+          (identifier))
+        (nil))))
+  (variable_declaration
+    (typed_name
+      (identifier))
+    (string))
+  (comment)
+  (variable_declaration
+    (typed_name
+      (identifier))
+    (binary_expression
+      (binary_expression
+        (number)
+        (number))
+      (number)))
+  (variable_declaration
+    (typed_name
+      (identifier))
+    (number)))

@@ -884,11 +884,11 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 	var output strings.Builder
 	className := node.Name.Value
 
-	// Track parent class name for super
+	// The parent as written: Base, or Geo.Base through a namespace.
+	parentName := ""
 	if node.Extends != nil {
-		if parentIdent, ok := node.Extends.(*ast.Identifier); ok {
-			g.classParents[className] = parentIdent.Value
-		}
+		parentName = g.generateExpression(node.Extends)
+		g.classParents[className] = parentName
 	}
 
 	// Set current class context
@@ -901,12 +901,9 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 	output.WriteString(fmt.Sprintf("%s%s = {}\n", g.localUnlessForward(className), className))
 
 	// Set up inheritance if there's a parent class
-	if node.Extends != nil {
-		if parentIdent, ok := node.Extends.(*ast.Identifier); ok {
-			parentName := parentIdent.Value
-			output.WriteString(g.generateIndent())
-			output.WriteString(fmt.Sprintf("setmetatable(%s, {__index = %s})\n", className, parentName))
-		}
+	if parentName != "" {
+		output.WriteString(g.generateIndent())
+		output.WriteString(fmt.Sprintf("setmetatable(%s, {__index = %s})\n", className, parentName))
 	}
 
 	output.WriteString(g.generateIndent())
@@ -914,10 +911,6 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 
 	// A class with accessors keeps them in __getters/__setters tables,
 	// chained to the parent's so inherited accessors are found too.
-	parentName := ""
-	if parentIdent, ok := node.Extends.(*ast.Identifier); ok {
-		parentName = parentIdent.Value
-	}
 	hasAccessors := len(node.Getters) > 0 || len(node.Setters) > 0
 	if hasAccessors {
 		output.WriteString(g.accessorTables(className, parentName))

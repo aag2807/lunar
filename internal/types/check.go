@@ -1211,6 +1211,9 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 			} else {
 				c.addError(fmt.Sprintf("Parent class '%s' not found", ident.Value), ident.Token)
 			}
+		} else if parentClass, ok := c.resolveTypeExpression(node.Extends).(*ClassType); ok {
+			// extends Geo.Base
+			classType.Parent = parentClass
 		}
 	}
 
@@ -1453,6 +1456,12 @@ func (c *Checker) addInterfaceProperty(iface *InterfaceType, prop *ast.PropertyD
 	}
 	name := prop.Name.Value
 	iface.Properties[name] = propType
+	if prop.IsReadonly {
+		if iface.ReadonlyProps == nil {
+			iface.ReadonlyProps = map[string]bool{}
+		}
+		iface.ReadonlyProps[name] = true
+	}
 	setMemberSym(&iface.MemberSyms, name, c.memberSym(prop.Name.Token, SymProperty, propType, iface.Name))
 	if prop.IsStatic {
 		if iface.StaticProps == nil {
@@ -1586,6 +1595,20 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		}
 
 		c.addError(fmt.Sprintf("Unknown type '%s'", node.Value), node.Token)
+		return Any
+
+	case *ast.DotExpression:
+		// Geo.Pos: a type a namespace or a module (import * as m) holds.
+		owner := c.qualifiedOwner(node.Left)
+		name, _ := node.Right.(*ast.Identifier)
+		if owner != nil && name != nil {
+			if member, ok := owner.Members[name.Value]; ok {
+				return member
+			}
+			c.addError(fmt.Sprintf("'%s' has no type '%s'", owner.Name, name.Value), name.Token)
+			return Any
+		}
+		c.addError(fmt.Sprintf("'%s' is not a namespace or module", typeExprText(node.Left)), node.Token)
 		return Any
 
 	case *ast.ArrayType:
@@ -4056,6 +4079,15 @@ func (c *Checker) checkBlockStatement(node *ast.BlockStatement) {
 	prevEnv := c.env
 	c.env = NewEnclosedEnvironment(prevEnv)
 
+	// Types declared inside the block, usable throughout it.
+	c.predeclareTypeNames(node.Statements)
+	for _, stmt := range node.Statements {
+		switch stmt.(type) {
+		case *ast.InterfaceDeclaration, *ast.TypeDeclaration, *ast.EnumDeclaration, *ast.ClassDeclaration:
+			c.registerTypeDefinition(stmt)
+		}
+	}
+
 	for _, stmt := range node.Statements {
 		c.checkStatement(stmt)
 	}
@@ -4172,6 +4204,11 @@ func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target as
 			case *EnumType:
 				c.addError(fmt.Sprintf("Cannot assign to enum member '%s'", field.Value), field.Token)
 				return
+			case *InterfaceType:
+				if owner.ReadonlyProps[field.Value] {
+					c.addError(fmt.Sprintf("Cannot assign to readonly property '%s'", field.Value), field.Token)
+					return
+				}
 			case *ClassType:
 				if _, isProp := owner.GetProperty(field.Value); !isProp {
 					_, hasGetter := owner.GetGetter(field.Value)
@@ -4849,6 +4886,35 @@ func typeMethodSelf(lit *ast.TableLiteral, iface *InterfaceType, annotation ast.
 			self.Type = annotation
 		}
 	}
+}
+
+// qualifiedOwner is the namespace a qualified type name's left side names.
+func (c *Checker) qualifiedOwner(e ast.Expression) *NamespaceType {
+	switch n := e.(type) {
+	case *ast.Identifier:
+		if t, ok := c.env.Get(n.Value); ok {
+			ns, _ := t.(*NamespaceType)
+			return ns
+		}
+	case *ast.DotExpression:
+		if outer := c.qualifiedOwner(n.Left); outer != nil {
+			if name, ok := n.Right.(*ast.Identifier); ok {
+				ns, _ := outer.Members[name.Value].(*NamespaceType)
+				return ns
+			}
+		}
+	}
+	return nil
+}
+
+func typeExprText(e ast.Expression) string {
+	switch n := e.(type) {
+	case *ast.Identifier:
+		return n.Value
+	case *ast.DotExpression:
+		return typeExprText(n.Left) + "." + typeExprText(n.Right)
+	}
+	return "?"
 }
 
 // withoutFirstParameter is fn as called with ':', which supplies the first

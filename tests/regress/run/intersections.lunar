@@ -1,0 +1,14 @@
+interface A
+    a: number
+end
+interface B
+    b: number
+end
+interface C extends A, B
+end
+local ab: A & B = { a = 1, b = 2 }
+local function both(x: A & B): number
+    return x.a + x.b
+end
+local c: C = { a = 3, b = 4 }
+assert(both(ab) == 3 and both(c) == 7)

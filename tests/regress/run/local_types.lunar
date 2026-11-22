@@ -1,0 +1,17 @@
+-- Types declared inside a function.
+local function area(w: number, h: number): number
+    interface Rect
+        w: number
+        h: number
+    end
+    enum Unit
+        Px
+        Em
+    end
+    type Size = number
+    local r: Rect = { w = w, h = h }
+    local s: Size = r.w * r.h
+    assert(Unit.Em == 1)
+    return s
+end
+assert(area(2, 3) == 6)

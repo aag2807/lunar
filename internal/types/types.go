@@ -932,9 +932,16 @@ func classHasShape(cl *ClassType, iface *InterfaceType) bool {
 }
 
 // fitsUnionMember says whether t fits a union or optional target because
-// it fits one of its members.
+// it fits one of its members, or an intersection because it fits them all.
 func fitsUnionMember(t, other Type) bool {
 	switch o := other.(type) {
+	case *IntersectionType:
+		for _, m := range o.Types {
+			if m == nil || !t.IsAssignableTo(m) {
+				return false
+			}
+		}
+		return len(o.Types) > 0
 	case *UnionType:
 		for _, m := range o.Types {
 			if m != nil && t.IsAssignableTo(m) {

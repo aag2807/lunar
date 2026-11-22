@@ -1,0 +1,7 @@
+interface P
+    readonly id: number
+    name: string
+end
+local p: P = { id = 1, name = "x" }
+p.id = 2
+-- error: readonly

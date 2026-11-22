@@ -1247,7 +1247,7 @@ func (p *Parser) parseType() ast.Expression {
 		// Template literal type: `Hello ${string}` or `${T}_${U}`
 		return p.parseTemplateLiteralType()
 	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
-		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		typeExpr = p.parseTypeName()
 	default:
 		p.addError(fmt.Sprintf("expected a type, got '%s'", p.curToken.Literal), p.curToken)
 		return nil
@@ -1665,7 +1665,7 @@ func (p *Parser) parseSimpleTypeWithSuffixes(skipOptional bool) ast.Expression {
 	case lexer.FALSE:
 		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: false}
 	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
-		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		typeExpr = p.parseTypeName()
 	default:
 		return nil
 	}
@@ -1820,7 +1820,7 @@ func (p *Parser) parseNonUnionIntersectionType(skipOptional bool) ast.Expression
 	case lexer.FALSE:
 		typeExpr = &ast.BooleanLiteral{Token: p.curToken, Value: false}
 	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
-		typeExpr = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		typeExpr = p.parseTypeName()
 	default:
 		return nil
 	}
@@ -2809,6 +2809,24 @@ func (p *Parser) parseDoStatement() *ast.DoStatement {
 	return stmt
 }
 
+// parseTypeName reads a type's name, qualified by the namespaces or
+// modules it is reached through: Pos, Geo.Pos, m.Shapes.Circle.
+func (p *Parser) parseTypeName() ast.Expression {
+	var name ast.Expression = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	for p.peekTokenIs(lexer.DOT) {
+		state := p.SaveState()
+		p.nextToken()
+		dot := p.curToken
+		if !lexer.CanBeFieldName(p.peekToken) {
+			p.RestoreState(state)
+			break
+		}
+		p.nextToken()
+		name = &ast.DotExpression{Token: dot, Left: name, Right: &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}}
+	}
+	return name
+}
+
 // parseLabelStatement parses ::name::, starting on the first ':'.
 func (p *Parser) parseLabelStatement() ast.Statement {
 	stmt := &ast.LabelStatement{Token: p.curToken}
@@ -2973,10 +2991,20 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 	if p.peekTokenIs(lexer.EXTENDS) {
 		p.nextToken() // consume 'extends'
 		p.nextToken() // move to parent class name
-		class.Extends = &ast.Identifier{
+		var parent ast.Expression = &ast.Identifier{
 			Token: p.curToken,
 			Value: p.curToken.Literal,
 		}
+		// extends Geo.Base: a class reached through a namespace or module
+		for p.peekTokenIs(lexer.DOT) {
+			p.nextToken()
+			dot := p.curToken
+			if !p.expectPeekFieldName() {
+				break
+			}
+			parent = &ast.DotExpression{Token: dot, Left: parent, Right: p.parseFieldName()}
+		}
+		class.Extends = parent
 	}
 
 	// Parse implements clause
@@ -3398,6 +3426,14 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 				iface.IndexSignature = indexSig
 			}
 			p.nextToken() // move past index signature
+		} else if p.curTokenIs(lexer.READONLY) && p.peekTokenIsIdentOrContextual() {
+			// readonly name: T
+			p.nextToken()
+			prop := p.parsePropertyDeclaration()
+			if prop != nil {
+				prop.IsReadonly = true
+				iface.Properties = append(iface.Properties, prop)
+			}
 		} else if p.curTokenIs(lexer.STATIC) {
 			// Handle static keyword
 			p.nextToken() // move past 'static'

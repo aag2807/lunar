@@ -1,0 +1,19 @@
+-- Types reached through a namespace.
+namespace Geo
+    export interface Pos
+        x: number
+        y: number
+    end
+    export class Base
+        tag(): string
+            return "base"
+        end
+    end
+end
+local p: Geo.Pos = { x = 1, y = 2 }
+class Thing extends Geo.Base
+end
+local function sum(q: Geo.Pos): number
+    return q.x + q.y
+end
+assert(sum(p) == 3 and Thing().tag() == "base")

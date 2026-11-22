@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  linux:
+    name: linux (Lua 5.3 + 5.4)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Lua 5.3 and 5.4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.3 lua5.4 liblua5.3-dev liblua5.4-dev pkg-config
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      # LUNAR_REQUIRE_LUA turns the runtime and no-libraries host tests from
+      # "skip when Lua is missing" into "fail when Lua is missing". The
+      # runtime test covers the target matrix itself: lua53 output under
+      # 5.3 and 5.4, lua54 output under 5.4.
+      - name: go test
+        env:
+          LUNAR_REQUIRE_LUA: "1"
+          LUNAR_LUA_BINS: "lua5.3 lua5.4"
+        run: go test -race ./...
+
+  windows:
+    name: windows (paths)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: go test
+        run: go test ./...

@@ -1,6 +1,9 @@
 package types
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // An optional stays 'T | nil' without narrowing, which makes optional
 // parameters unusable: every use has to be guarded, and the guard has to work.
@@ -95,12 +98,15 @@ local ok, result = pcall(risky)
 	}
 }
 
-// A non-call value still has to match the number of names.
-func TestExtraNamesWithoutACallAreStillReported(t *testing.T) {
-	errors := checkSource(t, "local a, b = 1")
-
-	if len(errors) == 0 {
-		t.Error("expected a mismatch between 2 names and 1 plain value")
+// As in Lua, a name with no value is nil, which an untyped name accepts
+// and a name typed as non-nil does not.
+func TestNamesWithoutValuesAreNil(t *testing.T) {
+	if errors := checkSource(t, "local a, b = 1\nlocal c = 1, 2"); len(errors) != 0 {
+		t.Errorf("untyped: %v", messages(errors))
+	}
+	errors := checkSource(t, "local a: number, b: number = 1")
+	if len(errors) != 1 || !strings.Contains(errors[0].Message, "'b'") {
+		t.Errorf("typed: %v", messages(errors))
 	}
 }
 

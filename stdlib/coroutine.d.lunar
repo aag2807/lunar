@@ -1,10 +1,13 @@
--- Lua 5.1 Coroutine Library Type Declarations
+-- Lua 5.3 and 5.4 Coroutine Library Type Declarations
 -- This file provides type definitions for Lua's coroutine manipulation functions
 
 -- Coroutine module interface
 declare interface Coroutine
     -- Creates a new coroutine with body function f
     create: function(f: any): any
+
+    -- Whether the running coroutine can yield (Lua 5.3+)
+    isyieldable: function(): boolean
 
     -- Starts or continues the execution of coroutine co
     resume: function(co: any, ...args: any): any

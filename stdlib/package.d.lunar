@@ -1,4 +1,4 @@
--- Lua 5.1 Package/Module Library Type Declarations
+-- Lua 5.3 and 5.4 Package/Module Library Type Declarations
 -- This file provides type definitions for Lua's module loading and package management
 
 -- Package module interface

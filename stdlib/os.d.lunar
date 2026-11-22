@@ -1,4 +1,4 @@
--- Lua 5.1 OS Library
+-- Lua 5.3 and 5.4 OS Library
 -- Type declarations for operating system facilities
 
 declare type DateTable

@@ -1038,9 +1038,13 @@ func (t *ClassType) IsChildOf(other *ClassType) bool {
 
 // InterfaceType represents an interface type
 type InterfaceType struct {
-	Name           string
-	Methods        map[string]*FunctionType
-	Properties     map[string]Type
+	Name       string
+	Methods    map[string]*FunctionType
+	Properties map[string]Type
+	// Open is set for the type of an unannotated table literal: like a Lua
+	// table, it gains a field when one is assigned, and a field it lacks
+	// reads as any. Interfaces that are written down stay closed.
+	Open           bool
 	Extends        []*InterfaceType
 	IndexSignature *IndexSignature // [key: KeyType]: ValueType
 	ReadonlyProps  map[string]bool // Track readonly properties (for as const)

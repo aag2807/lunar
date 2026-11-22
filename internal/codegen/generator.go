@@ -380,6 +380,15 @@ func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) s
 		output.WriteString("local ")
 	}
 	output.WriteString("function ")
+	if node.Receiver != nil {
+		// function M.add() and function Point:len(), as written.
+		output.WriteString(g.generateExpression(node.Receiver))
+		if node.IsMethod {
+			output.WriteString(":")
+		} else {
+			output.WriteString(".")
+		}
+	}
 	output.WriteString(node.Name.Value)
 	output.WriteString("(")
 

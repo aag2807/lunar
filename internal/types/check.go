@@ -687,7 +687,7 @@ func (c *Checker) hoistFunctionSignatures(statements []ast.Statement) {
 			stmt = exp.Statement
 		}
 		fn, ok := stmt.(*ast.FunctionDeclaration)
-		if !ok || fn.Name == nil || declared[fn.Name.Value] {
+		if !ok || fn.Name == nil || fn.Receiver != nil || declared[fn.Name.Value] {
 			continue
 		}
 
@@ -1186,10 +1186,49 @@ func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
 		return
 	}
 	interfaceType := c.buildInterface(node, node.Name.Value, nil)
+	// A second declaration of an interface adds to the first, so a later
+	// declaration file can extend one (Lua 5.4's coroutine.close).
+	if existing, ok := c.interfaces[node.Name.Value]; ok && existing.Properties != nil && c.shells[node.Name.Value] == nil {
+		mergeInterface(existing, interfaceType)
+		return
+	}
 	interfaceType = c.fillInterfaceShell(interfaceType)
 	c.interfaces[interfaceType.Name] = interfaceType
 	c.env.Set(interfaceType.Name, interfaceType)
 	c.typeSyms[interfaceType.Name] = c.define(node.Name.Token, SymInterface, interfaceType)
+}
+
+// mergeInterface adds more's members to into.
+func mergeInterface(into, more *InterfaceType) {
+	for name, t := range more.Properties {
+		into.Properties[name] = t
+	}
+	if into.Methods == nil {
+		into.Methods = map[string]*FunctionType{}
+	}
+	for name, m := range more.Methods {
+		into.Methods[name] = m
+	}
+	for _, flags := range []struct {
+		dst *map[string]bool
+		src map[string]bool
+	}{
+		{&into.OptionalProps, more.OptionalProps}, {&into.StaticProps, more.StaticProps}, {&into.StaticMethods, more.StaticMethods},
+	} {
+		for name, v := range flags.src {
+			if *flags.dst == nil {
+				*flags.dst = map[string]bool{}
+			}
+			(*flags.dst)[name] = v
+		}
+	}
+	for name, sym := range more.MemberSyms {
+		setMemberSym(&into.MemberSyms, name, sym)
+	}
+	into.Extends = append(into.Extends, more.Extends...)
+	if into.IndexSignature == nil {
+		into.IndexSignature = more.IndexSignature
+	}
 }
 
 // memberSym defines a member's symbol, or reuses the shared one while an
@@ -2556,7 +2595,8 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 			if declaredTypes[i] != nil {
 				varType = declaredTypes[i]
 			} else {
-				varType = Nil
+				// `local x` with no type: it takes whatever it is given.
+				varType = Any
 			}
 
 			if node.IsConstant || attribOf(node, i) == "const" {
@@ -2598,31 +2638,13 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 		}
 	}
 
-	// Check that the number of variables matches number of values
-	if len(node.Names) != len(valueTypes) {
-		c.addError(
-			fmt.Sprintf("Number of variables (%d) does not match number of values (%d)",
-				len(node.Names), len(valueTypes)),
-			node.Token,
-		)
-		// Register variables anyway to avoid cascading errors
-		for i, name := range node.Names {
-			var varType Type = Any
-			if i < len(declaredTypes) && declaredTypes[i] != nil {
-				varType = declaredTypes[i]
-			} else if i < len(valueTypes) {
-				varType = valueTypes[i]
-			}
-
-			if node.IsConstant || attribOf(node, i) == "const" {
-				c.env.SetConst(name.Value, varType)
-			} else {
-				c.env.Set(name.Value, varType)
-			}
-			c.define(name.Token, SymVariable, varType)
-		}
-		return
+	// Lua adjusts the values to the names: a missing one is nil and an
+	// extra one is dropped (local a, b = 1; local ok = pcall(f)). A name
+	// typed as non-nil that is left without a value is reported below.
+	for len(valueTypes) < len(node.Names) {
+		valueTypes = append(valueTypes, Nil)
 	}
+	valueTypes = valueTypes[:len(node.Names)]
 
 	// Register each variable with type checking
 	for i, name := range node.Names {
@@ -2648,6 +2670,10 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 			// Infer type from value
 			finalType = valueType
 
+			// `local x = nil` with no type declares a variable to fill later.
+			if IsNilType(finalType) && !node.IsConstant {
+				finalType = Any
+			}
 			// A mutable binding widens a literal to its base type unless the
 			// value explicitly asked to stay literal with `as const`.
 			if !node.IsConstant && (i >= len(node.Values) || !isConstAssertion(node.Values[i])) {
@@ -2667,14 +2693,23 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 
 // requiredParamCount returns how many arguments a signature demands, which is
 // the number of parameters before the first optional one.
+//
+// A parameter that may be nil (b: number?) can be left out only when every
+// parameter after it can be too; before a required one it must be passed,
+// if only as nil.
 func requiredParamCount(fnType *FunctionType) int {
-	for i, isOptional := range fnType.OptionalParams {
-		if isOptional {
-			return i
-		}
+	required := len(fnType.Parameters)
+	if fnType.HasRestParameter && required > 0 {
+		required-- // the rest takes any number, none included
 	}
-
-	return len(fnType.Parameters)
+	for required > 0 {
+		i := required - 1
+		if i >= len(fnType.OptionalParams) || !fnType.OptionalParams[i] {
+			break
+		}
+		required--
+	}
+	return required
 }
 
 // yieldsMultipleValues reports whether an expression can produce more than one
@@ -2693,6 +2728,10 @@ func yieldsMultipleValues(expr ast.Expression) bool {
 // the same thing in Lua, where a missing argument arrives as nil.
 func paramIsOptional(param *ast.Parameter, resolved Type) bool {
 	if param.IsOptional {
+		return true
+	}
+	// An untyped parameter is a Lua parameter: left out, it is nil.
+	if param.Type == nil && !param.IsRest {
 		return true
 	}
 
@@ -2758,6 +2797,10 @@ func isConstAssertion(expr ast.Expression) bool {
 
 // checkFunctionDeclaration checks a function declaration
 func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
+	if node.Receiver != nil {
+		c.checkFieldFunction(node)
+		return
+	}
 	if node.IsAsync {
 		c.addErrorCode("not-supported", "'async' functions are not supported: nothing would resume them. Use coroutine.create and coroutine.resume", node.Token)
 	}
@@ -2803,9 +2846,11 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 				params[i] = &ArrayType{ElementType: Any}
 			}
 		} else {
-			// Validate optional parameter ordering
+			// Validate optional parameter ordering. Only `name?:` says a
+			// parameter may be left out; `name: T?` may be nil, and before a
+			// required parameter it still has to be passed.
 			if paramIsOptional(param, c.resolveTypeExpression(param.Type)) {
-				hasOptional = true
+				hasOptional = hasOptional || param.IsOptional
 				optionalParams[i] = true
 			} else if hasOptional && !param.IsRest {
 				// Required parameter after optional parameter
@@ -2859,13 +2904,53 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		}
 	}
 
+	// A script may define a global that a declaration file describes, so
+	// the scripts calling it know its type; an untyped parameter or return
+	// takes the declared type: `function ring_run(n)` for
+	// `declare function ring_run(n: number): number`.
+	contextual := false
+	if declared, ok := c.env.Get(node.Name.Value); ok && !node.IsLocal {
+		if fn, isFn := declared.(*FunctionType); isFn && len(fn.Overloads) == 0 &&
+			(c.declaredFuncs[fn] || c.ambient[node.Name.Value] == declared) {
+			for i, param := range node.Parameters {
+				if param.Type == nil && !param.IsRest && i < len(fn.Parameters) {
+					params[i] = fn.Parameters[i]
+					funcType.Parameters[i] = fn.Parameters[i]
+					optional := i < len(fn.OptionalParams) && fn.OptionalParams[i]
+					if i < len(funcType.OptionalParams) {
+						funcType.OptionalParams[i] = optional
+					}
+				}
+			}
+			if node.ReturnType == nil {
+				returnType = fn.ReturnType
+				funcType.ReturnType = fn.ReturnType
+				contextual = true
+			}
+		}
+	}
+
 	// A name can have one implementation. Overloads describe external APIs
 	// and are written as `declare function` signatures; two bodies for one
 	// global would leave only the last at run time.
 	if existingType, ok := c.env.Get(node.Name.Value); ok && existingType != Type(funcType) {
 		existingFunc, isFunc := existingType.(*FunctionType)
 		_, inThisScope := c.env.store[node.Name.Value]
+		declaredGlobal := c.ambient[node.Name.Value] == existingType && !node.IsLocal
 		switch {
+		case declaredGlobal && !isFunc:
+			// Declared as a value: any takes the function, nothing else can.
+			if _, isAny := existingType.(*AnyType); !isAny {
+				c.addError(fmt.Sprintf("'%s' is declared as '%s', so a function cannot define it", node.Name.Value, existingType.String()),
+					node.Name.Token)
+			}
+			c.env.Set(node.Name.Value, funcType)
+		case declaredGlobal && !c.declaredFuncs[existingFunc]:
+			// Declared as a function-typed value: the definition has to fit.
+			if !funcType.IsAssignableTo(existingFunc) {
+				c.addError(fmt.Sprintf("Function '%s' does not match its declaration '%s'",
+					node.Name.Value, existingFunc.String()), node.Name.Token)
+			}
 		case isFunc && c.declaredFuncs[existingFunc]:
 			// Implementing a declared function: it has to fit the declaration,
 			// which stays the type callers see.
@@ -2902,9 +2987,10 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	c.currentFunctionReturnType = returnType
 
 	// Without an annotation the return type is inferred from the body rather
-	// than forced to void, so plain Lua functions keep working.
+	// than forced to void, so plain Lua functions keep working; one that
+	// defines a declared function returns what the declaration says.
 	prevInferring, prevInferred := c.inferringReturn, c.inferredReturns
-	c.inferringReturn = node.ReturnType == nil
+	c.inferringReturn = node.ReturnType == nil && !contextual
 	c.inferredReturns = nil
 
 	if c.inferringReturn {
@@ -3714,6 +3800,24 @@ func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target as
 		}
 	}
 
+	// Assigning a field an unannotated table literal lacks adds it, as in
+	// Lua: local t = { a = 1 }; t.b = 2.
+	if dot, ok := target.(*ast.DotExpression); ok && !dot.IsOptional {
+		if field, ok := dot.Right.(*ast.Identifier); ok {
+			if rec, ok := c.checkExpression(dot.Left).(*InterfaceType); ok && rec.Open {
+				_, hasProp := rec.Properties[field.Value]
+				_, hasMethod := rec.Methods[field.Value]
+				if !hasProp && !hasMethod {
+					added := Type(Any)
+					if valueType != nil {
+						added = widenLiteralType(valueType)
+					}
+					rec.Properties[field.Value] = added
+				}
+			}
+		}
+	}
+
 	targetType := c.checkExpression(target)
 	if valueType == nil {
 		return
@@ -4182,6 +4286,29 @@ func literalKeyName(key ast.Expression) (*ast.Identifier, bool) {
 	return nil, false
 }
 
+// checkFieldFunction checks `function M.f(...)` and `function t:m(...)`,
+// which Lua defines as `M.f = function(...)` and `t.m = function(self,
+// ...)`: the function is checked as that expression, then assigned to the
+// field, so an unannotated table gains it and a declared one must have it.
+func (c *Checker) checkFieldFunction(node *ast.FunctionDeclaration) {
+	if node.IsLocal {
+		c.addError("a local function has a plain name: local function f(), or M.f = function() ... end", node.Token)
+	}
+	params := node.Parameters
+	if node.IsMethod {
+		self := &ast.Parameter{Token: node.Name.Token, Name: &ast.Identifier{Token: node.Name.Token, Value: "self"}}
+		params = append([]*ast.Parameter{self}, params...)
+	}
+	fnType := c.checkFunctionExpression(&ast.FunctionExpression{Token: node.Token, GenericParams: node.GenericParams,
+		Parameters: params, ReturnType: node.ReturnType, Body: node.Body})
+	if fn, ok := fnType.(*FunctionType); ok {
+		fn.ParamNames = parameterNames(params)
+	}
+	target := &ast.DotExpression{Token: node.Name.Token, Left: node.Receiver, Right: node.Name}
+	c.checkAssignmentTarget(&ast.AssignmentStatement{Token: node.Name.Token, Targets: []ast.Expression{target}},
+		target, fnType)
+}
+
 // withoutFirstParameter is fn as called with ':', which supplies the first
 // argument itself.
 func withoutFirstParameter(fn *FunctionType) *FunctionType {
@@ -4384,6 +4511,7 @@ func (c *Checker) checkTableLiteral(node *ast.TableLiteral) Type {
 				Properties: properties,
 				Methods:    methods,
 				Extends:    []*InterfaceType{},
+				Open:       true,
 			}
 		}
 	}
@@ -4465,6 +4593,7 @@ func (c *Checker) mergeSpreadRecords(values []ast.Expression) Type {
 		Properties: properties,
 		Methods:    methods,
 		Extends:    []*InterfaceType{},
+		Open:       true,
 	}
 }
 
@@ -4555,8 +4684,188 @@ func (c *Checker) checkPrefixExpression(node *ast.PrefixExpression) Type {
 	}
 }
 
+// checkLogical checks a and b / a or b. In Lua they return one of their
+// operands: a or b is a when a is truthy, otherwise b; a and b is a when
+// a is falsy, otherwise b. The right side is checked knowing how the left
+// turned out, as an if statement would: `a and a * 2`, `x ~= nil and x.y`.
+func (c *Checker) checkLogical(node *ast.InfixExpression, isAnd bool) Type {
+	leftType := c.checkExpression(node.Left)
+
+	prevEnv := c.env
+	if check, ok := c.nilNarrowing(node.Left); ok {
+		// The right side runs where the left is truthy (and) or falsy (or).
+		narrowed := check.nonNil
+		if check.nilInThen == isAnd {
+			narrowed = Nil
+		}
+		c.env = NewEnclosedEnvironment(prevEnv)
+		c.env.Set(check.varName, narrowed)
+	}
+	rightType := c.checkExpression(node.Right)
+	c.env = prevEnv
+
+	if isAnyType(leftType) || isAnyType(rightType) {
+		return Any
+	}
+	if isAnd {
+		falsy := falsyPart(leftType)
+		if falsy == nil {
+			return rightType // the left is never falsy
+		}
+		return unionOf(falsy, rightType)
+	}
+	truthy := truthyPart(leftType)
+	if truthy == nil {
+		return rightType // the left is always nil or false
+	}
+	if falsyPart(leftType) == nil {
+		return leftType // the left is never falsy: b is never reached
+	}
+	return unionOf(truthy, rightType)
+}
+
+func isAnyType(t Type) bool {
+	_, ok := t.(*AnyType)
+	return ok
+}
+
+// truthyPart is what of t is neither nil nor false (nil if nothing is).
+func truthyPart(t Type) Type {
+	switch typ := t.(type) {
+	case *NilType, *VoidType:
+		return nil
+	case *BooleanLiteralType:
+		if typ.Value {
+			return typ
+		}
+		return nil
+	case *BooleanType:
+		return &BooleanLiteralType{Value: true}
+	case *OptionalType:
+		return truthyPart(typ.BaseType)
+	case *UnionType:
+		var parts []Type
+		for _, m := range typ.Types {
+			if part := truthyPart(m); part != nil {
+				parts = append(parts, part)
+			}
+		}
+		if len(parts) == 0 {
+			return nil
+		}
+		return unionOf(parts...)
+	}
+	return t
+}
+
+// falsyPart is what of t is nil or false (nil if nothing is).
+func falsyPart(t Type) Type {
+	switch typ := t.(type) {
+	case *NilType, *VoidType:
+		return Nil
+	case *BooleanLiteralType:
+		if typ.Value {
+			return nil
+		}
+		return typ
+	case *BooleanType:
+		return &BooleanLiteralType{Value: false}
+	case *OptionalType:
+		if part := falsyPart(typ.BaseType); part != nil {
+			return unionOf(Nil, part)
+		}
+		return Nil
+	case *UnionType:
+		var parts []Type
+		for _, m := range typ.Types {
+			if part := falsyPart(m); part != nil {
+				parts = append(parts, part)
+			}
+		}
+		if len(parts) == 0 {
+			return nil
+		}
+		return unionOf(parts...)
+	case *UnknownType:
+		return t
+	}
+	return nil
+}
+
+// unionOf joins types into one, flattening unions and dropping repeats;
+// true | false is boolean.
+func unionOf(types ...Type) Type {
+	var members []Type
+	seen := map[string]bool{}
+	var add func(Type)
+	add = func(t Type) {
+		if u, ok := t.(*UnionType); ok {
+			for _, m := range u.Types {
+				add(m)
+			}
+			return
+		}
+		if opt, ok := t.(*OptionalType); ok {
+			add(opt.BaseType)
+			add(Nil)
+			return
+		}
+		if key := t.String(); !seen[key] {
+			seen[key] = true
+			members = append(members, t)
+		}
+	}
+	for _, t := range types {
+		add(t)
+	}
+	if seen["true"] && seen["false"] {
+		kept := members[:0]
+		for _, m := range members {
+			if lit, ok := m.(*BooleanLiteralType); ok {
+				if lit.Value {
+					kept = append(kept, Boolean)
+				}
+				continue
+			}
+			kept = append(kept, m)
+		}
+		members = kept
+	}
+	// A literal beside its own base type adds nothing: string | "x" is
+	// string.
+	kept := members[:0]
+	for _, m := range members {
+		switch m.(type) {
+		case *BooleanLiteralType:
+			if seen["boolean"] {
+				continue
+			}
+		case *StringLiteralType:
+			if seen["string"] {
+				continue
+			}
+		case *NumberLiteralType:
+			if seen["number"] {
+				continue
+			}
+		}
+		kept = append(kept, m)
+	}
+	members = kept
+	if len(members) == 1 {
+		return members[0]
+	}
+	return &UnionType{Types: members}
+}
+
 // checkInfixExpression checks an infix expression
 func (c *Checker) checkInfixExpression(node *ast.InfixExpression) Type {
+	switch node.Operator {
+	case "and", "&&":
+		return c.checkLogical(node, true)
+	case "or", "||":
+		return c.checkLogical(node, false)
+	}
 	leftType := c.checkExpression(node.Left)
 	rightType := c.checkExpression(node.Right)
 
@@ -5233,6 +5542,11 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 			if _, isString := sig.KeyType.(*StringType); isString {
 				return resolved(ast.DispatchPlain, sig.ValueType)
 			}
+		}
+		// A table from an unannotated literal is a Lua table: a field it
+		// does not have is nil, or one set somewhere the checker cannot see.
+		if typ.Open {
+			return wrapIfOptional(Any)
 		}
 		c.addError(
 			fmt.Sprintf("Type '%s' has no property or method '%s'", typ.String(), propertyName),

@@ -634,6 +634,11 @@ type FunctionDeclaration struct {
 	IsLocal       bool         // declared as `local function f()`
 	Visibility    string       // visibility modifier: public, private, protected (when used in class)
 	Decorators    []*Decorator // decorators applied to the function
+	// Receiver is the table a function is defined into: M in
+	// `function M.add()`, a.b in `function a.b:m()`; nil for a plain name.
+	Receiver Expression
+	// IsMethod is set for `function t:m()`, which takes self first.
+	IsMethod bool
 }
 
 // AwaitExpression represents an await expression for async operations

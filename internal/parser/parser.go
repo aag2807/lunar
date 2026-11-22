@@ -2307,6 +2307,27 @@ func (p *Parser) parseFunctionSignature() *ast.FunctionDeclaration {
 	}
 	fd.Name = p.parseIdentifierOrContextual()
 
+	// function M.add(), function a.b.c:m(): what comes before the last
+	// name is the table the function goes into.
+	for p.peekTokenIs(lexer.DOT) || p.peekTokenIs(lexer.COLON) {
+		isMethod := p.peekTokenIs(lexer.COLON)
+		p.nextToken() // '.' or ':'
+		sep := p.curToken
+		if !p.expectPeekFieldName() {
+			return nil
+		}
+		if fd.Receiver == nil {
+			fd.Receiver = fd.Name
+		} else {
+			fd.Receiver = &ast.DotExpression{Token: sep, Left: fd.Receiver, Right: fd.Name}
+		}
+		fd.Name = p.parseFieldName()
+		if isMethod {
+			fd.IsMethod = true
+			break
+		}
+	}
+
 	// Parse generic parameters if present: <T, U>
 	if p.peekTokenIs(lexer.LT) {
 		p.nextToken() // consume <

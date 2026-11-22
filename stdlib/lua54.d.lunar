@@ -1,3 +1,8 @@
 -- Functions only Lua 5.4 has. Loaded when compiling for --target lua54.
 
 declare function warn(...messages: string): void
+
+declare interface Coroutine
+    -- Closes a coroutine and its pending to-be-closed variables
+    close: function(co: any): (boolean, any)
+end

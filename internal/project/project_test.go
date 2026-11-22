@@ -377,3 +377,20 @@ local hp: number = t.stats.hp
 	})
 	checkClean(t, open(t, Options{Dir: root}))
 }
+
+// One script defines a global helper that others call, as with the
+// engine's include: the declaration file describes it, the script that
+// defines it takes the declared types, and the others call it checked.
+func TestGlobalHelperDefinedInOneScript(t *testing.T) {
+	root := tree(t, map[string]string{
+		"lunar.config.json": `{"outDir": "../build"}`,
+		"shared.d.lunar":    "declare function ring_run(n: number, speed?: number): number\n",
+		"rings.lunar":       "function ring_run(n, speed)\n    return n * (speed or 1)\nend\n",
+		"level.lunar":       "local r: number = ring_run(2)\nlocal s = ring_run(2, 3)\n",
+		"bad.lunar":         "ring_run(\"fast\")\n",
+	})
+	_, diags := open(t, Options{Dir: root}).Check()
+	if len(diags) != 1 || !strings.HasSuffix(diags[0].File, "bad.lunar") || !strings.Contains(diags[0].Message, "Argument 1") {
+		t.Errorf("got %v", messagesOf(diags))
+	}
+}

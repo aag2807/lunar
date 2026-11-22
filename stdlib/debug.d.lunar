@@ -1,4 +1,4 @@
--- Lua 5.1 Debug Library Type Declarations
+-- Lua 5.3 and 5.4 Debug Library Type Declarations
 -- This file provides type definitions for Lua's debug/introspection functions
 
 -- Debug module interface

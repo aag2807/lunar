@@ -1,7 +1,12 @@
--- Lua 5.1 String Library
--- Type declarations for the string manipulation library
+-- Lua 5.3 and 5.4 string library
 
 declare interface StringLib
+	-- Binary packing (Lua 5.3+)
+	pack: function(fmt: string, ...values: any): string
+	packsize: function(fmt: string): number
+	unpack: function(fmt: string, s: string, pos?: number): any
+	dump: function(f: any, strip?: boolean): string
+
 	-- String Searching
 	find: function(s: string, pattern: string, init?: number, plain?: boolean): number | nil
 	match: function(s: string, pattern: string, init?: number): string | nil

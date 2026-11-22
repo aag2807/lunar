@@ -1,4 +1,4 @@
--- Lua 5.1 Math Library
+-- Lua 5.3 and 5.4 Math Library
 -- Type declarations for mathematical functions
 
 declare interface MathLib
@@ -42,6 +42,12 @@ declare interface MathLib
 
 	-- Constants
 	pi: number
+	maxinteger: number
+	mininteger: number
+	-- Integers (Lua 5.3+): math.type gives "integer", "float" or nil
+	tointeger: function(x: any): number | nil
+	type: function(x: any): string | nil
+	ult: function(m: number, n: number): boolean
 	huge: number
 end
 

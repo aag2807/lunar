@@ -71,3 +71,25 @@ func TestLocalAttributes(t *testing.T) {
 		t.Errorf("<close> on lua53: %q", errs)
 	}
 }
+
+// Two declarations of one interface add up, so a later declaration file
+// can extend a library: Lua 5.4's coroutine.close.
+func TestInterfaceDeclarationsMerge(t *testing.T) {
+	if errs := checkTarget(t, "lua54", `
+declare interface Engine
+    spawn: function(kind: string): number
+end
+declare interface Engine
+    despawn: function(id: number): void
+end
+declare const engine: Engine
+engine.despawn(engine.spawn("imp"))
+local co = coroutine.create(function() end)
+local closed = coroutine.close(co)
+`); len(errs) != 0 {
+		t.Errorf("merged declarations: %v", errs)
+	}
+	if errs := strings.Join(checkTarget(t, "lua53", "local co = coroutine.create(function() end)\ncoroutine.close(co)\n"), "\n"); !strings.Contains(errs, "'close'") {
+		t.Errorf("coroutine.close on lua53: %q", errs)
+	}
+}

@@ -1,5 +1,7 @@
 local Account = {}
 Account.__index = Account
+Account.__getters = {}
+Account.__setters = {}
 
 function Account.new(id, balance)
     local self = setmetatable({}, Account)
@@ -12,29 +14,29 @@ end
 
 Account.count = 0
 
-function Account:_get_amount()
+function Account.__getters.amount(self)
     return self.balance
 end
 
-function Account:_set_amount(value)
+function Account.__setters.amount(self, value)
     self.balance = value
 end
 
-local Account_mt = getmetatable(Account) or {}
-Account_mt.__index = function(self, key)
-    if key == "amount" then
-        return Account._get_amount(self)
+Account.__index = function(self, key)
+    local get = Account.__getters[key]
+    if get ~= nil then
+        return get(self)
     end
     return Account[key]
 end
-Account_mt.__newindex = function(self, key, value)
-    if key == "amount" then
-        Account._set_amount(self, value)
+Account.__newindex = function(self, key, value)
+    local set = Account.__setters[key]
+    if set ~= nil then
+        set(self, value)
         return
     end
     rawset(self, key, value)
 end
-setmetatable(Account, Account_mt)
 
 
 local Point = {}
@@ -60,8 +62,92 @@ local p = Point.new(2, 3)
 
 print(p.x, p.y, p:sum())
 
+local Savings = {}
+setmetatable(Savings, {__index = Account})
+Savings.__index = Savings
+Savings.__getters = setmetatable({}, {__index = Account.__getters})
+Savings.__setters = setmetatable({}, {__index = Account.__setters})
+
+function Savings.new(id, balance, rate)
+    local self = setmetatable({}, Savings)
+    self.rate = nil
+    do local __parent = Account.new(id, balance); for __k, __v in pairs(__parent) do self[__k] = __v end end
+    self.rate = rate
+    return self
+end
+
+function Savings.__getters.interest(self)
+    return self.amount * self.rate
+end
+
+Savings.__index = function(self, key)
+    local get = Savings.__getters[key]
+    if get ~= nil then
+        return get(self)
+    end
+    return Savings[key]
+end
+Savings.__newindex = function(self, key, value)
+    local set = Savings.__setters[key]
+    if set ~= nil then
+        set(self, value)
+        return
+    end
+    rawset(self, key, value)
+end
+
+
+local Plain = {}
+setmetatable(Plain, {__index = Account})
+Plain.__index = Plain
+
+function Plain.new(id)
+    local self = setmetatable({}, Plain)
+    do local __parent = Account.new(id, 1); for __k, __v in pairs(__parent) do self[__k] = __v end end
+    return self
+end
+
+if Account.__getters ~= nil then
+    Plain.__getters = setmetatable({}, {__index = Account.__getters})
+    Plain.__setters = setmetatable({}, {__index = Account.__setters})
+    Plain.__index = function(self, key)
+        local get = Plain.__getters[key]
+        if get ~= nil then
+            return get(self)
+        end
+        return Plain[key]
+    end
+    Plain.__newindex = function(self, key, value)
+        local set = Plain.__setters[key]
+        if set ~= nil then
+            set(self, value)
+            return
+        end
+        rawset(self, key, value)
+    end
+end
+
+
+local savings = Savings.new("s-1", 100, 0.5)
+
+local plain = Plain.new("p-1")
+
 assert(acct.id == "a-1")
 
 assert(Account.count == 0)
 
 assert(p.x == 2 and p.y == 3 and p:sum() == 5)
+
+assert(acct.amount == 100)
+
+acct.amount = 250
+
+assert(acct.amount == 250)
+
+assert(savings.amount == 100 and savings.interest == 50)
+
+savings.amount = 10
+
+assert(savings.amount == 10 and savings.interest == 5)
+
+assert(plain.amount == 1)

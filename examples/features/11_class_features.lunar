@@ -33,7 +33,38 @@ print(acct.id)
 local p: Point = Point(2, 3)
 print(p.x, p.y, p.sum())
 
+-- Accessors are inherited: a subclass can add its own and still use the
+-- parent's, and one that adds none still sees the parent's.
+class Savings extends Account
+    private rate: number
+
+    constructor(id: string, balance: number, rate: number)
+        super(id, balance)
+        self.rate = rate
+    end
+
+    get interest(): number
+        return self.amount * self.rate
+    end
+end
+
+class Plain extends Account
+    constructor(id: string)
+        super(id, 1)
+    end
+end
+
+local savings: Savings = Savings("s-1", 100, 0.5)
+local plain: Plain = Plain("p-1")
+
 -- Checked results: a wrong answer fails the run, not just a crash.
 assert(acct.id == "a-1")
 assert(Account.count == 0)
 assert(p.x == 2 and p.y == 3 and p.sum() == 5)
+assert(acct.amount == 100)
+acct.amount = 250
+assert(acct.amount == 250)
+assert(savings.amount == 100 and savings.interest == 50)
+savings.amount = 10
+assert(savings.amount == 10 and savings.interest == 5)
+assert(plain.amount == 1)

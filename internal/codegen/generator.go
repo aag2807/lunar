@@ -641,6 +641,53 @@ func (g *Generator) generateAssignmentStatement(node *ast.AssignmentStatement) s
 	return output.String()
 }
 
+// accessorTables creates a class's __getters and __setters tables, chained to
+// its parent's when it has one.
+func (g *Generator) accessorTables(className, parentName string) string {
+	var out strings.Builder
+	for _, kind := range []string{"__getters", "__setters"} {
+		out.WriteString(g.generateIndent())
+		if parentName != "" {
+			out.WriteString(fmt.Sprintf("%s.%s = setmetatable({}, {__index = %s.%s})\n", className, kind, parentName, kind))
+		} else {
+			out.WriteString(fmt.Sprintf("%s.%s = {}\n", className, kind))
+		}
+	}
+	return out.String()
+}
+
+// accessorMetamethods installs the __index and __newindex that consult a
+// class's accessors before its methods and the instance's own fields.
+// Methods are looked up on the class table itself, whose metatable leads to
+// the parent, so this never calls itself.
+func (g *Generator) accessorMetamethods(className string) string {
+	ind := g.generateIndent()
+	lines := []string{
+		"{C}.__index = function(self, key)",
+		"    local get = {C}.__getters[key]",
+		"    if get ~= nil then",
+		"        return get(self)",
+		"    end",
+		"    return {C}[key]",
+		"end",
+		"{C}.__newindex = function(self, key, value)",
+		"    local set = {C}.__setters[key]",
+		"    if set ~= nil then",
+		"        set(self, value)",
+		"        return",
+		"    end",
+		"    rawset(self, key, value)",
+		"end",
+	}
+	var out strings.Builder
+	for _, line := range lines {
+		out.WriteString(ind)
+		out.WriteString(strings.ReplaceAll(line, "{C}", className))
+		out.WriteString("\n")
+	}
+	return out.String()
+}
+
 // generateClassDeclaration generates code for a class (transpiled to Lua table with metatable)
 func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string {
 	var output strings.Builder
@@ -673,6 +720,17 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 
 	output.WriteString(g.generateIndent())
 	output.WriteString(fmt.Sprintf("%s.__index = %s\n", className, className))
+
+	// A class with accessors keeps them in __getters/__setters tables,
+	// chained to the parent's so inherited accessors are found too.
+	parentName := ""
+	if parentIdent, ok := node.Extends.(*ast.Identifier); ok {
+		parentName = parentIdent.Value
+	}
+	hasAccessors := len(node.Getters) > 0 || len(node.Setters) > 0
+	if hasAccessors {
+		output.WriteString(g.accessorTables(className, parentName))
+	}
 	output.WriteString("\n")
 
 	// Generate constructor as new() function. Every class needs one: the
@@ -803,7 +861,7 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 	// Generate getters
 	for _, getter := range node.Getters {
 		output.WriteString(g.generateIndent())
-		output.WriteString(fmt.Sprintf("function %s:_get_%s()\n", className, getter.Name.Value))
+		output.WriteString(fmt.Sprintf("function %s.__getters.%s(self)\n", className, getter.Name.Value))
 
 		g.indent++
 		if getter.Body != nil {
@@ -825,7 +883,7 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 		if setter.Parameter != nil {
 			paramName = setter.Parameter.Name.Value
 		}
-		output.WriteString(fmt.Sprintf("function %s:_set_%s(%s)\n", className, setter.Name.Value, paramName))
+		output.WriteString(fmt.Sprintf("function %s.__setters.%s(self, %s)\n", className, setter.Name.Value, paramName))
 
 		g.indent++
 		if setter.Body != nil {
@@ -840,66 +898,21 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 		output.WriteString("\n")
 	}
 
-	// Generate metamethod dispatching for getters/setters if any exist
-	if len(node.Getters) > 0 || len(node.Setters) > 0 {
-		// Generate __index metamethod for getters
-		if len(node.Getters) > 0 {
-			output.WriteString(g.generateIndent())
-			output.WriteString(fmt.Sprintf("local %s_mt = getmetatable(%s) or {}\n", className, className))
-			output.WriteString(g.generateIndent())
-			output.WriteString(fmt.Sprintf("%s_mt.__index = function(self, key)\n", className))
-			g.indent++
-
-			for _, getter := range node.Getters {
-				output.WriteString(g.generateIndent())
-				output.WriteString(fmt.Sprintf("if key == \"%s\" then\n", getter.Name.Value))
-				g.indent++
-				output.WriteString(g.generateIndent())
-				output.WriteString(fmt.Sprintf("return %s._get_%s(self)\n", className, getter.Name.Value))
-				g.indent--
-				output.WriteString(g.generateIndent())
-				output.WriteString("end\n")
-			}
-
-			output.WriteString(g.generateIndent())
-			output.WriteString(fmt.Sprintf("return %s[key]\n", className))
-			g.indent--
-			output.WriteString(g.generateIndent())
-			output.WriteString("end\n")
-		}
-
-		// Generate __newindex metamethod for setters
-		if len(node.Setters) > 0 {
-			if len(node.Getters) == 0 {
-				output.WriteString(g.generateIndent())
-				output.WriteString(fmt.Sprintf("local %s_mt = getmetatable(%s) or {}\n", className, className))
-			}
-			output.WriteString(g.generateIndent())
-			output.WriteString(fmt.Sprintf("%s_mt.__newindex = function(self, key, value)\n", className))
-			g.indent++
-
-			for _, setter := range node.Setters {
-				output.WriteString(g.generateIndent())
-				output.WriteString(fmt.Sprintf("if key == \"%s\" then\n", setter.Name.Value))
-				g.indent++
-				output.WriteString(g.generateIndent())
-				output.WriteString(fmt.Sprintf("%s._set_%s(self, value)\n", className, setter.Name.Value))
-				output.WriteString(g.generateIndent())
-				output.WriteString("return\n")
-				g.indent--
-				output.WriteString(g.generateIndent())
-				output.WriteString("end\n")
-			}
-
-			output.WriteString(g.generateIndent())
-			output.WriteString("rawset(self, key, value)\n")
-			g.indent--
-			output.WriteString(g.generateIndent())
-			output.WriteString("end\n")
-		}
-
+	// Route instance reads and writes through the accessors. A subclass with
+	// none of its own still needs this when its parent has some, which is
+	// only known at run time when the parent comes from another module.
+	if hasAccessors {
+		output.WriteString(g.accessorMetamethods(className))
+		output.WriteString("\n")
+	} else if parentName != "" {
 		output.WriteString(g.generateIndent())
-		output.WriteString(fmt.Sprintf("setmetatable(%s, %s_mt)\n", className, className))
+		output.WriteString(fmt.Sprintf("if %s.__getters ~= nil then\n", parentName))
+		g.indent++
+		output.WriteString(g.accessorTables(className, parentName))
+		output.WriteString(g.accessorMetamethods(className))
+		g.indent--
+		output.WriteString(g.generateIndent())
+		output.WriteString("end\n")
 		output.WriteString("\n")
 	}
 

@@ -27,6 +27,26 @@ function Car:sound()
     return "vroom"
 end
 
+if Vehicle.__getters ~= nil then
+    Car.__getters = setmetatable({}, {__index = Vehicle.__getters})
+    Car.__setters = setmetatable({}, {__index = Vehicle.__setters})
+    Car.__index = function(self, key)
+        local get = Car.__getters[key]
+        if get ~= nil then
+            return get(self)
+        end
+        return Car[key]
+    end
+    Car.__newindex = function(self, key, value)
+        local set = Car.__setters[key]
+        if set ~= nil then
+            set(self, value)
+            return
+        end
+        rawset(self, key, value)
+    end
+end
+
 
 local c = Car.new()
 

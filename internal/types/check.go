@@ -460,6 +460,9 @@ func (c *Checker) checkModuleShape(statements []ast.Statement) {
 // "Undefined variable".
 func (c *Checker) hoistFunctionSignatures(statements []ast.Statement) {
 	for _, stmt := range statements {
+		if exp, ok := stmt.(*ast.ExportStatement); ok {
+			stmt = exp.Statement
+		}
 		fn, ok := stmt.(*ast.FunctionDeclaration)
 		if !ok || fn.Name == nil {
 			continue

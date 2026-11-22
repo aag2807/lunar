@@ -111,6 +111,15 @@ func (g *Generator) write(text string) {
 func (g *Generator) Generate(statements []ast.Statement) string {
 	var output strings.Builder
 
+	// Exported functions are module members, not globals. Declaring them all
+	// local up front keeps forward references working: `function a()` then
+	// assigns the local, and a body can call one defined further down.
+	if names := exportedFunctionNames(statements); len(names) > 0 {
+		decl := "local " + strings.Join(names, ", ") + "\n\n"
+		g.write(decl)
+		output.WriteString(decl)
+	}
+
 	for i, stmt := range statements {
 		// Track mapping at the start of each statement
 		if g.sourceMapBuilder != nil {
@@ -139,6 +148,19 @@ func (g *Generator) Generate(statements []ast.Statement) string {
 	}
 
 	return output.String()
+}
+
+// exportedFunctionNames lists the top-level exported functions in order.
+func exportedFunctionNames(statements []ast.Statement) []string {
+	var names []string
+	for _, stmt := range statements {
+		if exp, ok := stmt.(*ast.ExportStatement); ok {
+			if fn, ok := exp.Statement.(*ast.FunctionDeclaration); ok && fn.Name != nil {
+				names = append(names, fn.Name.Value)
+			}
+		}
+	}
+	return names
 }
 
 // generateModuleReturn generates the module return statement for exports

@@ -1,3 +1,5 @@
+local double, triple
+
 function double(n)
     return n * 2
 end

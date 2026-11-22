@@ -72,6 +72,11 @@ type Parser struct {
 
 	prefixParseFns map[lexer.TokenType]prefixParseFn
 	infixParseFns  map[lexer.TokenType]infixParseFn
+
+	// ambient is set inside `declare class` and `declare namespace`, where
+	// functions, methods, constructors and accessors are signatures with no
+	// body: the enclosing declaration's 'end' is the only one.
+	ambient bool
 }
 
 // addError adds a parse error with location information
@@ -2029,6 +2034,19 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 }
 
 func (p *Parser) parseFunctionDeclaration() *ast.FunctionDeclaration {
+	fd := p.parseFunctionSignature()
+	if fd == nil || p.ambient {
+		return fd
+	}
+
+	fd.Body = p.parseBlockStatement()
+
+	return fd
+}
+
+// parseFunctionSignature parses `function name<T>(params): ReturnType` and
+// stops on its last token, leaving any body to the caller.
+func (p *Parser) parseFunctionSignature() *ast.FunctionDeclaration {
 	fd := &ast.FunctionDeclaration{
 		Token: p.curToken,
 	}
@@ -2056,8 +2074,6 @@ func (p *Parser) parseFunctionDeclaration() *ast.FunctionDeclaration {
 		p.nextToken() // move onto return type
 		fd.ReturnType = p.parseType()
 	}
-
-	fd.Body = p.parseBlockStatement()
 
 	return fd
 }
@@ -2783,7 +2799,7 @@ func (p *Parser) parseMethodDeclaration(isAbstract bool) *ast.FunctionDeclaratio
 	// would swallow the members that follow it, up to the class's own 'end'.
 	// A body written anyway is still consumed, so the checker can report it
 	// rather than the parser choking on the leftovers.
-	if isAbstract && !p.abstractMethodHasBody() {
+	if p.ambient || (isAbstract && !p.abstractMethodHasBody()) {
 		return method
 	}
 
@@ -2826,6 +2842,10 @@ func (p *Parser) parseConstructorDeclaration() *ast.ConstructorDeclaration {
 	}
 	constructor.Parameters = p.parseFunctionParameters()
 
+	if p.ambient {
+		return constructor
+	}
+
 	// Parse body
 	constructor.Body = p.parseBlockStatement()
 
@@ -2857,6 +2877,10 @@ func (p *Parser) parseGetterDeclaration() *ast.GetterDeclaration {
 	}
 	p.nextToken() // move to return type
 	getter.ReturnType = p.parseType()
+
+	if p.ambient {
+		return getter
+	}
 
 	// Parse body
 	getter.Body = p.parseBlockStatement()
@@ -2904,6 +2928,10 @@ func (p *Parser) parseSetterDeclaration() *ast.SetterDeclaration {
 	}
 
 	// Parse body
+	if p.ambient {
+		return setter
+	}
+
 	setter.Body = p.parseBlockStatement()
 
 	return setter
@@ -3242,6 +3270,27 @@ func (p *Parser) parseNamespaceDeclaration() *ast.NamespaceDeclaration {
 	return ns
 }
 
+// parseAmbient parses one declaration with bodies switched off.
+func (p *Parser) parseAmbient(parse func() ast.Statement) ast.Statement {
+	saved := p.ambient
+	p.ambient = true
+	defer func() { p.ambient = saved }()
+
+	stmt := parse()
+	// A nil *ClassDeclaration in an interface is not a nil Statement.
+	switch d := stmt.(type) {
+	case *ast.ClassDeclaration:
+		if d == nil {
+			return nil
+		}
+	case *ast.NamespaceDeclaration:
+		if d == nil {
+			return nil
+		}
+	}
+	return stmt
+}
+
 // parseDeclareStatement parses ambient declarations like: declare const name: Type
 func (p *Parser) parseDeclareStatement() *ast.DeclareStatement {
 	declareStmt := &ast.DeclareStatement{
@@ -3255,9 +3304,21 @@ func (p *Parser) parseDeclareStatement() *ast.DeclareStatement {
 	case lexer.CONST, lexer.LOCAL:
 		declareStmt.Declaration = p.parseVariableDeclaration()
 	case lexer.FUNCTION:
-		declareStmt.Declaration = p.parseFunctionDeclaration()
+		// A declaration has no body. The trailing 'end' that older
+		// declaration files write is accepted but not required, so leaving
+		// it out can no longer swallow the declarations that follow.
+		fd := p.parseFunctionSignature()
+		if fd == nil {
+			return nil
+		}
+		if p.peekTokenIs(lexer.END) {
+			p.nextToken()
+		}
+		declareStmt.Declaration = fd
 	case lexer.CLASS:
-		declareStmt.Declaration = p.parseClassDeclaration()
+		declareStmt.Declaration = p.parseAmbient(func() ast.Statement { return p.parseClassDeclaration() })
+	case lexer.NAMESPACE:
+		declareStmt.Declaration = p.parseAmbient(func() ast.Statement { return p.parseNamespaceDeclaration() })
 	case lexer.INTERFACE:
 		declareStmt.Declaration = p.parseInterfaceDeclaration()
 	case lexer.ENUM:

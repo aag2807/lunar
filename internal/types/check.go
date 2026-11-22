@@ -7,6 +7,7 @@ import (
 	"lunar/internal/parser"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // TypeError represents a type error
@@ -242,6 +243,10 @@ type Checker struct {
 	// treated as an overload of itself.
 	hoisted map[string]*FunctionType
 
+	// shells holds the empty interface, class and enum types published by
+	// predeclareTypeNames, keyed by name, until their declaration fills them.
+	shells map[string]Type
+
 	// Current class context (for visibility checking)
 	currentClass *ClassType
 
@@ -384,6 +389,7 @@ func (c *Checker) loadStdlib() {
 		}
 
 		// Register stdlib declarations
+		c.predeclareTypeNames(statements)
 		for _, stmt := range statements {
 			c.registerTypeDefinition(stmt)
 		}
@@ -397,6 +403,10 @@ func (c *Checker) loadStdlib() {
 
 // Check performs type checking on a list of statements
 func (c *Checker) Check(statements []ast.Statement) []*TypeError {
+	// Pass zero: publish every interface, class and enum name, so a
+	// declaration can refer to itself or to one further down.
+	c.predeclareTypeNames(statements)
+
 	// First pass: register all type definitions
 	for _, stmt := range statements {
 		c.registerTypeDefinition(stmt)
@@ -520,6 +530,91 @@ func (c *Checker) PreloadDeclarations(declEnv *Environment) {
 	}
 }
 
+// predeclareTypeNames publishes an empty interface, class or enum type for
+// every such declaration that is not yet known. Member signatures resolved
+// later point at these objects, and the register functions fill the same
+// objects in place, so `update: function(): DigestContext` inside
+// DigestContext, or a reference to an interface declared further down,
+// resolves to the finished type.
+func (c *Checker) predeclareTypeNames(statements []ast.Statement) {
+	if c.shells == nil {
+		c.shells = make(map[string]Type)
+	}
+	for _, stmt := range statements {
+		switch node := stmt.(type) {
+		case *ast.InterfaceDeclaration:
+			name := node.Name.Value
+			if _, known := c.interfaces[name]; !known {
+				shell := &InterfaceType{Name: name}
+				c.interfaces[name] = shell
+				c.env.Set(name, shell)
+				c.shells[name] = shell
+			}
+		case *ast.ClassDeclaration:
+			name := node.Name.Value
+			if _, known := c.classes[name]; !known {
+				shell := &ClassType{Name: name}
+				c.classes[name] = shell
+				c.env.Set(name, shell)
+				c.shells[name] = shell
+			}
+		case *ast.EnumDeclaration:
+			name := node.Name.Value
+			if _, known := c.enums[name]; !known {
+				shell := &EnumType{Name: name}
+				c.enums[name] = shell
+				c.env.Set(name, shell)
+				c.shells[name] = shell
+			}
+		case *ast.DeclareStatement:
+			if node.Declaration != nil {
+				c.predeclareTypeNames([]ast.Statement{node.Declaration})
+			}
+		case *ast.ExportStatement:
+			c.predeclareTypeNames([]ast.Statement{node.Statement})
+		case *ast.NamespaceDeclaration:
+			c.predeclareTypeNames(node.Statements)
+		}
+	}
+}
+
+// fillInterfaceShell returns the predeclared shell for t's name, now holding
+// t's contents, or t itself when no shell is waiting.
+func (c *Checker) fillInterfaceShell(t *InterfaceType) *InterfaceType {
+	if shell, ok := c.shells[t.Name].(*InterfaceType); ok {
+		delete(c.shells, t.Name)
+		*shell = *t
+		return shell
+	}
+	return t
+}
+
+func (c *Checker) fillClassShell(t *ClassType) *ClassType {
+	if shell, ok := c.shells[t.Name].(*ClassType); ok {
+		delete(c.shells, t.Name)
+		*shell = *t
+		return shell
+	}
+	return t
+}
+
+func (c *Checker) fillEnumShell(t *EnumType) *EnumType {
+	if shell, ok := c.shells[t.Name].(*EnumType); ok {
+		delete(c.shells, t.Name)
+		*shell = *t
+		return shell
+	}
+	return t
+}
+
+// didYouMean returns " Did you mean 'x'?" for the closest candidate, or "".
+func didYouMean(name string, candidates []string) string {
+	if similar := findSimilarNames(name, candidates, 2, 1); len(similar) > 0 {
+		return fmt.Sprintf(" Did you mean '%s'?", similar[0])
+	}
+	return ""
+}
+
 // registerTypeDefinition registers classes, interfaces, enums, and type aliases
 func (c *Checker) registerTypeDefinition(stmt ast.Statement) {
 	switch node := stmt.(type) {
@@ -535,7 +630,9 @@ func (c *Checker) registerTypeDefinition(stmt ast.Statement) {
 		c.registerNamespace(node)
 	case *ast.DeclareStatement:
 		// Ambient declarations - register the underlying declaration
-		if node.Declaration != nil {
+		if ns, ok := node.Declaration.(*ast.NamespaceDeclaration); ok {
+			c.env.Set(ns.Name.Value, c.registerAmbientNamespace(ns))
+		} else if node.Declaration != nil {
 			c.registerTypeDefinition(node.Declaration)
 		}
 	case *ast.ExportStatement:
@@ -574,6 +671,7 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 	// Publish the (still empty) class before resolving its members so that a
 	// member signature can name the class itself, as in
 	// `static open(owner: string): Account`. Members fill in the same pointer.
+	classType = c.fillClassShell(classType)
 	c.classes[classType.Name] = classType
 	c.env.Set(classType.Name, classType)
 
@@ -849,6 +947,7 @@ func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
 		}
 	}
 
+	interfaceType = c.fillInterfaceShell(interfaceType)
 	c.interfaces[interfaceType.Name] = interfaceType
 	c.env.Set(interfaceType.Name, interfaceType)
 }
@@ -861,6 +960,7 @@ func (c *Checker) registerEnum(node *ast.EnumDeclaration) {
 	}
 
 	// First, register the enum type itself so members can reference it
+	enumType = c.fillEnumShell(enumType)
 	c.enums[enumType.Name] = enumType
 	c.env.Set(enumType.Name, enumType)
 
@@ -4333,6 +4433,19 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 
 	// Check if left type has the property
 	switch typ := actualLeftType.(type) {
+	case *NamespaceType:
+		if member, ok := typ.Members[propertyName]; ok {
+			return resolved(ast.DispatchPlain, member)
+		}
+		if typ.Ambient {
+			names := make([]string, 0, len(typ.Members))
+			for name := range typ.Members {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			c.addError(fmt.Sprintf("Namespace '%s' has no member '%s'.%s", typ.Name, propertyName, didYouMean(propertyName, names)), rightIdent.Token)
+		}
+		return wrapIfOptional(Any)
 	case *ClassType:
 		// Check static properties first (when accessing class directly like Math.PI)
 		if propType, ok := typ.GetStaticProperty(propertyName); ok {
@@ -4814,6 +4927,43 @@ func (c *Checker) registerNamespace(node *ast.NamespaceDeclaration) {
 	c.env.Set(nsName, nsType)
 }
 
+// registerAmbientNamespace builds the type of a `declare namespace`, such as
+// a C API exposed to scripts as a table of functions. Its functions and
+// constants are reached only through the namespace; types declared inside it
+// are registered globally, as for ordinary namespaces.
+func (c *Checker) registerAmbientNamespace(node *ast.NamespaceDeclaration) *NamespaceType {
+	ns := &NamespaceType{Name: node.Name.Value, Members: make(map[string]Type), Ambient: true}
+
+	for _, stmt := range node.Statements {
+		switch s := stmt.(type) {
+		case *ast.FunctionDeclaration:
+			fn := c.declaredFunctionType(s)
+			if existing, ok := ns.Members[s.Name.Value].(*FunctionType); ok {
+				existing.Overloads = append(existing.Overloads, fn)
+			} else {
+				ns.Members[s.Name.Value] = fn
+			}
+		case *ast.VariableDeclaration:
+			for i, name := range s.Names {
+				var t Type = Any
+				if i < len(s.Types) && s.Types[i] != nil {
+					t = c.resolveTypeExpression(s.Types[i])
+				}
+				ns.Members[name.Value] = t
+			}
+		case *ast.NamespaceDeclaration:
+			ns.Members[s.Name.Value] = c.registerAmbientNamespace(s)
+		case *ast.ClassDeclaration:
+			c.registerTypeDefinition(s)
+			ns.Members[s.Name.Value] = c.classes[s.Name.Value]
+		case *ast.InterfaceDeclaration, *ast.EnumDeclaration, *ast.TypeDeclaration:
+			c.registerTypeDefinition(s)
+		}
+	}
+
+	return ns
+}
+
 // checkNamespaceDeclaration checks all statements in a namespace
 func (c *Checker) checkNamespaceDeclaration(node *ast.NamespaceDeclaration) {
 	// Check all statements in the namespace
@@ -4918,6 +5068,49 @@ func (c *Checker) checkImportStatement(node *ast.ImportStatement) {
 	}
 }
 
+// declaredFunctionType builds the type of an ambient function signature.
+func (c *Checker) declaredFunctionType(decl *ast.FunctionDeclaration) *FunctionType {
+	params := make([]Type, len(decl.Parameters))
+	optionalParams := make([]bool, len(decl.Parameters))
+	hasRestParam := false
+	for i, param := range decl.Parameters {
+		if param.Type != nil {
+			paramType := c.resolveTypeExpression(param.Type)
+			optionalParams[i] = !param.IsRest && paramIsOptional(param, paramType)
+			// If this is a rest parameter, wrap in array type if not already
+			if param.IsRest {
+				hasRestParam = true
+				if _, ok := paramType.(*ArrayType); !ok {
+					paramType = &ArrayType{ElementType: paramType}
+				}
+			}
+			params[i] = paramType
+		} else {
+			if param.IsRest {
+				hasRestParam = true
+				params[i] = &ArrayType{ElementType: Any}
+			} else {
+				params[i] = Any
+			}
+		}
+	}
+
+	var returnType Type = Void
+	if decl.ReturnType != nil {
+		returnType = c.resolveTypeExpression(decl.ReturnType)
+	}
+
+	funcType := &FunctionType{
+		Parameters:       params,
+		OptionalParams:   optionalParams,
+		ReturnType:       returnType,
+		GenericParams:    []string{}, // Ambient function declarations are not generic
+		HasRestParameter: hasRestParam,
+	}
+
+	return funcType
+}
+
 // checkDeclareStatement handles ambient declarations
 func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 	if node.Declaration == nil {
@@ -4945,44 +5138,7 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 		}
 
 	case *ast.FunctionDeclaration:
-		// Register the function signature without checking the body
-		params := make([]Type, len(decl.Parameters))
-		optionalParams := make([]bool, len(decl.Parameters))
-		hasRestParam := false
-		for i, param := range decl.Parameters {
-			if param.Type != nil {
-				paramType := c.resolveTypeExpression(param.Type)
-				optionalParams[i] = !param.IsRest && paramIsOptional(param, paramType)
-				// If this is a rest parameter, wrap in array type if not already
-				if param.IsRest {
-					hasRestParam = true
-					if _, ok := paramType.(*ArrayType); !ok {
-						paramType = &ArrayType{ElementType: paramType}
-					}
-				}
-				params[i] = paramType
-			} else {
-				if param.IsRest {
-					hasRestParam = true
-					params[i] = &ArrayType{ElementType: Any}
-				} else {
-					params[i] = Any
-				}
-			}
-		}
-
-		var returnType Type = Void
-		if decl.ReturnType != nil {
-			returnType = c.resolveTypeExpression(decl.ReturnType)
-		}
-
-		funcType := &FunctionType{
-			Parameters:       params,
-			OptionalParams:   optionalParams,
-			ReturnType:       returnType,
-			GenericParams:    []string{}, // Ambient function declarations are not generic
-			HasRestParameter: hasRestParam,
-		}
+		funcType := c.declaredFunctionType(decl)
 
 		// Check if function with same name already exists (for method overloading)
 		if existingType, ok := c.env.Get(decl.Name.Value); ok {

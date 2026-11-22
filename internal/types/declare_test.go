@@ -1,153 +1,104 @@
 package types
 
 import (
-	"lunar/internal/lexer"
-	"lunar/internal/parser"
+	"strings"
 	"testing"
 )
 
-func TestDeclareConst(t *testing.T) {
+// The owner's first engine declarations: the first function has no 'end'.
+// That used to swallow despawn and tick, which were then reported as
+// undefined at their call sites.
+func TestDeclarationsWithoutEndAreAllDefined(t *testing.T) {
 	input := `
-declare const PI: number
-
-local radius: number = 5
-local circumference: number = PI
+declare function spawn(name: string): number
+declare function despawn(id: number): void end
+declare function tick(dt: number): void
+local id: number = spawn("goblin")
+despawn(id)
+tick(0.016)
 `
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
-
-	checker := NewChecker()
-	errors := checker.Check(statements)
-
-	if len(errors) > 0 {
-		t.Errorf("Expected no type errors, got %d:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %s", err.Message)
-		}
+	for _, err := range checkSource(t, input) {
+		t.Errorf("unexpected type error: %s", err.Message)
 	}
 }
 
-func TestDeclareFunction(t *testing.T) {
+func TestDeclaredClassIsUsable(t *testing.T) {
 	input := `
-declare function print(message: string): void
-
-print("Hello, world!")
-`
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
-
-	checker := NewChecker()
-	errors := checker.Check(statements)
-
-	if len(errors) > 0 {
-		t.Errorf("Expected no type errors, got %d:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %s", err.Message)
-		}
-	}
-}
-
-func TestDeclareInterface(t *testing.T) {
-	input := `
-declare interface Graphics {
-	clear: function(): void
-	setColor: function(r: number, g: number, b: number): void
-}
+declare class Sprite
+    x: number
+    constructor(path: string)
+    draw(): void
+    static load(path: string): Sprite
 end
-
-declare const graphics: Graphics
-
-local g: Graphics = graphics
+local s: Sprite = Sprite.load("hero.png")
+s.draw()
+local n: number = s.x
+local t: Sprite = Sprite("tree.png")
 `
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
-
-	checker := NewChecker()
-	errors := checker.Check(statements)
-
-	if len(errors) > 0 {
-		t.Errorf("Expected no type errors, got %d:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %s", err.Message)
-		}
+	for _, err := range checkSource(t, input) {
+		t.Errorf("unexpected type error: %s", err.Message)
 	}
 }
 
-func TestDeclareType(t *testing.T) {
+func TestDeclaredNamespaceMembers(t *testing.T) {
 	input := `
-declare type Vector2
-	x: number
-	y: number
+declare namespace audio
+    function play(name: string, volume?: number): void
+    const masterVolume: number
 end
-
-declare function distance(v1: Vector2, v2: Vector2): number
-
-local v1: Vector2 = { x = 0, y = 0 }
-local v2: Vector2 = { x = 3, y = 4 }
-local d: number = distance(v1, v2)
+audio.play("boom")
+audio.play("boom", 0.5)
+local v: number = audio.masterVolume
 `
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
-	}
-
-	checker := NewChecker()
-	errors := checker.Check(statements)
-
-	if len(errors) > 0 {
-		t.Errorf("Expected no type errors, got %d:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %s", err.Message)
-		}
+	for _, err := range checkSource(t, input) {
+		t.Errorf("unexpected type error: %s", err.Message)
 	}
 }
 
-func TestDeclareWithGeneric(t *testing.T) {
-	input := `
-declare type Optional<T> = T | nil
-
-declare function getValue(): Optional<string>
-
-local result: Optional<string> = getValue()
-`
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	statements := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		t.Fatalf("Parser errors: %v", p.Errors())
+func TestDeclaredNamespaceRejectsUnknownMember(t *testing.T) {
+	errs := checkSource(t, `
+declare namespace audio
+    function play(name: string): void
+end
+audio.plya("boom")
+`)
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, "'plya'") || !strings.Contains(errs[0].Message, "'play'") {
+		t.Fatalf("expected one error naming plya and suggesting play, got %v", messages(errs))
 	}
+}
 
-	checker := NewChecker()
-	errors := checker.Check(statements)
+// Members of a declared namespace are reached through it, not as globals.
+func TestDeclaredNamespaceMembersAreNotGlobals(t *testing.T) {
+	errs := checkSource(t, `
+declare namespace audio
+    function play(name: string): void
+end
+play("boom")
+`)
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, "'play'") {
+		t.Fatalf("expected an undefined-variable error for play, got %v", messages(errs))
+	}
+}
 
-	if len(errors) > 0 {
-		t.Errorf("Expected no type errors, got %d:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %s", err.Message)
-		}
+// A declared interface may name itself, or one declared after it; C APIs
+// return handles to their own type all the time.
+func TestDeclaredInterfacesMayReferToThemselvesAndEachOther(t *testing.T) {
+	input := `
+declare interface DigestContext
+    update: function(data: string): DigestContext
+    hex: function(): string
+end
+declare interface Node
+    next: Edge?
+end
+declare interface Edge
+    target: Node
+end
+declare const digest: DigestContext
+local d: DigestContext = digest.update("a").update("b")
+local s: string = d.hex()
+`
+	for _, err := range checkSource(t, input) {
+		t.Errorf("unexpected type error: %s", err.Message)
 	}
 }

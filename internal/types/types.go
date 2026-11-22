@@ -1091,6 +1091,9 @@ func (t *InterfaceType) GetProperty(name string) (Type, bool) {
 type NamespaceType struct {
 	Name    string
 	Members map[string]Type // Types, functions, classes, etc. in the namespace
+	// Ambient is set for `declare namespace`, whose members are complete,
+	// so a member it does not list is an error rather than 'any'.
+	Ambient bool
 }
 
 func (t *NamespaceType) String() string {

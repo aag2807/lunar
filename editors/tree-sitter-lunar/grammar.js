@@ -628,6 +628,8 @@ module.exports = grammar({
         seq(
           '|',
           field('pattern', $.pattern),
+          // | 1 | 2 -> ...: alternatives, before the '->'
+          repeat(seq('|', field('pattern', $.pattern))),
           optional(seq('when', field('guard', $._expression))),
           '->',
           field('value', $._expression),
@@ -644,7 +646,9 @@ module.exports = grammar({
         $.false,
         $.nil,
         $.identifier,
-        prec(1, seq(field('binding', $.identifier), ':', field('type', $._type))),
+        // A type pattern names one type (the compiler takes a name), so a
+        // following '|' is the next alternative, not a union.
+        prec(1, seq(field('binding', $.identifier), ':', field('type', $._type_primary))),
         $.dot_index,
         $.table_pattern,
       ),

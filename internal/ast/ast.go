@@ -1530,6 +1530,32 @@ func (wp *WildcardPattern) patternNode()         {}
 func (wp *WildcardPattern) TokenLiteral() string { return wp.Token.Literal }
 func (wp *WildcardPattern) String() string       { return "_" }
 
+// OrPattern matches when any of its alternatives does: | 1 | 2 -> ...
+type OrPattern struct {
+	Token        lexer.Token // the first alternative's token
+	Alternatives []Pattern
+}
+
+func (op *OrPattern) patternNode()         {}
+func (op *OrPattern) TokenLiteral() string { return op.Token.Literal }
+func (op *OrPattern) String() string {
+	parts := make([]string, len(op.Alternatives))
+	for i, a := range op.Alternatives {
+		parts[i] = a.String()
+	}
+	return strings.Join(parts, " | ")
+}
+
+// ValuePattern matches a value equal to a named one: | State.Idle -> ...
+type ValuePattern struct {
+	Token lexer.Token
+	Value Expression
+}
+
+func (vp *ValuePattern) patternNode()         {}
+func (vp *ValuePattern) TokenLiteral() string { return vp.Token.Literal }
+func (vp *ValuePattern) String() string       { return vp.Value.String() }
+
 // LiteralPattern represents matching a literal value
 type LiteralPattern struct {
 	Token lexer.Token

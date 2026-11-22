@@ -103,6 +103,8 @@ type Parser struct {
 	// functions, methods, constructors and accessors are signatures with no
 	// body: the enclosing declaration's 'end' is the only one.
 	ambient bool
+	// matchWith is set once a match expression reached its `with`.
+	matchWith bool
 }
 
 // addError adds a parse error with location information
@@ -285,8 +287,25 @@ func (p *Parser) parseSuperExpression() ast.Expression {
 // follows is not a match expression (match = 1, s:match(...), match(x)).
 func (p *Parser) parseMatchOrName() ast.Expression {
 	state := p.SaveState()
+	tok := p.curToken
 	errorsBefore := len(p.errors)
-	if m := p.parseMatchExpression(); !isNilNode(m) && len(p.errors) == errorsBefore {
+	prevWith := p.matchWith
+	p.matchWith = false
+	m := p.parseMatchExpression()
+	sawWith := p.matchWith
+	p.matchWith = prevWith
+	if !isNilNode(m) && len(p.errors) == errorsBefore {
+		return m
+	}
+	// `match v with` is a match: its own errors say what is wrong, where
+	// reading match as a name gave "'v' is not a statement" and more.
+	if sawWith {
+		for !p.curTokenIs(lexer.END) && !p.curTokenIs(lexer.EOF) {
+			p.nextToken()
+		}
+		if isNilNode(m) {
+			return &ast.MatchExpression{Token: tok}
+		}
 		return m
 	}
 	p.RestoreState(state)
@@ -4232,6 +4251,7 @@ func (p *Parser) parseMatchExpression() ast.Expression {
 	if !p.expectPeek(lexer.WITH) {
 		return nil
 	}
+	p.matchWith = true
 
 	p.nextToken() // move past 'with' to first case
 
@@ -4292,6 +4312,25 @@ func (p *Parser) parseMatchCase() *ast.MatchCase {
 
 	p.nextToken() // move past pattern
 
+	// | 1 | 2 -> ...: before the '->', a '|' starts another alternative.
+	if p.curTokenIs(lexer.PIPE) {
+		or := &ast.OrPattern{Token: matchCase.Token, Alternatives: []ast.Pattern{matchCase.Pattern}}
+		for p.curTokenIs(lexer.PIPE) {
+			p.nextToken()
+			alt := p.parsePattern()
+			if alt == nil {
+				return nil
+			}
+			if patternBinds(alt) || patternBinds(or.Alternatives[0]) {
+				p.addError("an alternative of '|' patterns cannot bind a name: each would bind it differently", p.curToken)
+				return nil
+			}
+			or.Alternatives = append(or.Alternatives, alt)
+			p.nextToken()
+		}
+		matchCase.Pattern = or
+	}
+
 	// Check for optional guard (when clause)
 	hasGuard := false
 	if p.curTokenIs(lexer.IDENT) && p.curToken.Literal == "when" {
@@ -4332,8 +4371,48 @@ func (p *Parser) parseMatchCase() *ast.MatchCase {
 	return matchCase
 }
 
+// patternBinds says whether a pattern binds a name.
+func patternBinds(pat ast.Pattern) bool {
+	switch pt := pat.(type) {
+	case *ast.BindingPattern:
+		return true
+	case *ast.TypePattern:
+		return pt.Binding != ""
+	case *ast.StructPattern:
+		for _, f := range pt.Fields {
+			if patternBinds(f) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // parsePattern parses a pattern for pattern matching
 func (p *Parser) parsePattern() ast.Pattern {
+	// State.Idle, Color.Red: a value the subject is compared with.
+	if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.DOT) {
+		tok := p.curToken
+		var value ast.Expression = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		for p.peekTokenIs(lexer.DOT) {
+			p.nextToken() // '.'
+			dotTok := p.curToken
+			p.nextToken()
+			if !lexer.CanBeFieldName(p.curToken) {
+				p.addError(fmt.Sprintf("expected a name after '.' in a pattern, got %s", p.curToken.Type), p.curToken)
+				return nil
+			}
+			value = &ast.DotExpression{Token: dotTok, Left: value, Right: &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}}
+		}
+		return &ast.ValuePattern{Token: tok, Value: value}
+	}
+	// -1: a negative number.
+	if p.curTokenIs(lexer.MINUS) && p.peekTokenIs(lexer.NUMBER) {
+		tok := p.curToken
+		p.nextToken()
+		num := p.parseNumberLiteral()
+		return &ast.LiteralPattern{Token: tok, Value: &ast.PrefixExpression{Token: tok, Operator: "-", Right: num}}
+	}
 	switch p.curToken.Type {
 	case lexer.IDENT:
 		// Could be: wildcard (_), binding (x), or type pattern

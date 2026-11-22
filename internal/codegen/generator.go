@@ -2358,6 +2358,17 @@ func (g *Generator) generatePatternCondition(pattern ast.Pattern, valueName stri
 		condition := fmt.Sprintf("%s == %s", valueName, literalValue)
 		return condition, bindings
 
+	case *ast.OrPattern:
+		conds := make([]string, len(p.Alternatives))
+		for i, alt := range p.Alternatives {
+			cond, _ := g.generatePatternCondition(alt, valueName)
+			conds[i] = "(" + cond + ")"
+		}
+		return strings.Join(conds, " or "), bindings
+
+	case *ast.ValuePattern:
+		return fmt.Sprintf("%s == %s", valueName, g.generateExpression(p.Value)), bindings
+
 	case *ast.BindingPattern:
 		// Binding pattern always matches and binds the value to a variable
 		binding := fmt.Sprintf("local %s = %s", p.Name, valueName)

@@ -1,0 +1,20 @@
+-- | a | b alternatives, enum members as patterns, negative numbers.
+enum State
+    Idle
+    Run
+end
+local function name(s: State): string
+    return match s with
+        | State.Idle -> "idle"
+        | State.Run -> "run"
+    end
+end
+assert(name(State.Run) == "run" and name(State.Idle) == "idle")
+local function size(n: number): string
+    return match n with
+        | 1 | 2 -> "small"
+        | -1 -> "negative"
+        | _ -> "big"
+    end
+end
+assert(size(2) == "small" and size(-1) == "negative" and size(9) == "big")

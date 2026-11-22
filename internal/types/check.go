@@ -5219,6 +5219,8 @@ func (c *Checker) checkExpressionKind(expr ast.Expression) Type {
 		return Any
 	case *ast.TypeAssertion:
 		return c.checkTypeAssertion(node)
+	case *ast.MatchExpression:
+		return c.checkMatchExpression(node)
 	case *ast.AwaitExpression:
 		return c.checkAwaitExpression(node)
 	default:
@@ -5709,6 +5711,94 @@ func unionOf(types ...Type) Type {
 		return members[0]
 	}
 	return &UnionType{Types: members}
+}
+
+// checkMatchExpression types a match: its value is what its arms give,
+// and each arm's bindings have the matched value's type (or the type a
+// type pattern names).
+func (c *Checker) checkMatchExpression(node *ast.MatchExpression) Type {
+	valueType := c.checkExpression(node.Value)
+	var results []Type
+	for _, mc := range node.Cases {
+		prev := c.env
+		c.env = NewEnclosedEnvironment(prev)
+		c.checkPattern(mc.Pattern, valueType)
+		if mc.Guard != nil {
+			c.checkExpression(mc.Guard)
+		}
+		if mc.Body != nil {
+			results = append(results, c.checkExpression(mc.Body))
+		}
+		c.env = prev
+	}
+	if len(results) == 0 {
+		return Any
+	}
+	return combineReturnTypes(results)
+}
+
+// checkPattern binds what a pattern binds, and refuses a literal pattern
+// that a value of type t can never equal.
+func (c *Checker) checkPattern(pattern ast.Pattern, t Type) {
+	switch pt := pattern.(type) {
+	case *ast.BindingPattern:
+		c.env.Set(pt.Name, t)
+		c.define(pt.Token, SymVariable, t)
+	case *ast.LiteralPattern:
+		lit := c.checkExpression(pt.Value)
+		if !patternCanMatch(lit, t) {
+			c.addError(fmt.Sprintf("Pattern %s can never match a value of type '%s'", pt.Value.String(), t.String()), pt.Token)
+		}
+	case *ast.ValuePattern:
+		c.checkExpression(pt.Value)
+	case *ast.OrPattern:
+		for _, alt := range pt.Alternatives {
+			c.checkPattern(alt, t)
+		}
+	case *ast.TypePattern:
+		if pt.Binding == "" {
+			return
+		}
+		var bound Type = Any
+		switch pt.TypeName {
+		case "number":
+			bound = Number
+		case "string":
+			bound = String
+		case "boolean":
+			bound = Boolean
+		default:
+			if iface, ok := c.interfaces[pt.TypeName]; ok {
+				bound = iface
+			} else if cl, ok := c.classes[pt.TypeName]; ok {
+				bound = cl
+			}
+		}
+		c.env.Set(pt.Binding, bound)
+	case *ast.StructPattern:
+		for name, field := range pt.Fields {
+			ft := Type(Any)
+			if iface, ok := t.(*InterfaceType); ok {
+				if p, ok := iface.GetProperty(name); ok {
+					ft = p
+				}
+			}
+			c.checkPattern(field, ft)
+		}
+	}
+}
+
+// patternCanMatch says whether a literal of type lit can equal a value of
+// type t: "a" never equals a number.
+func patternCanMatch(lit, t Type) bool {
+	switch t.(type) {
+	case *AnyType, *UnknownType, *EnumType:
+		return true
+	}
+	if _, isNil := lit.(*NilType); isNil {
+		return true // nil is how a missing value is matched
+	}
+	return lit.IsAssignableTo(t) || widenLiteralType(lit).IsAssignableTo(widenLiteralType(t))
 }
 
 // hasMetatable says whether t is a table given a metatable, whose

@@ -313,6 +313,13 @@ var builtinTypes = []string{"any", "boolean", "never", "nil", "number", "string"
 // case: "h2." is not a statement), the same text with the line being typed
 // blanked, and an `end` added for each block still open, checked again.
 func (s *Server) completionIndex(path string, offset int) *types.Index {
+	return s.repairedIndex(path, offset, offset)
+}
+
+// repairedIndex is completionIndex with the lines from the one holding
+// from to the one holding offset blanked: a call being typed may span
+// several.
+func (s *Server) repairedIndex(path string, from, offset int) *types.Index {
 	m := s.modules[path]
 	if m != nil && !s.broken[path] {
 		return m.Index
@@ -329,7 +336,10 @@ func (s *Server) completionIndex(path string, offset int) *types.Index {
 		if offset > len(text) {
 			offset = len(text)
 		}
-		lineStart := strings.LastIndexByte(text[:offset], '\n') + 1
+		if from > offset {
+			from = offset
+		}
+		lineStart := strings.LastIndexByte(text[:from], '\n') + 1
 		lineEnd := len(text)
 		if nl := strings.IndexByte(text[offset:], '\n'); nl >= 0 {
 			lineEnd = offset + nl
@@ -466,17 +476,22 @@ func (s *Server) signatureHelp(uri string, pos Position) (interface{}, error) {
 	path := uriToPath(uri)
 	text := s.file(path).Text
 	offset := s.offsetAt(path, pos)
+	if offset > len(text) {
+		offset = len(text)
+	}
+	// Strings and comments hold commas and parentheses of their own.
+	code := maskStringsAndComments(text[:offset])
 
 	depth, active := 0, 0
 	open := -1
 scan:
 	for i := offset - 1; i >= 0; i-- {
-		switch text[i] {
+		switch code[i] {
 		case ')', ']', '}':
 			depth++
 		case '(', '[', '{':
 			if depth == 0 {
-				if text[i] == '(' {
+				if code[i] == '(' {
 					open = i
 				}
 				break scan
@@ -487,7 +502,7 @@ scan:
 				active++
 			}
 		case '\n':
-			if i < offset-200 {
+			if i < offset-2000 {
 				break scan
 			}
 		}
@@ -496,16 +511,67 @@ scan:
 		return nil, nil
 	}
 
-	chain := chainBefore(text, open)
-	t := s.typeOfChain(path, chain, open)
+	// firstOf<number>(: the type arguments come between the name and '('.
+	nameEnd := open
+	if nameEnd > 0 && code[nameEnd-1] == '>' {
+		for d, i := 0, nameEnd-1; i >= 0; i-- {
+			if code[i] == '>' {
+				d++
+			} else if code[i] == '<' {
+				if d--; d == 0 {
+					nameEnd = i
+					break
+				}
+			}
+		}
+	}
+	ix := s.repairedIndex(path, open, offset)
+	chain := chainBefore(text, nameEnd)
+	method := nameEnd > 0 && len(chain) > 1 && strings.HasSuffix(strings.TrimRight(text[:nameEnd], " \t"), chain[len(chain)-1]) &&
+		nameEnd-len(chain[len(chain)-1])-1 >= 0 && text[nameEnd-len(chain[len(chain)-1])-1] == ':'
 	var fn *types.FunctionType
-	switch typ := t.(type) {
-	case *types.FunctionType:
-		fn = typ
-	case *types.ClassType:
-		fn = typ.EffectiveConstructor()
-		if fn == nil {
-			fn = &types.FunctionType{ReturnType: typ}
+	if len(chain) > 1 {
+		base, _ := typeOfChainIn(ix, path, chain[:len(chain)-1], nameEnd)
+		last := chain[len(chain)-1]
+		switch b := base.(type) {
+		case *types.ClassType:
+			// Enemy.new(...) is the constructor.
+			if last == "new" {
+				fn = b.EffectiveConstructor()
+				if fn == nil {
+					fn = &types.FunctionType{ReturnType: b}
+				}
+			}
+		case *types.StringType, *types.StringLiteralType:
+			// s:sub(...) is string.sub(s, ...): s fills the first parameter.
+			if lib := lookupIn(ix, path, "string", nameEnd); lib != nil {
+				if f, ok := memberType(lib.Type, last).(*types.FunctionType); ok {
+					fn = f
+					if method && len(f.Parameters) > 0 {
+						rest := *f
+						rest.Parameters = f.Parameters[1:]
+						if len(f.OptionalParams) > 0 {
+							rest.OptionalParams = f.OptionalParams[1:]
+						}
+						if len(f.ParamNames) > 0 {
+							rest.ParamNames = f.ParamNames[1:]
+						}
+						fn = &rest
+					}
+				}
+			}
+		}
+	}
+	if fn == nil {
+		t, _ := typeOfChainIn(ix, path, chain, nameEnd)
+		switch typ := t.(type) {
+		case *types.FunctionType:
+			fn = typ
+		case *types.ClassType:
+			fn = typ.EffectiveConstructor()
+			if fn == nil {
+				fn = &types.FunctionType{ReturnType: typ}
+			}
 		}
 	}
 	if fn == nil {
@@ -522,4 +588,35 @@ scan:
 		active = len(params) - 1
 	}
 	return SignatureHelp{Signatures: []SignatureInformation{info}, ActiveParameter: active}, nil
+}
+
+// maskStringsAndComments is text with the inside of every string and
+// comment blanked, so counting brackets and commas sees code only.
+func maskStringsAndComments(text string) string {
+	out := []byte(text)
+	blank := func(from, to int) {
+		for i := from; i < to && i < len(out); i++ {
+			if out[i] != '\n' {
+				out[i] = ' '
+			}
+		}
+	}
+	l := lexer.New(text)
+	prevEnd := 0
+	for i := 0; i < 1_000_000; i++ {
+		tok := l.NextToken()
+		// Between tokens there is only whitespace and comments.
+		if tok.Offset > prevEnd {
+			blank(prevEnd, tok.Offset)
+		}
+		if tok.Type == lexer.EOF {
+			blank(prevEnd, len(text))
+			break
+		}
+		if tok.Type == lexer.STRING || tok.Type == lexer.TEMPLATE_STRING || tok.Type == lexer.ILLEGAL && strings.HasPrefix(tok.Literal, "unterminated") {
+			blank(tok.Offset, tok.End)
+		}
+		prevEnd = tok.End
+	}
+	return string(out)
 }

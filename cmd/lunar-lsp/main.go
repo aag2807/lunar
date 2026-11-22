@@ -3,18 +3,18 @@ package main
 import (
 	"flag"
 	"fmt"
-	"lunar/internal/lsp"
 	"os"
-)
 
-var version = "1.3.0"
+	"lunar/internal/lsp"
+	"lunar/internal/version"
+)
 
 func main() {
 	showVersion := flag.Bool("version", false, "Show version information")
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("lunar-lsp version %s\n", version)
+		fmt.Println(version.String())
 		os.Exit(0)
 	}
 

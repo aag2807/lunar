@@ -109,6 +109,13 @@ type WorkspaceClientCapabilities struct {
 // InitializeResult represents the initialize response
 type InitializeResult struct {
 	Capabilities ServerCapabilities `json:"capabilities"`
+	ServerInfo   *ServerInfo        `json:"serverInfo,omitempty"`
+}
+
+// ServerInfo names the server and its version in the initialize response
+type ServerInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
 }
 
 // ServerCapabilities represents server capabilities

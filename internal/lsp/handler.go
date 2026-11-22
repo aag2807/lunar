@@ -6,6 +6,7 @@ import (
 	"lunar/internal/lexer"
 	"lunar/internal/parser"
 	"lunar/internal/types"
+	"lunar/internal/version"
 	"path/filepath"
 	"strings"
 )
@@ -36,6 +37,7 @@ func (s *Server) handleInitialize(content json.RawMessage) error {
 	}
 
 	result := InitializeResult{
+		ServerInfo: &ServerInfo{Name: "lunar", Version: version.Version},
 		Capabilities: ServerCapabilities{
 			TextDocumentSync: &TextDocumentSyncOptions{
 				OpenClose: true,

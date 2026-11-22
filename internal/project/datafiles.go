@@ -85,35 +85,42 @@ var nodeType = reflect.TypeOf((*ast.Node)(nil)).Elem()
 
 // walk visits every AST node reachable from v.
 func walk(v reflect.Value, visit func(any)) {
+	walkOnce(v, visit, map[uintptr]bool{})
+}
+
+// walkOnce visits each node once: a table literal's fields are reached
+// both through its pairs and its entries.
+func walkOnce(v reflect.Value, visit func(any), seen map[uintptr]bool) {
 	switch v.Kind() {
 	case reflect.Interface:
 		if !v.IsNil() {
-			walk(v.Elem(), visit)
+			walkOnce(v.Elem(), visit, seen)
 		}
 	case reflect.Ptr:
-		if v.IsNil() {
+		if v.IsNil() || seen[v.Pointer()] {
 			return
 		}
+		seen[v.Pointer()] = true
 		if v.Type().Implements(nodeType) {
 			visit(v.Interface())
 		}
-		walk(v.Elem(), visit)
+		walkOnce(v.Elem(), visit, seen)
 	case reflect.Struct:
 		if v.Type() == reflect.TypeOf(lexer.Token{}) {
 			return
 		}
 		for i := 0; i < v.NumField(); i++ {
-			walk(v.Field(i), visit)
+			walkOnce(v.Field(i), visit, seen)
 		}
 	case reflect.Slice:
 		for i := 0; i < v.Len(); i++ {
-			walk(v.Index(i), visit)
+			walkOnce(v.Index(i), visit, seen)
 		}
 	case reflect.Map:
 		iter := v.MapRange()
 		for iter.Next() {
-			walk(iter.Key(), visit)
-			walk(iter.Value(), visit)
+			walkOnce(iter.Key(), visit, seen)
+			walkOnce(iter.Value(), visit, seen)
 		}
 	}
 }

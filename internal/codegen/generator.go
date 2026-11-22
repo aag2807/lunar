@@ -298,7 +298,13 @@ func (g *Generator) generateStatement(stmt ast.Statement) string {
 	case *ast.FunctionDeclaration:
 		return g.generateFunctionDeclaration(node)
 	case *ast.ExpressionStatement:
-		return g.generateIndent() + g.generateExpression(node.Expression) + "\n"
+		code := g.generateExpression(node.Expression)
+		// A statement starting with '(' would continue the one before it
+		// (`f\n(x)` is a call of f): Lua's ';' keeps it apart.
+		if strings.HasPrefix(code, "(") {
+			code = ";" + code
+		}
+		return g.generateIndent() + code + "\n"
 	case *ast.ReturnStatement:
 		return g.generateReturnStatement(node)
 	case *ast.IfStatement:
@@ -510,26 +516,37 @@ func (g *Generator) generateIfStatement(node *ast.IfStatement) string {
 
 	output.WriteString(g.generateIndent())
 	output.WriteString("if ")
-	output.WriteString(g.generateExpression(node.Condition))
-	output.WriteString(" then\n")
-
-	// Consequence
-	g.indent++
-	for _, stmt := range node.Consequence.Statements {
-		output.WriteString(g.generateStatement(stmt))
-	}
-	g.indent--
-
-	// Alternative (else)
-	if node.Alternative != nil {
-		output.WriteString(g.generateIndent())
-		output.WriteString("else\n")
-
+	// An elseif chain is written as one: nested else-if blocks overflowed
+	// Lua's C stack at about 200 branches, and took quadratic time.
+	for cur := node; ; {
+		output.WriteString(g.generateExpression(cur.Condition))
+		output.WriteString(" then\n")
 		g.indent++
-		for _, stmt := range node.Alternative.Statements {
+		for _, stmt := range cur.Consequence.Statements {
 			output.WriteString(g.generateStatement(stmt))
 		}
 		g.indent--
+
+		alt := cur.Alternative
+		if alt == nil {
+			break
+		}
+		if len(alt.Statements) == 1 {
+			if next, ok := alt.Statements[0].(*ast.IfStatement); ok && next.Token.Literal == "elseif" {
+				output.WriteString(g.generateIndent())
+				output.WriteString("elseif ")
+				cur = next
+				continue
+			}
+		}
+		output.WriteString(g.generateIndent())
+		output.WriteString("else\n")
+		g.indent++
+		for _, stmt := range alt.Statements {
+			output.WriteString(g.generateStatement(stmt))
+		}
+		g.indent--
+		break
 	}
 
 	output.WriteString(g.generateIndent())
@@ -1317,6 +1334,8 @@ func (g *Generator) generateExpression(expr ast.Expression) string {
 		return fmt.Sprintf("\"%s\"", g.escapeLuaString(node.Value))
 	case *ast.TemplateLiteral:
 		return g.generateTemplateLiteral(node)
+	case *ast.ParenExpression:
+		return "(" + g.generateExpression(node.Expression) + ")"
 	case *ast.BooleanLiteral:
 		if node.Value {
 			return "true"
@@ -1388,7 +1407,9 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 				switch {
 				case e.Key != nil:
 					key, val := g.tableKey(e.Key), g.generateExpression(e.Value)
-					if isLuaIdentifier(key) {
+					if computed, ok := strings.CutPrefix(key, "\x00"); ok {
+						output.WriteString(fmt.Sprintf("__temp[%s] = %s; ", computed, val))
+					} else if isLuaIdentifier(key) {
 						output.WriteString(fmt.Sprintf("__temp[\"%s\"] = %s; ", key, val))
 					} else {
 						output.WriteString(fmt.Sprintf("__temp[%s] = %s; ", key, val))
@@ -1459,12 +1480,7 @@ func (g *Generator) generateTableLiteral(node *ast.TableLiteral) string {
 				fields[i] = g.generateExpression(e.Value)
 				continue
 			}
-			key, val := g.tableKey(e.Key), g.generateExpression(e.Value)
-			if isLuaIdentifier(key) {
-				fields[i] = fmt.Sprintf("%s = %s", key, val)
-			} else {
-				fields[i] = fmt.Sprintf("[%s] = %s", key, val)
-			}
+			fields[i] = g.tableField(g.tableKey(e.Key), g.generateExpression(e.Value))
 		}
 		output.WriteString(strings.Join(fields, ", "))
 		output.WriteString("}")
@@ -1571,7 +1587,22 @@ func (g *Generator) tableKey(key ast.Expression) string {
 	if ident, ok := key.(*ast.Identifier); ok {
 		return ident.Value
 	}
+	// A computed key, [KEY]: always in brackets, never a field name.
+	if paren, ok := key.(*ast.ParenExpression); ok {
+		return "\x00" + g.generateExpression(paren.Expression)
+	}
 	return g.generateExpression(key)
+}
+
+// tableField renders one key = value field of a table constructor.
+func (g *Generator) tableField(key, val string) string {
+	if computed, ok := strings.CutPrefix(key, "\x00"); ok {
+		return fmt.Sprintf("[%s] = %s", computed, val)
+	}
+	if isLuaIdentifier(key) {
+		return fmt.Sprintf("%s = %s", key, val)
+	}
+	return fmt.Sprintf("[%s] = %s", key, val)
 }
 
 func (g *Generator) sortedPairs(pairs map[ast.Expression]ast.Expression) [][2]string {

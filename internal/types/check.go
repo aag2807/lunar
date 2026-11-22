@@ -610,10 +610,23 @@ func (c *Checker) gotosIn(stmts []ast.Statement) []*ast.GotoStatement {
 // not resolve. A function inside it is checked on its own: a goto cannot
 // leave a function.
 func (c *Checker) nestedGotos(v reflect.Value) []*ast.GotoStatement {
+	return c.nestedGotosOnce(v, map[uintptr]bool{})
+}
+
+// nestedGotosOnce visits each node once: a table literal's fields are
+// reached both through its pairs and its entries, which made the walk
+// exponential in nesting depth.
+func (c *Checker) nestedGotosOnce(v reflect.Value, seen map[uintptr]bool) []*ast.GotoStatement {
 	switch v.Kind() {
 	case reflect.Interface, reflect.Ptr:
 		if v.IsNil() {
 			return nil
+		}
+		if v.Kind() == reflect.Ptr {
+			if seen[v.Pointer()] {
+				return nil
+			}
+			seen[v.Pointer()] = true
 		}
 		switch n := v.Interface().(type) {
 		case *ast.BlockStatement:
@@ -627,25 +640,25 @@ func (c *Checker) nestedGotos(v reflect.Value) []*ast.GotoStatement {
 			}
 			return nil
 		}
-		return c.nestedGotos(v.Elem())
+		return c.nestedGotosOnce(v.Elem(), seen)
 	case reflect.Struct:
 		var out []*ast.GotoStatement
 		for i := 0; i < v.NumField(); i++ {
 			if v.Type().Field(i).IsExported() {
-				out = append(out, c.nestedGotos(v.Field(i))...)
+				out = append(out, c.nestedGotosOnce(v.Field(i), seen)...)
 			}
 		}
 		return out
 	case reflect.Slice:
 		var out []*ast.GotoStatement
 		for i := 0; i < v.Len(); i++ {
-			out = append(out, c.nestedGotos(v.Index(i))...)
+			out = append(out, c.nestedGotosOnce(v.Index(i), seen)...)
 		}
 		return out
 	case reflect.Map:
 		var out []*ast.GotoStatement
 		for _, k := range v.MapKeys() {
-			out = append(out, c.nestedGotos(v.MapIndex(k))...)
+			out = append(out, c.nestedGotosOnce(v.MapIndex(k), seen)...)
 		}
 		return out
 	}
@@ -4920,6 +4933,11 @@ func typeExprText(e ast.Expression) string {
 // withoutFirstParameter is fn as called with ':', which supplies the first
 // argument itself.
 func withoutFirstParameter(fn *FunctionType) *FunctionType {
+	// function(...) called with ':' gets the table as one of its varargs;
+	// the vararg parameter stays.
+	if fn.HasRestParameter && len(fn.Parameters) == 1 {
+		return fn
+	}
 	rest := *fn
 	rest.Parameters = fn.Parameters[1:]
 	if len(fn.OptionalParams) > 0 {
@@ -4957,6 +4975,8 @@ func (c *Checker) checkExpressionKind(expr ast.Expression) Type {
 		return &StringLiteralType{Value: node.Value}
 	case *ast.TemplateLiteral:
 		return c.checkTemplateLiteral(node)
+	case *ast.ParenExpression:
+		return c.checkExpression(node.Expression)
 	case *ast.BooleanLiteral:
 		// Boolean literals infer as literal types for discriminated unions
 		return &BooleanLiteralType{Value: node.Value}

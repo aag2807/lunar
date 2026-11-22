@@ -26,21 +26,17 @@ function Ball:update(dt, gravity, width, height)
     if self.x - self.radius < 0 then
         self.x = self.radius
         self.vx = - self.vx * 0.9
-    else
-        if self.x + self.radius > width then
-            self.x = width - self.radius
-            self.vx = - self.vx * 0.9
-        end
+    elseif self.x + self.radius > width then
+        self.x = width - self.radius
+        self.vx = - self.vx * 0.9
     end
     if self.y - self.radius < 0 then
         self.y = self.radius
         self.vy = - self.vy * 0.9
-    else
-        if self.y + self.radius > height then
-            self.y = height - self.radius
-            self.vy = - self.vy * 0.75
-            self.vx = self.vx * 0.98
-        end
+    elseif self.y + self.radius > height then
+        self.y = height - self.radius
+        self.vy = - self.vy * 0.75
+        self.vx = self.vx * 0.98
     end
 end
 
@@ -87,13 +83,9 @@ end
 love.keypressed = function(key)
     if key == "space" then
         spawn()
-    else
-        if key == "backspace" then
-            balls = {}
-        else
-            if key == "escape" then
-                love.event.quit()
-            end
-        end
+    elseif key == "backspace" then
+        balls = {}
+    elseif key == "escape" then
+        love.event.quit()
     end
 end

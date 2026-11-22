@@ -32,12 +32,10 @@ print(sum, diff, prod, quot, floor, rem, power)
 
 if version >= 1.0 and ready then
     print("release")
+elseif version > 0 then
+    print("beta")
 else
-    if version > 0 then
-        print("beta")
-    else
-        print("unreleased")
-    end
+    print("unreleased")
 end
 
 local total = 0

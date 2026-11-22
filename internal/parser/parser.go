@@ -490,9 +490,11 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		if p.stopAtPipe && p.peekTokenIs(lexer.PIPE) {
 			return leftExp
 		}
-		// f{...} and f"..." call only what Lua can call: a name, a field,
-		// an index, a call or a parenthesised expression.
-		if (p.peekTokenIs(lexer.LBRACE) || p.peekTokenIs(lexer.STRING)) && !isCallable(leftExp) {
+		// A call (f(), f{...}, f"...") applies only to what Lua can call: a
+		// name, a field, an index, a call or a parenthesised expression.
+		// After anything else, as `local t = {}` then `(f)()` on the next
+		// line, the '(' starts a new statement, as in Lua.
+		if (p.peekTokenIs(lexer.LBRACE) || p.peekTokenIs(lexer.STRING) || p.peekTokenIs(lexer.LPAREN)) && !isCallable(leftExp) {
 			return leftExp
 		}
 		infix := p.infixParseFns[p.peekToken.Type]
@@ -562,6 +564,7 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 
 // parseGroupedInner parses ( expression ), starting on the '('.
 func (p *Parser) parseGroupedInner() ast.Expression {
+	open := p.curToken
 	p.nextToken() // consume '('
 
 	exp := p.parseExpression(LOWEST)
@@ -572,6 +575,16 @@ func (p *Parser) parseGroupedInner() ast.Expression {
 	// (f()) keeps only f's first value, so these parentheses stay.
 	if call, ok := exp.(*ast.CallExpression); ok {
 		call.Parenthesized = true
+	}
+	// Called, indexed or reached into, the parentheses decide what that
+	// applies to: (t.f or g)(2), (a or b)[1], (function() end)().
+	if !isCallable(exp) || isNilNode(exp) {
+		switch p.peekToken.Type {
+		case lexer.LPAREN, lexer.LBRACKET, lexer.DOT, lexer.COLON, lexer.STRING, lexer.LBRACE:
+			if !isNilNode(exp) {
+				return &ast.ParenExpression{Token: open, Expression: exp}
+			}
+		}
 	}
 
 	return exp
@@ -2978,10 +2991,18 @@ func (p *Parser) parseTableLiteral() ast.Expression {
 		// Try to parse as key-value pair first - allows context-aware keywords
 		// Check for [key] = value syntax
 		if p.curTokenIs(lexer.LBRACKET) {
+			open := p.curToken
 			p.nextToken() // consume '['
 			key := p.parseExpression(LOWEST)
 			if !p.expectPeek(lexer.RBRACKET) {
 				return nil
+			}
+			// [KEY] = v is the value of KEY, not the field "KEY": only a
+			// literal key in brackets names a field directly.
+			switch key.(type) {
+			case *ast.StringLiteral, *ast.NumberLiteral, *ast.BooleanLiteral:
+			default:
+				key = &ast.ParenExpression{Token: open, Expression: key}
 			}
 			if !p.expectPeek(lexer.ASSIGN) {
 				return nil
@@ -4374,7 +4395,8 @@ func (p *Parser) parseSingleArgumentCall(left ast.Expression) ast.Expression {
 // around it: a name, a field or method, an index, or a call.
 func isCallable(e ast.Expression) bool {
 	switch n := e.(type) {
-	case *ast.Identifier, *ast.DotExpression, *ast.IndexExpression, *ast.SuperExpression:
+	case *ast.Identifier, *ast.DotExpression, *ast.IndexExpression, *ast.SuperExpression,
+		*ast.ParenExpression, *ast.GenericType:
 		return true
 	case *ast.CallExpression:
 		return true

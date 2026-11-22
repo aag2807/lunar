@@ -229,6 +229,18 @@ func (ve *VarargExpression) TokenLiteral() string { return ve.Token.Literal }
 func (ve *VarargExpression) String() string       { return "..." }
 
 // TypeAssertion represents type assertion syntax value as Type
+// ParenExpression is a parenthesised expression used as a prefix
+// expression, (t.f or g)(2) or (a or b)[1], where the parentheses decide
+// what is called or indexed.
+type ParenExpression struct {
+	Token      lexer.Token // '('
+	Expression Expression
+}
+
+func (pe *ParenExpression) expressionNode()      {}
+func (pe *ParenExpression) TokenLiteral() string { return pe.Token.Literal }
+func (pe *ParenExpression) String() string       { return "(" + pe.Expression.String() + ")" }
+
 type TypeAssertion struct {
 	Token      lexer.Token // 'as' token
 	Expression Expression  // the expression being asserted

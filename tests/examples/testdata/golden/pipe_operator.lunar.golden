@@ -167,10 +167,8 @@ end
 function clamp(x, min, max)
     if x < min then
         return min
-    else
-        if x > max then
-            return max
-        end
+    elseif x > max then
+        return max
     end
     return x
 end

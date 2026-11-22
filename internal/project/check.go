@@ -187,11 +187,7 @@ func (p *Project) checkModule(m *Module, checker *types.Checker, declSources []s
 	}
 	statements = append(statements, m.Statements...)
 
-	for _, e := range checker.Check(statements) {
-		if e.File == m.Path {
-			diags = append(diags, typeDiag(e))
-		}
-	}
+	diags = append(diags, moduleDiags(checker.Check(statements), m.Path)...)
 	m.Exports = checker.Exports()
 	m.Symbols = checker.ExportSymbols()
 	m.Index = checker.Index()
@@ -317,6 +313,28 @@ func typeDiag(e *types.TypeError) diag.Diagnostic {
 	}
 	return diag.Diagnostic{File: e.File, Line: e.Line, Column: e.Column, EndLine: e.EndLine,
 		EndColumn: e.EndColumn, Severity: diag.Error, Code: code, Message: e.Message}
+}
+
+// moduleDiags keeps the errors in the module's own file, and places one
+// with no file at all (raised on a token the parser did not produce) at the
+// top of the module rather than losing it. Errors in declaration files are
+// reported once, by the declarations' own check.
+func moduleDiags(errs []*types.TypeError, path string) diag.List {
+	var out diag.List
+	for _, e := range errs {
+		switch {
+		case e.File == path:
+			out = append(out, typeDiag(e))
+		case e.File == "":
+			d := typeDiag(e)
+			d.File = path
+			if d.Line < 1 {
+				d.Line, d.Column, d.EndLine, d.EndColumn = 1, 1, 1, 1
+			}
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 func typeDiags(errs []*types.TypeError) diag.List {

@@ -1552,3 +1552,22 @@ func (t *KeyofType) IsAssignableTo(other Type) bool {
 	// This would require resolving the keyof first, which happens during type checking
 	return false
 }
+
+// GenericInterfaceType is a generic interface (interface Box<T>) before it
+// is given type arguments. Instantiate builds Box<number>, once per set of
+// arguments, in the checker that declared it, so the names its fields use
+// resolve there even when it is imported elsewhere.
+type GenericInterfaceType struct {
+	Name        string
+	Params      []string
+	Instantiate func(args []Type) *InterfaceType
+}
+
+func (t *GenericInterfaceType) String() string {
+	return t.Name + "<" + strings.Join(t.Params, ", ") + ">"
+}
+func (t *GenericInterfaceType) Equals(other Type) bool {
+	o, ok := other.(*GenericInterfaceType)
+	return ok && o.Name == t.Name
+}
+func (t *GenericInterfaceType) IsAssignableTo(other Type) bool { return t.Equals(other) }

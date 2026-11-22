@@ -1141,6 +1141,7 @@ func (cd *ConstructorDeclaration) String() string {
 type InterfaceDeclaration struct {
 	Token          lexer.Token // 'interface' token
 	Name           *Identifier
+	GenericParams  []*Identifier // type parameters, as in interface Box<T>
 	Methods        []*InterfaceMethod
 	Properties     []*PropertyDeclaration
 	IndexSignature *IndexSignatureDeclaration // [key: KeyType]: ValueType

@@ -10,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strings"
 )
 
 // TypeError represents a type error
@@ -229,8 +230,12 @@ type Checker struct {
 	errors []*TypeError
 
 	// Type definitions (classes, interfaces, enums, type aliases)
-	classes            map[string]*ClassType
-	interfaces         map[string]*InterfaceType
+	classes           map[string]*ClassType
+	interfaces        map[string]*InterfaceType
+	genericInterfaces map[string]*GenericInterfaceType
+	// sharedMemberSyms are the member symbols of the generic interface an
+	// instance is being built from.
+	sharedMemberSyms   map[string]*Symbol
 	enums              map[string]*EnumType
 	typeAliases        map[string]Type
 	genericTypeAliases map[string]*GenericTypeAlias
@@ -376,6 +381,7 @@ func NewCheckerWithOptions(opts Options) *Checker {
 		errors:             []*TypeError{},
 		classes:            make(map[string]*ClassType),
 		interfaces:         make(map[string]*InterfaceType),
+		genericInterfaces:  make(map[string]*GenericInterfaceType),
 		enums:              make(map[string]*EnumType),
 		typeAliases:        make(map[string]Type),
 		genericTypeAliases: make(map[string]*GenericTypeAlias),
@@ -649,6 +655,10 @@ func (c *Checker) predeclareTypeNames(statements []ast.Statement) {
 		switch node := stmt.(type) {
 		case *ast.InterfaceDeclaration:
 			name := node.Name.Value
+			if len(node.GenericParams) > 0 {
+				c.declareGenericInterface(node)
+				continue
+			}
 			if _, known := c.interfaces[name]; !known {
 				shell := &InterfaceType{Name: name}
 				c.interfaces[name] = shell
@@ -1027,8 +1037,86 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 
 // registerInterface registers an interface type
 func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
+	if len(node.GenericParams) > 0 {
+		c.declareGenericInterface(node)
+		return
+	}
+	interfaceType := c.buildInterface(node, node.Name.Value, nil)
+	interfaceType = c.fillInterfaceShell(interfaceType)
+	c.interfaces[interfaceType.Name] = interfaceType
+	c.env.Set(interfaceType.Name, interfaceType)
+	c.typeSyms[interfaceType.Name] = c.define(node.Name.Token, SymInterface, interfaceType)
+}
+
+// memberSym defines a member's symbol, or reuses the shared one while an
+// instance of a generic interface is built.
+func (c *Checker) memberSym(tok lexer.Token, kind SymbolKind, typ Type, container string) *Symbol {
+	if c.sharedMemberSyms != nil {
+		if sym := c.sharedMemberSyms[tok.Literal]; sym != nil {
+			return sym
+		}
+	}
+	return c.defineMember(tok, kind, typ, container)
+}
+
+// declareGenericInterface records interface Box<T> as a template; each
+// Box<X> written later is built from it on first use.
+func (c *Checker) declareGenericInterface(node *ast.InterfaceDeclaration) {
+	name := node.Name.Value
+	if _, done := c.genericInterfaces[name]; done {
+		return
+	}
+	params := make([]string, len(node.GenericParams))
+	for i, p := range node.GenericParams {
+		params[i] = p.Value
+	}
+	tmpl := &GenericInterfaceType{Name: name, Params: params}
+	c.genericInterfaces[name] = tmpl
+	c.env.Set(name, tmpl)
+	c.typeSyms[name] = c.define(node.Name.Token, SymInterface, tmpl)
+
+	instances := map[string]*InterfaceType{}
+	var memberSyms map[string]*Symbol
+	build := func(args []Type) *InterfaceType {
+		strs := make([]string, len(args))
+		for i, a := range args {
+			strs[i] = a.String()
+		}
+		key := name + "<" + strings.Join(strs, ", ") + ">"
+		if inst, ok := instances[key]; ok {
+			return inst
+		}
+		// Registered before it is filled, so Node<T> may refer to itself.
+		inst := &InterfaceType{Name: key}
+		instances[key] = inst
+		prevEnv := c.env
+		c.env = NewEnclosedEnvironment(prevEnv)
+		for i, p := range params {
+			c.env.Set(p, args[i])
+		}
+		*inst = *c.buildInterface(node, key, memberSyms)
+		c.env = prevEnv
+		return inst
+	}
+	// The template's own members, with the parameters unbound, own the
+	// symbols every instance shares, so references and rename see them all.
+	generic := make([]Type, len(params))
+	for i, p := range params {
+		generic[i] = &GenericParamType{Name: p}
+	}
+	tmpl.Instantiate = build // before building: Node<T> may name itself
+	memberSyms = build(generic).MemberSyms
+}
+
+// buildInterface makes the interface type a declaration describes, named
+// name. With syms, members take those symbols instead of defining new ones.
+func (c *Checker) buildInterface(node *ast.InterfaceDeclaration, name string, syms map[string]*Symbol) *InterfaceType {
+	prevSyms := c.sharedMemberSyms
+	c.sharedMemberSyms = syms
+	defer func() { c.sharedMemberSyms = prevSyms }()
+
 	interfaceType := &InterfaceType{
-		Name:          node.Name.Value,
+		Name:          name,
 		Methods:       make(map[string]*FunctionType),
 		Properties:    make(map[string]Type),
 		Extends:       []*InterfaceType{},
@@ -1058,7 +1146,7 @@ func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
 			ParamNames:    parameterNames(method.Parameters),
 		}
 		setMemberSym(&interfaceType.MemberSyms, method.Name.Value,
-			c.defineMember(method.Name.Token, SymMethod, interfaceType.Methods[method.Name.Value], interfaceType.Name))
+			c.memberSym(method.Name.Token, SymMethod, interfaceType.Methods[method.Name.Value], interfaceType.Name))
 		if method.IsStatic {
 			interfaceType.StaticMethods[method.Name.Value] = true
 		}
@@ -1085,10 +1173,7 @@ func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
 		}
 	}
 
-	interfaceType = c.fillInterfaceShell(interfaceType)
-	c.interfaces[interfaceType.Name] = interfaceType
-	c.env.Set(interfaceType.Name, interfaceType)
-	c.typeSyms[interfaceType.Name] = c.define(node.Name.Token, SymInterface, interfaceType)
+	return interfaceType
 }
 
 // registerEnum registers an enum type
@@ -1131,7 +1216,7 @@ func (c *Checker) addInterfaceProperty(iface *InterfaceType, prop *ast.PropertyD
 	}
 	name := prop.Name.Value
 	iface.Properties[name] = propType
-	setMemberSym(&iface.MemberSyms, name, c.defineMember(prop.Name.Token, SymProperty, propType, iface.Name))
+	setMemberSym(&iface.MemberSyms, name, c.memberSym(prop.Name.Token, SymProperty, propType, iface.Name))
 	if prop.IsStatic {
 		if iface.StaticProps == nil {
 			iface.StaticProps = make(map[string]bool)
@@ -1251,6 +1336,10 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 
 		// Check environment last (for other types registered in environment)
 		if typ, ok := c.env.Get(node.Value); ok {
+			if tmpl, isGeneric := typ.(*GenericInterfaceType); isGeneric {
+				c.addError(fmt.Sprintf("Generic type '%s' needs type arguments: %s<...>", tmpl.Name, tmpl.Name), node.Token)
+				return Any
+			}
 			return typ
 		}
 
@@ -1332,6 +1421,23 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		}
 
 	case *ast.GenericType:
+		// A generic interface, declared here or imported: Box<number>.
+		if baseIdent, ok := node.BaseType.(*ast.Identifier); ok {
+			if typ, found := c.env.Get(baseIdent.Value); found {
+				if tmpl, isGeneric := typ.(*GenericInterfaceType); isGeneric {
+					c.reference(baseIdent.Token, c.typeSyms[baseIdent.Value])
+					args := make([]Type, len(node.TypeArguments))
+					for i, arg := range node.TypeArguments {
+						args[i] = c.resolveTypeExpression(arg)
+					}
+					if len(args) != len(tmpl.Params) {
+						c.addError(fmt.Sprintf("Generic type '%s' expects %d type argument(s), got %d", tmpl.Name, len(tmpl.Params), len(args)), baseIdent.Token)
+						return Any
+					}
+					return tmpl.Instantiate(args)
+				}
+			}
+		}
 		// Check if this is a generic type alias instantiation like Nullable<string>
 		if baseIdent, ok := node.BaseType.(*ast.Identifier); ok {
 			if genericAlias, exists := c.genericTypeAliases[baseIdent.Value]; exists {
@@ -5602,6 +5708,9 @@ func (c *Checker) checkExportStatement(node *ast.ExportStatement) {
 		// Export interfaces
 		if interfaceType, ok := c.interfaces[stmt.Name.Value]; ok {
 			c.exports[stmt.Name.Value] = interfaceType
+		}
+		if tmpl, ok := c.genericInterfaces[stmt.Name.Value]; ok {
+			c.exports[stmt.Name.Value] = tmpl
 		}
 
 	case *ast.EnumDeclaration:

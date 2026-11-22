@@ -162,6 +162,17 @@ later, and have index signatures: with `[key: string]: number`, every name
 the interface does not declare reads and writes as a number, through `.` or
 `[]`. `type Name … end` declares an object shape the same way.
 
+An interface may take type parameters, given where it is used:
+
+```lunar
+interface Slot<T>
+    item: T
+    count: number
+end
+
+local arrows: Slot<string> = { item = "arrow", count = 20 }
+```
+
 ## Classes
 
 ```lunar

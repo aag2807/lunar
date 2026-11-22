@@ -75,6 +75,15 @@ local orc: Fighter = {
     end,
 }
 
+-- A generic interface takes type parameters: Slot<number>, Slot<string>.
+interface Slot<T>
+    item: T
+    count: number
+end
+
+local arrows: Slot<string> = { item = "arrow", count = 20 }
+local coins: Slot<number> = { item = 5, count = 3 }
+
 -- Checked results: a wrong answer fails the run, not just a crash.
 assert(report(Circle(1)) == "circle: 3.14159")
 assert(report(Square(3)) == "square: 9")
@@ -82,3 +91,4 @@ assert(duel.speed == nil and duel.delay == nil)
 assert(chase.speed == 3)
 assert(orc.attack("imp") == 6)
 assert(orc.onHit(4) == 8)
+assert(arrows.item == "arrow" and coins.item * coins.count == 15)

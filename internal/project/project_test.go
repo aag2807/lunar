@@ -355,3 +355,25 @@ func TestSingleFileOutsideRootDir(t *testing.T) {
 		t.Errorf("got %v", messagesOf(diags))
 	}
 }
+
+// A generic interface exported from one module is instantiated in another;
+// the names its fields use resolve where it was declared.
+func TestGenericInterfaceAcrossModules(t *testing.T) {
+	root := tree(t, map[string]string{
+		"lunar.config.json": `{"outDir": "../build"}`,
+		"box.lunar": `interface Stats
+    hp: number
+end
+export interface Tagged<T>
+    value: T
+    stats: Stats
+end
+`,
+		"main.lunar": `import { Tagged } from "./box"
+local t: Tagged<string> = { value = "imp", stats = { hp = 3 } }
+local name: string = t.value
+local hp: number = t.stats.hp
+`,
+	})
+	checkClean(t, open(t, Options{Dir: root}))
+}

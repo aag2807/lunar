@@ -3093,6 +3093,12 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 	}
 	iface.Name = p.parseIdentifierOrContextual()
 
+	// Type parameters: interface Box<T>
+	if p.peekTokenIs(lexer.LT) {
+		p.nextToken() // consume <
+		iface.GenericParams = p.parseGenericParameters()
+	}
+
 	// Parse extends clause
 	if p.peekTokenIs(lexer.EXTENDS) {
 		p.nextToken() // consume 'extends'

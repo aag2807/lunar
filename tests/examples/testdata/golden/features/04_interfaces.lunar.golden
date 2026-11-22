@@ -54,6 +54,10 @@ end, name = "orc", onHit = function(damage)
     return damage * 2
 end}
 
+local arrows = {count = 20, item = "arrow"}
+
+local coins = {count = 3, item = 5}
+
 assert(report(Circle.new(1)) == "circle: 3.14159")
 
 assert(report(Square.new(3)) == "square: 9")
@@ -65,3 +69,5 @@ assert(chase.speed == 3)
 assert(orc:attack("imp") == 6)
 
 assert(orc.onHit(4) == 8)
+
+assert(arrows.item == "arrow" and coins.item * coins.count == 15)

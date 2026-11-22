@@ -10,3 +10,6 @@
 (namespace_declaration "namespace" @context name: (_) @name) @item
 (declare_class "class" @context name: (_) @name) @item
 (declare_namespace "namespace" @context name: (_) @name) @item
+(variable_declaration "function" @context name: (_) @name) @item
+(abstract_method "abstract" @context name: (_) @name) @item
+(declare_statement "function" @context name: (_) @name) @item

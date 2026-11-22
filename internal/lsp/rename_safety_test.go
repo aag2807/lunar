@@ -73,3 +73,15 @@ func TestRenameAllowsHarmlessShadowing(t *testing.T) {
 		t.Errorf("rename a to b: %q", errMsg)
 	}
 }
+
+// Lunar's own keywords are names in Lua, and rename takes them; Lua's
+// reserved words it refuses.
+func TestRenameToContextualKeywords(t *testing.T) {
+	text := "local a = 1\nprint(a)\n"
+	if errMsg := renameIn(t, text, "a = 1", 1, "from"); errMsg != "" {
+		t.Errorf("rename to from: %q", errMsg)
+	}
+	if errMsg := renameIn(t, text, "a = 1", 1, "end"); !strings.Contains(errMsg, "not a valid name") {
+		t.Errorf("rename to end: %q", errMsg)
+	}
+}

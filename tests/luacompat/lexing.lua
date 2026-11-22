@@ -28,3 +28,9 @@ print("three dashes is a line comment")
 --]]
 print(4., 2.E-1, 0xA., 0x.8p1, 3.e2, 1e309, -1e309, 0x10, 0xff // 1)
 print(.5, 5e-1, 0X1P4, math.type(4.), math.type(0xA.), math.type(0x10))
+--[==[
+a level-2 comment ]] with ]=] inside
+]==]
+local l3 = [===[
+level ]==] three]===]
+print(l3)

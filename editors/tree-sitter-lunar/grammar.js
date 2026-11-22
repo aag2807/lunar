@@ -30,6 +30,21 @@ const commaSep1 = (rule) => seq(rule, repeat(seq(',', rule)));
 const commaSep = (rule) => optional(commaSep1(rule));
 const trailingCommaSep1 = (rule) => seq(commaSep1(rule), optional(','));
 
+// Long brackets, [[ ]] to [=====[ ]=====]: a body is anything that does
+// not close its own level.
+const LONG_LEVELS = [0, 1, 2, 3, 4, 5];
+
+function longBracket(prefix, n) {
+  const eq = '='.repeat(n);
+  // A character that is not ']', or a ']' not followed by n '=' and ']'.
+  const alts = ['[^\\]]'];
+  for (let i = 0; i < n; i++) {
+    alts.push('\\]' + '='.repeat(i) + '[^=]');
+  }
+  alts.push('\\]' + eq + '[^\\]]');
+  return seq(prefix + '[' + eq + '[', new RegExp('(' + alts.join('|') + ')*'), ']' + eq + ']');
+}
+
 module.exports = grammar({
   name: 'lunar',
 
@@ -737,9 +752,7 @@ module.exports = grammar({
           // backslash keeps a line break, CRLF included.
           seq('"', repeat(choice(/[^"\\\n]+/, /\\(z[ \t\r\n\f\v]*|\r\n|.|\n)/)), '"'),
           seq("'", repeat(choice(/[^'\\\n]+/, /\\(z[ \t\r\n\f\v]*|\r\n|.|\n)/)), "'"),
-          seq('[[', /([^\]]|\][^\]])*/, ']]'),
-          seq('[=[', /([^\]]|\][^=]|\]=[^\]])*/, ']=]'),
-          seq('[==[', /([^\]]|\][^=]|\]=[^=]|\]==[^\]])*/, ']==]'),
+          ...LONG_LEVELS.map((n) => longBracket('', n)),
         ),
       ),
 
@@ -755,8 +768,7 @@ module.exports = grammar({
     comment: (_) =>
       token(
         choice(
-          seq('--[[', /([^\]]|\][^\]])*/, ']]'),
-          seq('--[=[', /([^\]]|\][^=]|\]=[^\]])*/, ']=]'),
+          ...LONG_LEVELS.map((n) => longBracket('--', n)),
           seq('--', /[^\n]*/),
         ),
       ),

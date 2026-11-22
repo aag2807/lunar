@@ -246,7 +246,9 @@ func (s *Server) rename(uri string, pos Position, newName string) (interface{}, 
 	if err := renamable(occ.Sym); err != nil {
 		return nil, err
 	}
-	if !identifierPattern.MatchString(newName) || lexer.LookupIdent(newName) != lexer.IDENT {
+	// Any name the parser takes: Lunar's own keywords (from, class, ...)
+	// are names in Lua too.
+	if kind := lexer.LookupIdent(newName); !identifierPattern.MatchString(newName) || kind != lexer.IDENT && !lexer.IsSoftKeyword(kind) {
 		return nil, fmt.Errorf("'%s' is not a valid name", newName)
 	}
 	if err := s.renameConflict(occ.Sym, newName); err != nil {

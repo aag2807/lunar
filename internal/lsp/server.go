@@ -45,8 +45,11 @@ type Server struct {
 	timer      *time.Timer
 	dirty      bool
 
-	progs   []*project.Program         // from the last analysis, one per project
-	modules map[string]*project.Module // last module without syntax errors, by path
+	progs []*project.Program // from the last analysis, one per project
+	// lastProgs are the same programs by project, for the next analysis to
+	// start from.
+	lastProgs map[string]*project.Program
+	modules   map[string]*project.Module // last module without syntax errors, by path
 	// configErrors is the error last shown for each config file, so it is
 	// shown once rather than on every keystroke.
 	configErrors map[string]string
@@ -375,6 +378,16 @@ func (s *Server) analyze() {
 		key  string // the config that owns what this run reports
 		opts project.Options
 	}
+	// Each analysis starts from the previous one of the same project, so an
+	// edit re-checks only the edited file and what imports it.
+	prevProgs := s.lastProgs
+	s.lastProgs = map[string]*project.Program{}
+	cacheKey := func(r run) string {
+		if len(r.opts.Files) > 0 {
+			return "files:" + r.opts.Dir
+		}
+		return "project:" + r.key + "\x00" + r.opts.Dir
+	}
 	var runs []run
 	seen := map[string]bool{}
 	if s.root != "" {
@@ -414,7 +427,8 @@ func (s *Server) analyze() {
 			return
 		}
 		delete(s.configErrors, r.key)
-		prog, checkDiags := p.Check()
+		prog, checkDiags := p.CheckReusing(prevProgs[cacheKey(r)])
+		s.lastProgs[cacheKey(r)] = prog
 		s.progs = append(s.progs, prog)
 		for _, m := range prog.Modules {
 			if !owns(m.Path) {

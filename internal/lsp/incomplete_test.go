@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -23,5 +24,24 @@ func TestTypingIncompleteCodeKeepsTheServerAlive(t *testing.T) {
 		if !strings.Contains(h.Contents.Value, "Enemy") {
 			t.Errorf("%q: hover %q", typed, h.Contents.Value)
 		}
+	}
+}
+
+// An edit re-checks the edited file and what imports it, not the rest.
+func TestEditReusesUnaffectedModules(t *testing.T) {
+	c := newClient(t)
+	c.open("main.lunar")
+	enemy := filepath.Join(c.root, "actors", "enemy.lunar")
+	before := c.s.modules[enemy]
+	if before == nil {
+		t.Fatal("enemy.lunar not analysed")
+	}
+	c.change("main.lunar", c.text("main.lunar")+"local extra = 1\n")
+	if after := c.s.modules[enemy]; after == nil || after.Index != before.Index {
+		t.Error("actors/enemy.lunar was checked again after an edit to main.lunar")
+	}
+	main := filepath.Join(c.root, "main.lunar")
+	if d, _ := c.diagnosticsFor("main.lunar"); len(d) != 0 || c.s.modules[main] == nil {
+		t.Errorf("main.lunar after the edit: %+v", d)
 	}
 }

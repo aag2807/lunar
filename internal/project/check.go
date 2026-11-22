@@ -1,6 +1,8 @@
 package project
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -31,8 +33,13 @@ type Module struct {
 	// Broken is set when the module does not parse: it is not checked or
 	// emitted, and its importers take its names as 'any'.
 	Broken bool
-	// checked is set once its exports are known.
-	checked bool
+	// checked is set once its exports are known; reused when they were
+	// taken from an earlier check.
+	checked, reused bool
+	// Diags are the module's own check diagnostics; parseDiags its syntax
+	// errors.
+	Diags      diag.List
+	parseDiags diag.List
 
 	imports []resolvedImport
 }
@@ -49,31 +56,67 @@ type Program struct {
 	Modules []*Module
 	// DeclIndex covers the declaration files, checked on their own.
 	DeclIndex *types.Index
+
+	// What a later check may reuse: everything a module's check depends
+	// on besides its own text and imports, the declarations' own
+	// diagnostics, and the modules by path.
+	contextKey string
+	declDiags  diag.List
+	byPath     map[string]*Module
 }
 
 // Check parses and checks the declarations and every module, following
 // imports. Diagnostics come back sorted; the Program is usable for Emit
 // only when none of them is an error.
 func (p *Project) Check() (*Program, diag.List) {
+	return p.CheckReusing(nil)
+}
+
+// CheckReusing is Check, taking from prev (an earlier check of the same
+// project, as the language server makes on every edit) each module whose
+// text is unchanged and whose imports were all taken from prev too, as
+// long as the declarations and settings are the same. Its results are
+// those of a full check.
+func (p *Project) CheckReusing(prev *Program) (*Program, diag.List) {
 	var diags diag.List
 
 	// Declarations are checked once, together; per module they are only
 	// context, so their errors are not repeated for every script.
 	declSources := make([]string, len(p.DeclFiles))
-	var declStatements []ast.Statement
+	var declIO diag.List
+	key := sha256.New()
+	fmt.Fprintf(key, "%s\x00%s\x00%q\x00", p.Root, p.Target, p.DataFiles)
 	for i, path := range p.DeclFiles {
 		text, err := p.read(path)
 		if err != nil {
-			diags = append(diags, ioDiag(path, err))
+			declIO = append(declIO, ioDiag(path, err))
 			continue
 		}
 		declSources[i] = text
-		statements, parseDiags := parseSource(path, text)
-		diags = append(diags, parseDiags...)
-		declStatements = append(declStatements, statements...)
+		fmt.Fprintf(key, "%s\x00%d\x00%s\x00", path, len(text), text)
 	}
-	declChecker := p.newChecker()
-	diags = append(diags, typeDiags(declChecker.Check(declStatements))...)
+	contextKey := hex.EncodeToString(key.Sum(nil))
+	if prev != nil && prev.contextKey != contextKey {
+		prev = nil // other declarations or settings: nothing carries over
+	}
+
+	var declDiags diag.List
+	var declIndex *types.Index
+	if prev != nil {
+		declDiags, declIndex = prev.declDiags, prev.DeclIndex
+	} else {
+		var declStatements []ast.Statement
+		for i, path := range p.DeclFiles {
+			statements, parseDiags := parseSource(path, declSources[i])
+			declDiags = append(declDiags, parseDiags...)
+			declStatements = append(declStatements, statements...)
+		}
+		declChecker := p.newChecker()
+		declDiags = append(declDiags, typeDiags(declChecker.Check(declStatements))...)
+		declIndex = declChecker.Index()
+	}
+	diags = append(diags, declIO...)
+	diags = append(diags, declDiags...)
 
 	// Load every module reachable from the sources.
 	byPath := map[string]*Module{}
@@ -94,9 +137,17 @@ func (p *Project) Check() (*Program, diag.List) {
 			return m
 		}
 		m.Source = text
-		m.Statements, err = nil, nil
-		statements, parseDiags := parseSource(path, text)
+		// Unchanged text needs no parsing again; the earlier tree also
+		// carries the checker's annotations, should the module be reused.
+		var statements []ast.Statement
+		var parseDiags diag.List
+		if pm := prev.module(path); pm != nil && pm.Source == text {
+			statements, parseDiags = pm.Statements, pm.parseDiags
+		} else {
+			statements, parseDiags = parseSource(path, text)
+		}
 		m.Statements = statements
+		m.parseDiags = parseDiags
 		m.Broken = parseDiags.HasErrors()
 		diags = append(diags, parseDiags...)
 
@@ -158,12 +209,45 @@ func (p *Project) Check() (*Program, diag.List) {
 		if m.Broken {
 			continue
 		}
-		diags = append(diags, p.checkModule(m, checker, declSources)...)
+		if pm := prev.module(m.Path); pm != nil && reusable(m, pm) {
+			m.Exports, m.Symbols, m.Index, m.Diags = pm.Exports, pm.Symbols, pm.Index, pm.Diags
+			m.checked, m.reused = true, true
+			diags = append(diags, m.Diags...)
+			continue
+		}
+		m.Diags = p.checkModule(m, checker, declSources)
+		diags = append(diags, m.Diags...)
 		m.checked = true
 	}
 
 	diags.Sort()
-	return &Program{Project: p, Modules: sorted, DeclIndex: declChecker.Index()}, diags
+	return &Program{Project: p, Modules: sorted, DeclIndex: declIndex,
+		contextKey: contextKey, declDiags: declDiags, byPath: byPath}, diags
+}
+
+// module is the earlier check's module at path, if any.
+func (prog *Program) module(path string) *Module {
+	if prog == nil {
+		return nil
+	}
+	return prog.byPath[path]
+}
+
+// reusable says whether m, about to be checked, would come out the same as
+// pm did: the same text, checked cleanly before, and every import resolved
+// to the same module, itself reused.
+func reusable(m, pm *Module) bool {
+	if pm.Source != m.Source || !pm.checked || pm.Broken || len(pm.imports) != len(m.imports) {
+		return false
+	}
+	for i, ri := range m.imports {
+		before := pm.imports[i]
+		if ri.err != nil || before.err != nil || ri.target == nil || before.target == nil ||
+			ri.target.Path != before.target.Path || !ri.target.reused {
+			return false
+		}
+	}
+	return true
 }
 
 // checkModule checks one module with the declarations, recording its

@@ -40,7 +40,11 @@ type Server struct {
 	exited      bool
 	// watchFiles: the client lets the server register file watching.
 	watchFiles bool
-	root       string
+	root       string   // the first workspace folder, for short file names
+	roots      []string // every workspace folder
+	// projectsIn caches the lunar.config.json files found under each
+	// workspace folder; a watched-file event finds them again.
+	projectsIn map[string][]string
 	docs       map[string]string // open buffers by absolute path
 	// clientURIs is the URI the editor opened each file with, which is
 	// how it is named back to the editor.
@@ -247,7 +251,11 @@ func (s *Server) handleMessage(content json.RawMessage) error {
 		delete(s.docs, uriToPath(p.TextDocument.URI))
 		s.changed()
 		return nil
-	case "textDocument/didSave", "workspace/didChangeWatchedFiles":
+	case "workspace/didChangeWatchedFiles":
+		s.projectsIn = nil // a config may have come or gone
+		s.changed()
+		return nil
+	case "textDocument/didSave":
 		s.changed()
 		return nil
 	}
@@ -320,9 +328,14 @@ func (s *Server) handleInitialize(content json.RawMessage) error {
 	}
 	switch {
 	case len(req.Params.WorkspaceFolders) > 0:
-		s.root = uriToPath(req.Params.WorkspaceFolders[0].URI)
+		for _, f := range req.Params.WorkspaceFolders {
+			s.roots = append(s.roots, uriToPath(f.URI))
+		}
 	case req.Params.RootURI != "":
-		s.root = uriToPath(req.Params.RootURI)
+		s.roots = []string{uriToPath(req.Params.RootURI)}
+	}
+	if len(s.roots) > 0 {
+		s.root = s.roots[0]
 	}
 	s.dirty = true
 	if w := req.Params.Capabilities.Workspace.DidChangeWatchedFiles; w != nil && w.DynamicRegistration {
@@ -426,10 +439,22 @@ func (s *Server) analyze() {
 	}
 	var runs []run
 	seen := map[string]bool{}
-	if s.root != "" {
-		cfg, _ := project.FindConfig(s.root)
-		runs = append(runs, run{cfg, project.Options{Dir: s.root, ConfigPath: cfg, Overlay: overlay}})
-		seen[cfg] = true
+	// Each workspace folder: the project it is in, if any, and every
+	// project inside it, checked whether or not one of its files is open.
+	// A folder with no config (a repository's root) is not one program:
+	// its loose files are checked one folder at a time, below.
+	for _, root := range s.roots {
+		var cfgs []string
+		if cfg, found := project.FindConfig(root); found {
+			cfgs = append(cfgs, cfg)
+		}
+		cfgs = append(cfgs, s.projectsUnder(root)...)
+		for _, cfg := range cfgs {
+			if !seen[cfg] {
+				runs = append(runs, run{cfg, project.Options{ConfigPath: cfg, Overlay: overlay}})
+				seen[cfg] = true
+			}
+		}
 	}
 	docs := make([]string, 0, len(s.docs))
 	for path := range s.docs {
@@ -587,4 +612,36 @@ func (s *Server) uriOf(path string) string {
 		return uri
 	}
 	return pathToURI(path)
+}
+
+// projectsUnder lists the lunar.config.json files in root's tree, skipping
+// hidden folders and node_modules, a few levels deep. The list is kept
+// until a watched-file event.
+func (s *Server) projectsUnder(root string) []string {
+	if cfgs, ok := s.projectsIn[root]; ok {
+		return cfgs
+	}
+	var cfgs []string
+	var walk func(dir string, depth int)
+	walk = func(dir string, depth int) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			switch {
+			case e.IsDir() && depth < 6 && !strings.HasPrefix(e.Name(), ".") && e.Name() != "node_modules":
+				walk(filepath.Join(dir, e.Name()), depth+1)
+			case e.Name() == project.ConfigName && !e.IsDir():
+				cfgs = append(cfgs, filepath.Join(dir, e.Name()))
+			}
+		}
+	}
+	walk(root, 0)
+	sort.Strings(cfgs)
+	if s.projectsIn == nil {
+		s.projectsIn = map[string][]string{}
+	}
+	s.projectsIn[root] = cfgs
+	return cfgs
 }

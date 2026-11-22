@@ -587,6 +587,9 @@ func (p *Parameter) String() string {
 type BlockStatement struct {
 	Token      lexer.Token
 	Statements []Statement
+	// EndToken is the block's terminator ('end', 'until'), which bounds the
+	// scope of the names defined in it.
+	EndToken lexer.Token
 }
 
 func (bs *BlockStatement) statementNode()       {}

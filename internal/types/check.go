@@ -35,6 +35,7 @@ type Environment struct {
 	store     map[string]Type
 	constVars map[string]bool // tracks which variables are const
 	outer     *Environment
+	syms      map[string]*Symbol // definitions made in this scope, for the index
 }
 
 // NewEnvironment creates a new environment
@@ -264,6 +265,14 @@ type Checker struct {
 	importResolver ImportResolver
 	boundImports   map[*ast.ImportStatement]bool
 
+	// index records definitions and their uses for editors; scopeEnd is
+	// where the function body being checked ends (-1 at the top level).
+	index    Index
+	scopeEnd int
+	typeSyms map[string]*Symbol
+
+	exportSyms map[string]*Symbol
+
 	// ambient maps each name a declaration bound (the stdlib, .d.lunar
 	// files) to its type; globalUses are the identifiers that resolved to
 	// one of those bindings, which is what a data file may not do.
@@ -292,6 +301,8 @@ type Checker struct {
 type ModuleInfo struct {
 	Path    string
 	Exports map[string]Type
+	// Symbols are where each export is defined, for editors.
+	Symbols map[string]*Symbol
 }
 
 // ImportResolver returns the module an import statement names, or an error
@@ -308,6 +319,11 @@ func (c *Checker) SetImportResolver(r ImportResolver) {
 // Exports returns the names the checked module exports and their types.
 func (c *Checker) Exports() map[string]Type {
 	return c.exports
+}
+
+// ExportSymbols returns where each exported name is defined.
+func (c *Checker) ExportSymbols() map[string]*Symbol {
+	return c.exportSyms
 }
 
 // NewChecker creates a new type checker
@@ -358,6 +374,9 @@ func NewCheckerWithOptions(opts Options) *Checker {
 		currentModule:      "",
 		stdlibPath:         opts.StdlibDir,
 		target:             opts.Target,
+		scopeEnd:           -1,
+		typeSyms:           make(map[string]*Symbol),
+		exportSyms:         make(map[string]*Symbol),
 	}
 
 	// Register built-in utility types
@@ -710,6 +729,7 @@ func (c *Checker) registerTypeDefinition(stmt ast.Statement) {
 			nsType := c.registerAmbientNamespace(ns)
 			c.env.Set(ns.Name.Value, nsType)
 			c.markAmbient(ns.Name.Value, nsType)
+			c.define(ns.Name.Token, SymNamespace, nsType)
 		} else if node.Declaration != nil {
 			c.registerTypeDefinition(node.Declaration)
 		}
@@ -753,6 +773,7 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 	classType = c.fillClassShell(classType)
 	c.classes[classType.Name] = classType
 	c.env.Set(classType.Name, classType)
+	c.typeSyms[classType.Name] = c.define(node.Name.Token, SymClass, classType)
 
 	// ClassName.new is the constructor Lunar generates, so a Lunar class
 	// cannot define its own. A declared class describes foreign Lua and may.
@@ -796,6 +817,7 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		} else {
 			classType.Properties[propName] = propType
 		}
+		setMemberSym(&classType.MemberSyms, propName, c.defineMember(prop.Name.Token, SymProperty, propType, classType.Name))
 
 		// Track readonly properties
 		if prop.IsReadonly {
@@ -853,6 +875,7 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 			GenericParams:    []string{}, // Constructors are not separately generic
 			OptionalParams:   ctorOptional,
 			HasRestParameter: ctorHasRest,
+			ParamNames:       parameterNames(node.Constructor.Parameters),
 		}
 	}
 
@@ -890,6 +913,8 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		} else {
 			classType.Methods[methodName] = funcType
 		}
+		funcType.ParamNames = parameterNames(method.Parameters)
+		setMemberSym(&classType.MemberSyms, methodName, c.defineMember(method.Name.Token, SymMethod, funcType, classType.Name))
 
 		// Track abstract methods
 		if method.IsAbstract {
@@ -917,6 +942,7 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		}
 		getterName := getter.Name.Value
 		classType.Getters[getterName] = funcType
+		setMemberSym(&classType.MemberSyms, getterName, c.defineMember(getter.Name.Token, SymProperty, funcType.ReturnType, classType.Name))
 
 		// Track getter visibility (default to public if not specified)
 		visibility := getter.Visibility
@@ -939,6 +965,9 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 		}
 		setterName := setter.Name.Value
 		classType.Setters[setterName] = funcType
+		if classType.MemberSyms[setterName] == nil {
+			setMemberSym(&classType.MemberSyms, setterName, c.defineMember(setter.Name.Token, SymProperty, Any, classType.Name))
+		}
 
 		// Track setter visibility (default to public if not specified)
 		visibility := setter.Visibility
@@ -1016,7 +1045,10 @@ func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
 			Parameters:    params,
 			ReturnType:    returnType,
 			GenericParams: []string{}, // Interface methods are not separately generic
+			ParamNames:    parameterNames(method.Parameters),
 		}
+		setMemberSym(&interfaceType.MemberSyms, method.Name.Value,
+			c.defineMember(method.Name.Token, SymMethod, interfaceType.Methods[method.Name.Value], interfaceType.Name))
 		if method.IsStatic {
 			interfaceType.StaticMethods[method.Name.Value] = true
 		}
@@ -1046,6 +1078,7 @@ func (c *Checker) registerInterface(node *ast.InterfaceDeclaration) {
 	interfaceType = c.fillInterfaceShell(interfaceType)
 	c.interfaces[interfaceType.Name] = interfaceType
 	c.env.Set(interfaceType.Name, interfaceType)
+	c.typeSyms[interfaceType.Name] = c.define(node.Name.Token, SymInterface, interfaceType)
 }
 
 // registerEnum registers an enum type
@@ -1059,6 +1092,7 @@ func (c *Checker) registerEnum(node *ast.EnumDeclaration) {
 	enumType = c.fillEnumShell(enumType)
 	c.enums[enumType.Name] = enumType
 	c.env.Set(enumType.Name, enumType)
+	c.typeSyms[enumType.Name] = c.define(node.Name.Token, SymEnum, enumType)
 
 	if _, blocked, previous := node.ImplicitValues(); blocked != nil {
 		c.addError(fmt.Sprintf("Enum member '%s' needs an explicit value because '%s' is not a number literal",
@@ -1073,6 +1107,7 @@ func (c *Checker) registerEnum(node *ast.EnumDeclaration) {
 		// All enum members have the enum type itself, not the value type
 		// This ensures type safety: Color.Red has type Color, not number
 		enumType.Members[member.Name.Value] = enumType
+		setMemberSym(&enumType.MemberSyms, member.Name.Value, c.defineMember(member.Name.Token, SymEnumMember, enumType, enumType.Name))
 	}
 }
 
@@ -1086,6 +1121,7 @@ func (c *Checker) addInterfaceProperty(iface *InterfaceType, prop *ast.PropertyD
 	}
 	name := prop.Name.Value
 	iface.Properties[name] = propType
+	setMemberSym(&iface.MemberSyms, name, c.defineMember(prop.Name.Token, SymProperty, propType, iface.Name))
 	if prop.IsStatic {
 		if iface.StaticProps == nil {
 			iface.StaticProps = make(map[string]bool)
@@ -1156,6 +1192,7 @@ func (c *Checker) registerTypeAlias(node *ast.TypeDeclaration) {
 
 	c.typeAliases[node.Name.Value] = aliasType
 	c.env.Set(node.Name.Value, aliasType)
+	c.typeSyms[node.Name.Value] = c.define(node.Name.Token, SymTypeAlias, aliasType)
 }
 
 // resolveTypeExpression resolves a type expression to a Type
@@ -1188,6 +1225,7 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 		}
 
 		// Check for user-defined types
+		c.reference(node.Token, c.typeSyms[node.Value])
 		if classType, ok := c.classes[node.Value]; ok {
 			return classType
 		}
@@ -2262,6 +2300,7 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 			} else {
 				c.env.Set(name.Value, varType)
 			}
+			c.define(name.Token, SymVariable, varType)
 		}
 		return
 	}
@@ -2316,6 +2355,7 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 			} else {
 				c.env.Set(name.Value, varType)
 			}
+			c.define(name.Token, SymVariable, varType)
 		}
 		return
 	}
@@ -2357,6 +2397,7 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 		} else {
 			c.env.Set(name.Value, finalType)
 		}
+		c.define(name.Token, SymVariable, finalType)
 	}
 }
 
@@ -2564,6 +2605,8 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		c.funcDefs = make(map[*FunctionType]lexer.Token)
 	}
 	c.funcDefs[funcType] = node.Name.Token
+	funcType.ParamNames = parameterNames(node.Parameters)
+	c.define(node.Name.Token, SymFunction, funcType)
 
 	// Check function body in new scope
 	prevReturnType := c.currentFunctionReturnType
@@ -2588,13 +2631,21 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		c.env.Set(genericParam.Value, Any)
 	}
 
+	// Parameters and the body's locals are in scope until the body ends.
+	prevScopeEnd := c.scopeEnd
+	if node.Body != nil {
+		c.scopeEnd = node.Body.EndToken.End
+	}
+
 	// Add parameters to scope
 	for i, param := range node.Parameters {
 		c.env.Set(param.Name.Value, params[i])
+		c.define(param.Name.Token, SymParameter, params[i])
 	}
 
 	// Check body
 	c.checkBlockStatement(node.Body)
+	c.scopeEnd = prevScopeEnd
 
 	if c.inferringReturn {
 		// funcType is already registered; callers see the inferred type because
@@ -2605,6 +2656,17 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	c.inferringReturn, c.inferredReturns = prevInferring, prevInferred
 	c.env = prevEnv
 	c.currentFunctionReturnType = prevReturnType
+}
+
+// parameterNames lists a signature's parameter names, for signature help.
+func parameterNames(params []*ast.Parameter) []string {
+	names := make([]string, len(params))
+	for i, p := range params {
+		if p != nil && p.Name != nil {
+			names[i] = p.Name.Value
+		}
+	}
+	return names
 }
 
 // combineReturnTypes reduces the return types seen in a body to one type: void
@@ -3196,10 +3258,13 @@ func (c *Checker) checkForStatement(node *ast.ForStatement) {
 		for i, variable := range node.Variables {
 			if i == 0 {
 				c.env.Set(variable.Value, keyType)
+				c.define(variable.Token, SymVariable, keyType)
 			} else if i == 1 {
 				c.env.Set(variable.Value, valueType)
+				c.define(variable.Token, SymVariable, valueType)
 			} else {
 				c.env.Set(variable.Value, Any)
+				c.define(variable.Token, SymVariable, Any)
 			}
 		}
 
@@ -3217,6 +3282,7 @@ func (c *Checker) checkForStatement(node *ast.ForStatement) {
 	} else {
 		for _, variable := range node.Variables {
 			c.env.Set(variable.Value, Number)
+			c.define(variable.Token, SymVariable, Number)
 		}
 
 		// Numeric for loop
@@ -3449,12 +3515,18 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 				paramType = c.resolveTypeExpression(param.Type)
 			}
 			c.env.Set(param.Name.Value, paramType)
+			c.define(param.Name.Token, SymParameter, paramType)
 		}
 
 		// Check constructor body (allow readonly assignments in constructor)
 		prevInConstructor := c.inConstructor
 		c.inConstructor = true
+		prevScopeEnd := c.scopeEnd
+		if node.Constructor.Body != nil {
+			c.scopeEnd = node.Constructor.Body.EndToken.End
+		}
 		c.checkBlockStatement(node.Constructor.Body)
+		c.scopeEnd = prevScopeEnd
 		c.inConstructor = prevInConstructor
 
 		c.env = prevEnv
@@ -3492,10 +3564,16 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 				paramType = c.resolveTypeExpression(param.Type)
 			}
 			c.env.Set(param.Name.Value, paramType)
+			c.define(param.Name.Token, SymParameter, paramType)
 		}
 
 		// Check method body
+		prevScopeEnd := c.scopeEnd
+		if method.Body != nil {
+			c.scopeEnd = method.Body.EndToken.End
+		}
 		c.checkBlockStatement(method.Body)
+		c.scopeEnd = prevScopeEnd
 
 		c.env = prevEnv
 		c.currentFunctionReturnType = prevReturnType
@@ -3839,6 +3917,9 @@ func (c *Checker) checkIdentifier(node *ast.Identifier) Type {
 	if ok && c.ambient[node.Value] == typ {
 		c.globalUses = append(c.globalUses, node.Token)
 	}
+	if ok {
+		c.reference(node.Token, c.env.lookupSym(node.Value))
+	}
 	if !ok {
 		// Build error message with suggestions
 		errorMsg := fmt.Sprintf("Undefined variable '%s'", node.Value)
@@ -4053,6 +4134,7 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 		paramTypes[i] = paramType
 		if param.Name != nil {
 			c.env.Set(param.Name.Value, paramType)
+			c.define(param.Name.Token, SymParameter, paramType)
 		}
 	}
 
@@ -4077,7 +4159,12 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 	c.currentFunctionReturnType = returnType
 
 	// Type check the body
+	prevScopeEnd := c.scopeEnd
+	if node.Body != nil {
+		c.scopeEnd = node.Body.EndToken.End
+	}
 	c.checkBlockStatement(node.Body)
+	c.scopeEnd = prevScopeEnd
 
 	// Restore environment and return type
 	c.env = prevEnv
@@ -4617,6 +4704,8 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		}
 		return wrapIfOptional(resultType)
 	}
+
+	c.reference(rightIdent.Token, memberSymbol(actualLeftType, propertyName))
 
 	// Check if left type has the property
 	switch typ := actualLeftType.(type) {
@@ -5214,10 +5303,12 @@ func (c *Checker) registerAmbientNamespace(node *ast.NamespaceDeclaration) *Name
 		switch s := stmt.(type) {
 		case *ast.FunctionDeclaration:
 			fn := c.declaredFunctionType(s)
+			fn.ParamNames = parameterNames(s.Parameters)
 			if existing, ok := ns.Members[s.Name.Value].(*FunctionType); ok {
 				existing.Overloads = append(existing.Overloads, fn)
 			} else {
 				ns.Members[s.Name.Value] = fn
+				setMemberSym(&ns.MemberSyms, s.Name.Value, c.defineMember(s.Name.Token, SymFunction, fn, ns.Name))
 			}
 		case *ast.VariableDeclaration:
 			for i, name := range s.Names {
@@ -5226,6 +5317,7 @@ func (c *Checker) registerAmbientNamespace(node *ast.NamespaceDeclaration) *Name
 					t = c.resolveTypeExpression(s.Types[i])
 				}
 				ns.Members[name.Value] = t
+				setMemberSym(&ns.MemberSyms, name.Value, c.defineMember(name.Token, SymVariable, t, ns.Name))
 			}
 		case *ast.NamespaceDeclaration:
 			ns.Members[s.Name.Value] = c.registerAmbientNamespace(s)
@@ -5304,6 +5396,19 @@ func (c *Checker) checkExportStatement(node *ast.ExportStatement) {
 			}
 		}
 	}
+
+	// Remember where each export is defined, so an importing module's uses
+	// lead back to it.
+	for name := range c.exports {
+		if c.exportSyms[name] != nil {
+			continue
+		}
+		if sym := c.typeSyms[name]; sym != nil {
+			c.exportSyms[name] = sym
+		} else if sym := c.env.lookupSym(name); sym != nil {
+			c.exportSyms[name] = sym
+		}
+	}
 }
 
 // checkImportStatement checks an import statement
@@ -5341,7 +5446,9 @@ func (c *Checker) bindImport(node *ast.ImportStatement) {
 	}
 
 	if node.Alias != nil {
-		c.env.Set(node.Alias.Value, &NamespaceType{Name: node.Alias.Value, Members: info.Exports, Ambient: true})
+		ns := &NamespaceType{Name: node.Alias.Value, Members: info.Exports, Ambient: true, MemberSyms: info.Symbols}
+		c.env.Set(node.Alias.Value, ns)
+		c.define(node.Alias.Token, SymNamespace, ns)
 		return
 	}
 	for _, name := range node.Names {
@@ -5352,6 +5459,15 @@ func (c *Checker) bindImport(node *ast.ImportStatement) {
 			continue
 		}
 		c.env.Set(name.Value, typ)
+		// Uses of an imported name are uses of the export's definition.
+		if sym := info.Symbols[name.Value]; sym != nil {
+			c.env.defineSym(name.Value, sym)
+			c.reference(name.Token, sym)
+			switch typ.(type) {
+			case *ClassType, *InterfaceType, *EnumType:
+				c.typeSyms[name.Value] = sym
+			}
+		}
 		// Imported types are named like local ones.
 		switch t := typ.(type) {
 		case *ClassType:
@@ -5447,6 +5563,7 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 				c.env.Set(name.Value, varType)
 			}
 			c.markAmbient(name.Value, varType)
+			c.define(name.Token, SymVariable, varType)
 		}
 
 	case *ast.FunctionDeclaration:
@@ -5471,6 +5588,8 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 			c.env.Set(decl.Name.Value, funcType)
 			c.markAmbient(decl.Name.Value, funcType)
 		}
+		funcType.ParamNames = parameterNames(decl.Parameters)
+		c.define(decl.Name.Token, SymFunction, funcType)
 
 		// Class, Interface, Enum, Type declarations are already handled in registerTypeDefinition
 	}

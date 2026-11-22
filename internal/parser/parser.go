@@ -2193,6 +2193,7 @@ func (p *Parser) parseBlockStatementUntil(terminator lexer.TokenType) *ast.Block
 
 	p.nextToken()
 	block.Statements = p.parseStatements(terminator)
+	block.EndToken = p.curToken
 
 	return block
 }

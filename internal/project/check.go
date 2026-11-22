@@ -22,6 +22,9 @@ type Module struct {
 	Source      string
 	Statements  []ast.Statement
 	Exports     map[string]types.Type
+	Symbols     map[string]*types.Symbol // where each export is defined
+	// Index is what the checker defined and resolved in this module.
+	Index *types.Index
 	// Emit is false for a module that was only loaded because something
 	// imports it, when compiling a single file.
 	Emit bool
@@ -39,6 +42,8 @@ type resolvedImport struct {
 type Program struct {
 	Project *Project
 	Modules []*Module
+	// DeclIndex covers the declaration files, checked on their own.
+	DeclIndex *types.Index
 }
 
 // Check parses and checks the declarations and every module, following
@@ -134,7 +139,7 @@ func (p *Project) Check() (*Program, diag.List) {
 				if exports == nil {
 					exports = map[string]types.Type{}
 				}
-				return &types.ModuleInfo{Path: ri.target.Path, Exports: exports}, nil
+				return &types.ModuleInfo{Path: ri.target.Path, Exports: exports, Symbols: ri.target.Symbols}, nil
 			}
 			return nil, fmt.Errorf("Cannot find module '%s'", node.Module)
 		})
@@ -154,13 +159,15 @@ func (p *Project) Check() (*Program, diag.List) {
 			}
 		}
 		m.Exports = checker.Exports()
+		m.Symbols = checker.ExportSymbols()
+		m.Index = checker.Index()
 		if p.isDataFile(m.Rel) {
 			diags = append(diags, dataFileDiagnostics(m, checker)...)
 		}
 	}
 
 	diags.Sort()
-	return &Program{Project: p, Modules: sorted}, diags
+	return &Program{Project: p, Modules: sorted, DeclIndex: declChecker.Index()}, diags
 }
 
 func (p *Project) newChecker() *types.Checker {

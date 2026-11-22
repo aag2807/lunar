@@ -248,3 +248,30 @@ func TestConfigRejectsUnknownKeys(t *testing.T) {
 		t.Errorf("got %v", messagesOf(diags))
 	}
 }
+
+// An imported name's uses lead to its definition in the exporting file,
+// which is what go-to-definition, references and rename need.
+func TestImportedNamesResolveToTheirDefinition(t *testing.T) {
+	root := tree(t, map[string]string{
+		"lunar.config.json": `{"outDir": "../build"}`,
+		"enemy.lunar":       "export class Enemy\n    hp: number\n    constructor(hp: number)\n        self.hp = hp\n    end\nend\n",
+		"main.lunar":        "import { Enemy } from \"./enemy\"\nlocal e: Enemy = Enemy(3)\nlocal n: number = e.hp\n",
+	})
+	prog := checkClean(t, open(t, Options{Dir: root}))
+	var main *Module
+	for _, m := range prog.Modules {
+		if m.Rel == "main.lunar" {
+			main = m
+		}
+	}
+	src := main.Source
+	for _, at := range []int{strings.Index(src, "Enemy(3)"), strings.LastIndex(src, "hp")} {
+		occ, ok := main.Index.At(main.Path, at)
+		if !ok {
+			t.Fatalf("nothing indexed at %d", at)
+		}
+		if !strings.HasSuffix(occ.Sym.Decl.File, "enemy.lunar") {
+			t.Errorf("%q resolves to %s:%d", occ.Tok.Literal, occ.Sym.Decl.File, occ.Sym.Decl.Line)
+		}
+	}
+}

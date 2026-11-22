@@ -461,6 +461,7 @@ type FunctionType struct {
 	HasRestParameter bool            // True if the last parameter is a rest parameter
 	OptionalParams   []bool          // True for each parameter that is optional
 	Overloads        []*FunctionType // Additional overload signatures (for method overloading)
+	ParamNames       []string        // Parameter names where known, for signature help
 }
 
 func (t *FunctionType) String() string {
@@ -799,6 +800,7 @@ type ClassType struct {
 	Implements         []*InterfaceType
 	IsAbstract         bool                     // Whether class is abstract
 	Ambient            bool                     // Declared with `declare class`: foreign Lua
+	MemberSyms         map[string]*Symbol       // Where each member is defined, for editors
 	GenericParams      []string                 // Generic type parameter names (e.g., ["T", "U"])
 	IndexSignature     *IndexSignature          // [key: KeyType]: ValueType
 	Getters            map[string]*FunctionType // Property getters
@@ -1012,6 +1014,8 @@ type InterfaceType struct {
 	// OptionalProps are the properties a table literal may leave out:
 	// written `name?: T`, or typed so that they admit nil (`name: T?`).
 	OptionalProps map[string]bool
+	// MemberSyms records where each member is defined, for editors.
+	MemberSyms map[string]*Symbol
 }
 
 // requiredProperties returns every property the interface requires,
@@ -1242,6 +1246,8 @@ type NamespaceType struct {
 	// Ambient is set for `declare namespace`, whose members are complete,
 	// so a member it does not list is an error rather than 'any'.
 	Ambient bool
+	// MemberSyms records where each member is defined, for editors.
+	MemberSyms map[string]*Symbol
 }
 
 func (t *NamespaceType) String() string {
@@ -1296,8 +1302,9 @@ func (t *PromiseType) IsAssignableTo(other Type) bool {
 
 // EnumType represents an enum type
 type EnumType struct {
-	Name    string
-	Members map[string]Type
+	Name       string
+	Members    map[string]Type
+	MemberSyms map[string]*Symbol // where each member is defined, for editors
 }
 
 func (t *EnumType) String() string {

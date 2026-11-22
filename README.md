@@ -71,27 +71,61 @@ that CI compiles and **runs** under Lua 5.3 and 5.4, asserting its own results
   `declare class`, `declare namespace`, interfaces that refer to themselves
   or to each other
 
-## Known gaps
-
-Being fixed, in this order:
-
-- Declarations are only found next to the input file, and the standard
-  library only next to the binary (or a few folders above the current one)
-- Imports resolve relative to the working directory, not the importing file,
-  and a class cannot be imported from another module yet
+## Not supported
 
 Function overloading is for `declare function` only, and `async`/`await` are
-refused with an error: Lua's coroutines do that job.
+refused with an error: Lua's coroutines do that job. Targets other than Lua
+5.3 and 5.4 (LuaJIT, 5.1) are not supported.
 
 ## Install
 
 Requires Go 1.23 or newer.
 
 ```sh
-make build        # builds dist/lunar and dist/lunar-lsp
+make build                       # builds dist/lunar and dist/lunar-lsp
+make install PREFIX=$HOME/.local # copies them to $HOME/.local/bin
 ```
 
+The binary is self-contained: the standard library declarations are built in.
+
 ## Use
+
+A project is a folder of scripts with a `lunar.config.json` (paths are
+relative to it):
+
+```json
+{
+  "rootDir": "scripts",
+  "outDir": "../build/scripts",
+  "target": "lua54",
+  "declarations": ["../engine/api"],
+  "dataFiles": ["data/**"]
+}
+```
+
+```sh
+lunar build                 # compile every script under rootDir into outDir
+lunar build --json --watch  # for an editor: JSON lines, rebuild on change
+```
+
+`lunar build` checks the whole folder first and writes only if nothing is
+wrong, so the last good Lua stays in place when a script has an error. The
+output mirrors `rootDir`; plain `.lua` scripts are copied through, and outputs
+whose source was deleted are removed (nothing lunar did not write is touched).
+
+- **Imports** starting with `./` or `../` are relative to the importing file,
+  others to `rootDir`. `require` names are relative to `rootDir`:
+  `scripts/ai/brain.lunar` is `require("ai.brain")`, so the engine sets
+  `package.path` to the output folder.
+- **Declarations** are the bundled Lua standard library (built into lunar),
+  every `*.d.lunar` under `rootDir`, and the `declarations` paths and `--decl`
+  flags, which may be anywhere, such as the engine's API.
+- **Data files** (`dataFiles` globs) are loaded by the engine with no libraries
+  opened, so using a global (`tostring`, the engine API) or a construct whose
+  Lua needs one (classes, spreads, template strings, `match`) is an error in
+  them.
+
+Single files compile the same way, checking what they import:
 
 ```sh
 lunar game.lunar                    # writes game.lua
@@ -130,8 +164,7 @@ is typed `any`, the call is emitted as written: write `obj:method()` to pass
 `self`.
 
 Declaration files (`*.d.lunar`) describe existing Lua or C APIs to the type
-checker. Those in the same folder as the input are loaded automatically, along
-with the standard library declarations in [`stdlib/`](stdlib/).
+checker:
 
 ```lunar
 declare function spawn(name: string, x?: number): number

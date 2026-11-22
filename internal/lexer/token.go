@@ -198,8 +198,17 @@ var keywords = map[string]TokenType{
 type Token struct {
 	Type    TokenType
 	Literal string
-	Line    int
-	Column  int
+	// Line and Column are where the token starts, 1-based; Column counts
+	// bytes. EndLine and EndColumn are just past its last character.
+	Line      int
+	Column    int
+	EndLine   int
+	EndColumn int
+	// Offset and End are byte offsets of the token's text in its file.
+	Offset int
+	End    int
+	// File is the path of the source the token came from.
+	File string
 }
 
 func LookupIdent(ident string) TokenType {

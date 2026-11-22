@@ -1,5 +1,7 @@
 package lexer
 
+import "strings"
+
 type Lexer struct {
 	input        string
 	position     int
@@ -7,6 +9,14 @@ type Lexer struct {
 	ch           byte
 	line         int
 	column       int
+	file         string
+}
+
+// NewFile lexes input, recording path as every token's File.
+func NewFile(path, input string) *Lexer {
+	l := New(input)
+	l.file = path
+	return l
 }
 
 func New(input string) *Lexer {
@@ -16,7 +26,14 @@ func New(input string) *Lexer {
 	return l
 }
 
+// readChar advances one byte. Moving past a newline starts the next line,
+// so line and column stay right inside strings and comments too.
 func (l *Lexer) readChar() {
+	if l.ch == '\n' {
+		l.line++
+		l.column = 0
+	}
+
 	if l.readPosition >= len(l.input) {
 		l.ch = 0 // ASCII code for "NUL"
 	} else {
@@ -25,20 +42,48 @@ func (l *Lexer) readChar() {
 
 	l.position = l.readPosition
 	l.readPosition++
-
-	if l.ch == '\n' {
-		l.column = 0
-	} else {
-		l.column++
-	}
+	l.column++
 }
 
+// NextToken returns the next token, with its start and end positions and
+// byte offsets recorded in one place, after whitespace and comments.
 func (l *Lexer) NextToken() Token {
-	var tok Token
-	l.skipWhitespace()
+	for {
+		l.skipWhitespace()
+		if l.ch == '-' && l.peekChar() == '-' {
+			l.skipComment()
+			continue
+		}
+		break
+	}
 
-	tok.Line = l.line
-	tok.Column = l.column
+	start, line, column := l.position, l.line, l.column
+	tok := l.scanToken()
+
+	end := l.position
+	if tok.Type == EOF || start >= len(l.input) {
+		start, end = len(l.input), len(l.input)
+	}
+	if end > len(l.input) {
+		end = len(l.input)
+	}
+	tok.File = l.file
+	tok.Offset, tok.End = start, end
+	tok.Line, tok.Column = line, column
+
+	text := l.input[start:end]
+	if nl := strings.LastIndexByte(text, '\n'); nl < 0 {
+		tok.EndLine, tok.EndColumn = line, column+len(text)
+	} else {
+		tok.EndLine = line + strings.Count(text, "\n")
+		tok.EndColumn = len(text) - nl
+	}
+	return tok
+}
+
+// scanToken reads one token starting at the current character.
+func (l *Lexer) scanToken() Token {
+	var tok Token
 
 	switch l.ch {
 	case '+':
@@ -210,10 +255,6 @@ func (l *Lexer) NextToken() Token {
 
 func (l *Lexer) skipWhitespace() {
 	for l.ch == ' ' || l.ch == '\t' || l.ch == '\r' || l.ch == '\n' {
-		if l.ch == '\n' {
-			l.line++
-			l.column = 0
-		}
 		l.readChar()
 	}
 }
@@ -243,10 +284,6 @@ func (l *Lexer) skipMultiLineComment() {
 			return
 		}
 
-		if l.ch == '\n' {
-			l.line++
-			l.column = 0
-		}
 		l.readChar()
 	}
 }

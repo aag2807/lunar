@@ -20,12 +20,15 @@ func TestReadChar(t *testing.T) {
 		l.readChar()
 	}
 
-	if l.line != 1 {
-		t.Errorf("line number after newline wrong. expected=2 got=%d", l.line)
+	// The newline is the last character of line 1.
+	if l.ch != '\n' || l.line != 1 || l.column != 6 {
+		t.Errorf("at the newline: ch=%q line=%d column=%d, want '\\n' 1 6", l.ch, l.line, l.column)
 	}
 
-	if l.column != 0 {
-		t.Errorf("column after newline wrong. expected=0, got=%d", l.column)
+	// Moving past it starts line 2.
+	l.readChar()
+	if l.ch != 'p' || l.line != 2 || l.column != 1 {
+		t.Errorf("after the newline: ch=%q line=%d column=%d, want 'p' 2 1", l.ch, l.line, l.column)
 	}
 }
 
@@ -128,8 +131,9 @@ func TestStringTokens(t *testing.T) {
 		{TokenType(STRING), "string with \n newline", 3},
 		{TokenType(STRING), "string with \t tab", 4},
 		{TokenType(STRING), "multiple\n    lines", 5},
-		{TokenType(STRING), "escaped \\backslash", 6},
-		{TokenType(EOF), "", 6},
+		// The string before spans lines 5 and 6.
+		{TokenType(STRING), "escaped \\backslash", 7},
+		{TokenType(EOF), "", 7},
 	}
 
 	l := New(input)

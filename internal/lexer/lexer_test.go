@@ -117,7 +117,7 @@ func TestStringTokens(t *testing.T) {
     "string with \"quotes\""
     "string with \n newline"
     "string with \t tab"
-    "multiple
+    "multiple\
     lines"
     "escaped \\backslash"`
 
@@ -131,7 +131,8 @@ func TestStringTokens(t *testing.T) {
 		{TokenType(STRING), "string with \n newline", 3},
 		{TokenType(STRING), "string with \t tab", 4},
 		{TokenType(STRING), "multiple\n    lines", 5},
-		// The string before spans lines 5 and 6.
+		// The string before spans lines 5 and 6: a backslash keeps the line
+		// break, as in Lua (without it the string would end at its line).
 		{TokenType(STRING), "escaped \\backslash", 7},
 		{TokenType(EOF), "", 7},
 	}

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Generator generates Lua code from an AST
@@ -2153,32 +2154,40 @@ func getOperatorPrecedence(op string) int {
 	}
 }
 
-// escapeLuaString escapes special characters in a string for Lua output
+// escapeLuaString writes a string's bytes as the inside of a "..." Lua
+// literal. Lua strings are bytes: valid UTF-8 is written as is, anything
+// else (a lone 0xE9, control bytes) as a three-digit decimal escape, which
+// a following digit cannot extend.
 func (g *Generator) escapeLuaString(s string) string {
 	var result strings.Builder
-	for _, ch := range s {
-		switch ch {
+	for i := 0; i < len(s); {
+		c := s[i]
+		switch c {
 		case '\n':
 			result.WriteString("\\n")
 		case '\t':
 			result.WriteString("\\t")
 		case '\r':
 			result.WriteString("\\r")
-		case '\b':
-			result.WriteString("\\b")
-		case '\f':
-			result.WriteString("\\f")
-		case '\v':
-			result.WriteString("\\v")
-		case '\x00':
-			result.WriteString("\\0")
 		case '"':
 			result.WriteString("\\\"")
 		case '\\':
 			result.WriteString("\\\\")
 		default:
-			result.WriteRune(ch)
+			if c >= 0x80 {
+				if r, size := utf8.DecodeRuneInString(s[i:]); r != utf8.RuneError || size > 1 {
+					result.WriteString(s[i : i+size])
+					i += size
+					continue
+				}
+			}
+			if c < ' ' || c >= 0x7f {
+				fmt.Fprintf(&result, "\\%03d", c)
+			} else {
+				result.WriteByte(c)
+			}
 		}
+		i++
 	}
 	return result.String()
 }

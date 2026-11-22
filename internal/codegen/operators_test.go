@@ -40,3 +40,14 @@ func TestImportPathBecomesLuaModuleName(t *testing.T) {
 
 	assertContains(t, output, `require("mod.math_utils")`)
 }
+
+// Strings are bytes. A byte that is not UTF-8 (Latin-1 é) survives as a
+// decimal escape instead of becoming U+FFFD; UTF-8 text is written as is;
+// NUL before a digit stays NUL then the digit.
+func TestStringBytesSurvive(t *testing.T) {
+	output := generate(t, "local a = \"caf\xe9\"\nlocal b = \"é🎮\"\nlocal c = \"\\0001\"")
+
+	assertContains(t, output, `"caf\233"`)
+	assertContains(t, output, `"é🎮"`)
+	assertContains(t, output, `"\0001"`)
+}

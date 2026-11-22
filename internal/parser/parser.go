@@ -304,6 +304,10 @@ func (p *Parser) parseAwaitOrName() ast.Expression {
 
 func (p *Parser) parseNumberLiteral() ast.Expression {
 	value, err := parseLuaNumber(p.curToken.Literal)
+	// 1e309 is out of range for a float: Lua reads it as inf, as Go does.
+	if numErr, ok := err.(*strconv.NumError); ok && numErr.Err == strconv.ErrRange {
+		err = nil
+	}
 	if err != nil {
 		msg := fmt.Sprintf("could not parse %q as number", p.curToken.Literal)
 		p.addError(msg, p.curToken)
@@ -914,8 +918,20 @@ func (p *Parser) curPrecedence() int {
 }
 
 func (p *Parser) noPrefixParseFnError(t lexer.TokenType) {
-	if t == lexer.ILLEGAL && strings.HasPrefix(p.curToken.Literal, "unterminated") {
-		p.addError(p.curToken.Literal, p.curToken)
+	if t == lexer.ILLEGAL {
+		lit := p.curToken.Literal
+		switch {
+		case strings.Contains(lit, " "):
+			// The lexer's own message: "unterminated string", "invalid
+			// escape sequence '\q'", ...
+			p.addError(lit, p.curToken)
+		case lit == "\x00":
+			p.addError("unexpected NUL byte", p.curToken)
+		case len(lit) == 1 && (lit[0] < ' ' || lit[0] >= 0x7f):
+			p.addError(fmt.Sprintf("unexpected byte 0x%02X", lit[0]), p.curToken)
+		default:
+			p.addError(fmt.Sprintf("unexpected symbol '%s'", lit), p.curToken)
+		}
 		return
 	}
 	if t == lexer.END {

@@ -322,6 +322,9 @@ type Checker struct {
 	// stringMethodUses are calls through a string's metatable (s:upper()),
 	// which only exists once the string library is opened.
 	stringMethodUses []lexer.Token
+	// stringDots are the s.m expressions that resolved through the string
+	// library; a call through one may be plain Lua's s.m(s, ...).
+	stringDots map[*ast.DotExpression]bool
 
 	// exprTypes records the type computed for each expression checked.
 	exprTypes map[ast.Expression]Type
@@ -5548,6 +5551,14 @@ func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 	c.callee = node.Function
 	funcType := c.checkExpression(node.Function)
 
+	// s.upper() is Lunar for s:upper(), but s.sub(s, 2, 3), the string
+	// passed as its own first argument, is plain Lua's string.sub(s, 2, 3)
+	// and stays as written.
+	if dot, ok := node.Function.(*ast.DotExpression); ok && !dot.IsMethodCall && c.stringDots[dot] &&
+		len(node.Arguments) > 0 && exprText(node.Arguments[0]) == exprText(dot.Left) {
+		dot.MethodDispatch = ast.DispatchPlain
+	}
+
 	// obj:f(x) on a function stored in a field passes obj as f's first
 	// argument, so the arguments written fill the parameters after it.
 	if dot, ok := node.Function.(*ast.DotExpression); ok && dot.IsMethodCall && dot.MethodDispatch == ast.DispatchPlain {
@@ -6240,6 +6251,10 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 			_, isMethod := lib.GetMethod(propertyName)
 			if isProp || isMethod {
 				c.stringMethodUses = append(c.stringMethodUses, rightIdent.Token)
+				if c.stringDots == nil {
+					c.stringDots = map[*ast.DotExpression]bool{}
+				}
+				c.stringDots[node] = true
 				return resolved(ast.DispatchSelf, Any)
 			}
 		}

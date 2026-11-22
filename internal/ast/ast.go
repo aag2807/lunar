@@ -288,6 +288,9 @@ type VariableDeclaration struct {
 	Values               []Expression  // Values for each variable
 	IsConstant           bool
 	IsTupleDestructuring bool // True for (a, b) = func() syntax
+	// Attribs are Lua 5.4's attributes, one per name ("const", "close", or
+	// "" for none): local x <const> = 5.
+	Attribs []string
 }
 
 func (vd *VariableDeclaration) statementNode()       {}
@@ -890,6 +893,26 @@ func (ds *DoStatement) String() string {
 
 	return out.String()
 }
+
+// GotoStatement is Lua's goto name.
+type GotoStatement struct {
+	Token lexer.Token // 'goto'
+	Label *Identifier
+}
+
+func (gs *GotoStatement) statementNode()       {}
+func (gs *GotoStatement) TokenLiteral() string { return gs.Token.Literal }
+func (gs *GotoStatement) String() string       { return "goto " + gs.Label.Value }
+
+// LabelStatement is Lua's ::name::, a place a goto can jump to.
+type LabelStatement struct {
+	Token lexer.Token // the first ':'
+	Name  *Identifier
+}
+
+func (ls *LabelStatement) statementNode()       {}
+func (ls *LabelStatement) TokenLiteral() string { return ls.Token.Literal }
+func (ls *LabelStatement) String() string       { return "::" + ls.Name.Value + "::" }
 
 type BreakStatement struct {
 	Token lexer.Token // 'break' token

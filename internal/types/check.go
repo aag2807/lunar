@@ -496,8 +496,152 @@ func (c *Checker) Check(statements []ast.Statement) []*TypeError {
 	}
 
 	c.checkModuleShape(statements)
+	c.checkGotos(statements)
 
 	return c.errors
+}
+
+// attribOf is the Lua 5.4 attribute of a declaration's i-th name, or "".
+func attribOf(node *ast.VariableDeclaration, i int) string {
+	if i < len(node.Attribs) {
+		return node.Attribs[i]
+	}
+	return ""
+}
+
+// checkAttribs checks Lua 5.4's <const> and <close>.
+func (c *Checker) checkAttribs(node *ast.VariableDeclaration) {
+	for i, attrib := range node.Attribs {
+		switch attrib {
+		case "", "const":
+		case "close":
+			if c.target != "lua54" {
+				c.addError("'<close>' needs Lua 5.4: set \"target\": \"lua54\"", node.Names[i].Token)
+			}
+		default:
+			c.addError(fmt.Sprintf("unknown attribute '%s' (Lua has <const> and <close>)", attrib), node.Names[i].Token)
+		}
+	}
+}
+
+// checkGotos checks every goto against the labels Lua would let it reach,
+// as Lua does when it loads the file: a label in the same block or one
+// around it, in the same function, not past the start of a local's scope.
+func (c *Checker) checkGotos(statements []ast.Statement) {
+	for _, g := range c.gotosIn(statements) {
+		c.addError(fmt.Sprintf("no visible label '%s' for goto", g.Label.Value), g.Token)
+	}
+}
+
+// gotosIn resolves the gotos in a block, nested blocks included, against
+// the block's labels and returns those left for an enclosing block.
+func (c *Checker) gotosIn(stmts []ast.Statement) []*ast.GotoStatement {
+	labels := map[string]int{}
+	for i, stmt := range stmts {
+		if l, ok := stmt.(*ast.LabelStatement); ok {
+			if _, dup := labels[l.Name.Value]; dup {
+				c.addError(fmt.Sprintf("label '%s' already defined", l.Name.Value), l.Name.Token)
+				continue
+			}
+			labels[l.Name.Value] = i
+		}
+	}
+	var unresolved []*ast.GotoStatement
+	for i, stmt := range stmts {
+		var found []*ast.GotoStatement
+		if g, ok := stmt.(*ast.GotoStatement); ok {
+			found = []*ast.GotoStatement{g}
+		} else {
+			found = c.nestedGotos(reflect.ValueOf(stmt))
+		}
+		for _, g := range found {
+			j, ok := labels[g.Label.Value]
+			if !ok {
+				unresolved = append(unresolved, g)
+				continue
+			}
+			if j > i && !labelEndsBlock(stmts, j) {
+				if name := localBetween(stmts, i, j); name != "" {
+					c.addError(fmt.Sprintf("goto %s jumps into the scope of local '%s'", g.Label.Value, name), g.Token)
+				}
+			}
+		}
+	}
+	return unresolved
+}
+
+// nestedGotos finds the gotos inside a statement that its own blocks do
+// not resolve. A function inside it is checked on its own: a goto cannot
+// leave a function.
+func (c *Checker) nestedGotos(v reflect.Value) []*ast.GotoStatement {
+	switch v.Kind() {
+	case reflect.Interface, reflect.Ptr:
+		if v.IsNil() {
+			return nil
+		}
+		switch n := v.Interface().(type) {
+		case *ast.BlockStatement:
+			return c.gotosIn(n.Statements)
+		case *ast.FunctionDeclaration, *ast.FunctionExpression,
+			*ast.ConstructorDeclaration, *ast.GetterDeclaration, *ast.SetterDeclaration:
+			if body := reflect.Indirect(reflect.ValueOf(n)).FieldByName("Body"); body.IsValid() {
+				if block, ok := body.Interface().(*ast.BlockStatement); ok && block != nil {
+					c.checkGotos(block.Statements)
+				}
+			}
+			return nil
+		}
+		return c.nestedGotos(v.Elem())
+	case reflect.Struct:
+		var out []*ast.GotoStatement
+		for i := 0; i < v.NumField(); i++ {
+			if v.Type().Field(i).IsExported() {
+				out = append(out, c.nestedGotos(v.Field(i))...)
+			}
+		}
+		return out
+	case reflect.Slice:
+		var out []*ast.GotoStatement
+		for i := 0; i < v.Len(); i++ {
+			out = append(out, c.nestedGotos(v.Index(i))...)
+		}
+		return out
+	case reflect.Map:
+		var out []*ast.GotoStatement
+		for _, k := range v.MapKeys() {
+			out = append(out, c.nestedGotos(v.MapIndex(k))...)
+		}
+		return out
+	}
+	return nil
+}
+
+// labelEndsBlock says whether only labels follow the label at j: Lua lets
+// a goto jump there past locals, since their scope ends with the block.
+func labelEndsBlock(stmts []ast.Statement, j int) bool {
+	for _, stmt := range stmts[j+1:] {
+		if _, isLabel := stmt.(*ast.LabelStatement); !isLabel && !isNilNode(stmt) {
+			return false
+		}
+	}
+	return true
+}
+
+// localBetween names a local declared directly in stmts between i and j.
+func localBetween(stmts []ast.Statement, i, j int) string {
+	for _, stmt := range stmts[i+1 : j] {
+		switch n := stmt.(type) {
+		case *ast.VariableDeclaration:
+			if len(n.Names) > 0 {
+				return n.Names[0].Value
+			}
+		case *ast.FunctionDeclaration:
+			if n.IsLocal && n.Name != nil {
+				return n.Name.Value
+			}
+		}
+	}
+	return ""
 }
 
 // checkModuleShape rejects a file that both exports names and returns a
@@ -2367,8 +2511,8 @@ func (c *Checker) checkStatement(stmt ast.Statement) {
 		c.checkForStatement(node)
 	case *ast.DoStatement:
 		c.checkDoStatement(node)
-	case *ast.BreakStatement:
-		// Nothing to check for break
+	case *ast.BreakStatement, *ast.GotoStatement, *ast.LabelStatement:
+		// Checked elsewhere (gotos against labels, by checkGotos)
 	case *ast.BlockStatement:
 		c.checkBlockStatement(node)
 	case *ast.AssignmentStatement:
@@ -2395,6 +2539,7 @@ func (c *Checker) checkStatement(stmt ast.Statement) {
 
 // checkVariableDeclaration checks a variable declaration
 func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
+	c.checkAttribs(node)
 	// Resolve declared types for each variable
 	declaredTypes := make([]Type, len(node.Names))
 	for i, typ := range node.Types {
@@ -2414,7 +2559,7 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 				varType = Nil
 			}
 
-			if node.IsConstant {
+			if node.IsConstant || attribOf(node, i) == "const" {
 				c.env.SetConst(name.Value, varType)
 			} else {
 				c.env.Set(name.Value, varType)
@@ -2469,7 +2614,7 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 				varType = valueTypes[i]
 			}
 
-			if node.IsConstant {
+			if node.IsConstant || attribOf(node, i) == "const" {
 				c.env.SetConst(name.Value, varType)
 			} else {
 				c.env.Set(name.Value, varType)
@@ -2511,7 +2656,7 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 		}
 
 		// Register variable
-		if node.IsConstant {
+		if node.IsConstant || attribOf(node, i) == "const" {
 			c.env.SetConst(name.Value, finalType)
 		} else {
 			c.env.Set(name.Value, finalType)

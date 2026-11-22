@@ -1137,6 +1137,7 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 			return nil
 		}
 		decl.Names = append(decl.Names, p.parseIdentifierOrContextual())
+		decl.Attribs = append(decl.Attribs, p.parseAttrib())
 
 		// Parse type annotation if present
 		if p.peekTokenIs(lexer.COLON) {
@@ -1156,6 +1157,7 @@ func (p *Parser) parseVariableDeclaration() *ast.VariableDeclaration {
 			}
 
 			decl.Names = append(decl.Names, p.parseIdentifierOrContextual())
+			decl.Attribs = append(decl.Attribs, p.parseAttrib())
 
 			// Parse type annotation if present
 			if p.peekTokenIs(lexer.COLON) {
@@ -2539,6 +2541,17 @@ func (p *Parser) parseStatement() ast.Statement {
 }
 
 func (p *Parser) parseStatementNode() ast.Statement {
+	// goto name and ::name::
+	if p.curTokenIs(lexer.IDENT) && p.curToken.Literal == "goto" && p.peekTokenIsIdentOrContextual() {
+		stmt := &ast.GotoStatement{Token: p.curToken}
+		p.nextToken()
+		stmt.Label = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		return stmt
+	}
+	if p.curTokenIs(lexer.COLON) && p.peekTokenIs(lexer.COLON) {
+		return p.parseLabelStatement()
+	}
+
 	// A word like class, import or const begins a declaration only when
 	// what follows fits one; otherwise it is a name, as in Lua.
 	if lexer.IsSoftKeyword(p.curToken.Type) && !p.startsDeclaration() {
@@ -2767,6 +2780,40 @@ func (p *Parser) parseDoStatement() *ast.DoStatement {
 	return stmt
 }
 
+// parseLabelStatement parses ::name::, starting on the first ':'.
+func (p *Parser) parseLabelStatement() ast.Statement {
+	stmt := &ast.LabelStatement{Token: p.curToken}
+	p.nextToken() // the second ':'
+	if !p.expectPeekIdentOrContextual() {
+		return nil
+	}
+	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	if !p.expectPeek(lexer.COLON) || !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+	return stmt
+}
+
+// parseAttrib reads Lua 5.4's <const> or <close> after a local's name, if
+// there is one, and returns it ("" if none).
+func (p *Parser) parseAttrib() string {
+	if !p.peekTokenIs(lexer.LT) {
+		return ""
+	}
+	state := p.SaveState()
+	p.nextToken() // '<'
+	if !p.peekTokenIsIdentOrContextual() {
+		p.RestoreState(state)
+		return ""
+	}
+	p.nextToken() // the attribute
+	attrib := p.curToken.Literal
+	if !p.expectPeek(lexer.GT) {
+		return attrib
+	}
+	return attrib
+}
+
 func (p *Parser) parseBreakStatement() *ast.BreakStatement {
 	return &ast.BreakStatement{Token: p.curToken}
 }
@@ -2833,12 +2880,14 @@ func (p *Parser) parseTableLiteral() ast.Expression {
 			table.Values = append(table.Values, value)
 		}
 
-		// Check for comma or end
+		// Fields are separated by ',' or ';', as in Lua
 		if !p.peekTokenIs(lexer.RBRACE) {
-			if !p.expectPeek(lexer.COMMA) {
+			if p.peekTokenIs(lexer.SEMICOLON) {
+				p.nextToken()
+			} else if !p.expectPeek(lexer.COMMA) {
 				return nil
 			}
-			p.nextToken() // move past comma
+			p.nextToken() // move past the separator
 		} else {
 			p.nextToken() // move to '}'
 		}

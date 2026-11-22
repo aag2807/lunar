@@ -284,6 +284,10 @@ func (g *Generator) generateStatement(stmt ast.Statement) string {
 		return g.generateDoStatement(node)
 	case *ast.BreakStatement:
 		return g.generateIndent() + "break\n"
+	case *ast.GotoStatement:
+		return g.generateIndent() + "goto " + node.Label.Value + "\n"
+	case *ast.LabelStatement:
+		return g.generateIndent() + "::" + node.Name.Value + "::\n"
 	case *ast.BlockStatement:
 		return g.generateBlockStatement(node)
 	case *ast.AssignmentStatement:
@@ -315,12 +319,16 @@ func (g *Generator) generateVariableDeclaration(node *ast.VariableDeclaration) s
 	output.WriteString(g.generateIndent())
 	output.WriteString("local ")
 
-	// Write all variable names
+	// Write all variable names, with Lua 5.4's attributes. For 5.3 a
+	// <const> is dropped (the checker enforces it); <close> is refused.
 	for i, name := range node.Names {
 		if i > 0 {
 			output.WriteString(", ")
 		}
 		output.WriteString(name.Value)
+		if i < len(node.Attribs) && node.Attribs[i] != "" && (g.target == "lua54" || node.Attribs[i] != "const") {
+			output.WriteString(" <" + node.Attribs[i] + ">")
+		}
 	}
 
 	// Write values if present

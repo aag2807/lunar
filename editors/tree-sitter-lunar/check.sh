@@ -22,7 +22,8 @@ tree-sitter test -p .
 
 list=$(mktemp)
 trap 'rm -f "$list"' EXIT
-git -C "$repo" ls-files '*.lunar' | sed "s|^|$repo/|" > "$list"
+# Plain Lua is Lunar too: the compiler's Lua corpus must parse as well.
+git -C "$repo" ls-files '*.lunar' 'tests/luacompat/*.lua' | sed "s|^|$repo/|" > "$list"
 bad=$(tree-sitter parse -p . --quiet --paths "$list" 2>/dev/null | grep -E 'ERROR|MISSING' || true)
 if [ -n "$bad" ]; then
     echo "these files do not parse cleanly:" >&2

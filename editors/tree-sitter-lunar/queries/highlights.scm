@@ -95,6 +95,16 @@
 ["if" "elseif" "else" "match"] @keyword.conditional
 ["for" "while" "repeat" "until"] @keyword.repeat
 (break_statement) @keyword.repeat
+"goto" @keyword.repeat
+(label_statement
+  "::" @punctuation.special
+  name: (identifier) @label)
+(goto_statement
+  label: (identifier) @label)
+(attribute
+  "<" @punctuation.bracket
+  name: (identifier) @attribute
+  ">" @punctuation.bracket)
 ["import" "export" "from" "declare"] @keyword.import
 ["and" "or" "not"] @keyword.operator
 ["class" "interface" "enum" "type" "namespace" "extends" "implements"] @keyword.type

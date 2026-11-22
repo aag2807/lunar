@@ -40,14 +40,22 @@ module.exports = grammar({
   supertypes: ($) => [$._statement, $._expression, $._type],
 
   conflicts: ($) => [
+    [$._type, $.conditional_type],
+    [$.interface_declaration, $._identifier_like],
+    [$.class_declaration, $._identifier_like],
+    [$.modifier, $._identifier_like],
+    [$._identifier_like, $.function_definition],
+    [$._identifier_like, $.match_expression],
+    [$._identifier_like, $.arrow_function],
+    [$.export_statement, $._identifier_like],
+    [$.import_statement, $._identifier_like],
+    [$.variable_declaration, $._identifier_like],
     [$._expression, $.generic_call],
     [$.union_type],
     [$.variable_declaration, $.export_statement],
     [$.type_predicate, $._identifier_like],
     [$.parameter, $.type_identifier],
     [$.declare_class, $._identifier_like],
-    [$.setter, $._identifier_like],
-    [$.getter, $._identifier_like],
     [$.constructor_definition, $._identifier_like],
     [$.spread_element, $.vararg_expression],
     [$.parameter, $.vararg_expression],
@@ -76,6 +84,8 @@ module.exports = grammar({
         $.function_declaration,
         $.return_statement,
         $.break_statement,
+        $.goto_statement,
+        $.label_statement,
         $.class_declaration,
         $.interface_declaration,
         $.enum_declaration,
@@ -110,7 +120,14 @@ module.exports = grammar({
       ),
 
     typed_name: ($) =>
-      seq(field('name', $._identifier_like), optional(seq(':', field('type', $._type)))),
+      seq(
+        field('name', $._identifier_like),
+        optional(field('attribute', $.attribute)),
+        optional(seq(':', field('type', $._type))),
+      ),
+
+    // Lua 5.4: local x <const> = 5, local h <close> = v
+    attribute: ($) => seq('<', field('name', $.identifier), '>'),
 
     assignment_statement: ($) =>
       seq(commaSep1($._assignable), choice('=', '+=', '-=', '*=', '/=', '..=', '??='), commaSep1($._expression)),
@@ -209,6 +226,10 @@ module.exports = grammar({
 
     break_statement: (_) => 'break',
 
+    goto_statement: ($) => seq('goto', field('label', $.identifier)),
+
+    label_statement: ($) => seq('::', field('name', $.identifier), '::'),
+
     // ------------------------------------------------------------ declarations
 
     decorator: ($) =>
@@ -242,14 +263,18 @@ module.exports = grammar({
 
     modifier: (_) => choice('public', 'private', 'protected', 'static', 'readonly'),
 
+    // A property has a type or a value (as the compiler requires), so a
+    // bare word after the class name is part of its header: extends Actor.
     class_property: ($) =>
       prec.right(
         seq(
           repeat($.modifier),
           field('name', $._identifier_like),
           optional('?'),
-          optional(seq(':', field('type', $._type))),
-          optional(seq('=', field('value', $._expression))),
+          choice(
+            seq(':', field('type', $._type), optional(seq('=', field('value', $._expression)))),
+            seq('=', field('value', $._expression)),
+          ),
         ),
       ),
 
@@ -457,21 +482,21 @@ module.exports = grammar({
         $.parenthesized_expression,
       ),
 
+    // Lunar's own keywords are ordinary names in Lua, and so wherever a
+    // name may stand: local from = 1, t.class, s:match(p), f(public).
     _identifier_like: ($) =>
-      choice($.identifier, alias(choice('type', 'get', 'set', 'from', 'as', 'is', 'constructor'), $.identifier)),
-
-    // After '.' or ':' and as a table key, Lunar's own keywords are names:
-    // s:match(p), string.match, t.class.
-    _field_name: ($) =>
       choice(
-        $._identifier_like,
+        $.identifier,
         alias(
-          choice('match', 'with', 'when', 'class', 'interface', 'enum', 'namespace', 'declare', 'export', 'import',
+          choice('type', 'get', 'set', 'from', 'as', 'is', 'constructor',
+            'match', 'with', 'when', 'class', 'interface', 'enum', 'namespace', 'declare', 'export', 'import',
             'static', 'public', 'private', 'protected', 'readonly', 'abstract', 'async', 'await', 'extends',
             'implements', 'keyof', 'typeof', 'const'),
           $.identifier,
         ),
       ),
+
+    _field_name: ($) => $._identifier_like,
 
     parenthesized_expression: ($) => seq('(', $._expression, ')'),
 
@@ -525,7 +550,7 @@ module.exports = grammar({
       ),
 
     table_constructor: ($) =>
-      seq('{', optional(seq(commaSep1($.field), optional(choice(',', ';')))), '}'),
+      seq('{', optional(seq($.field, repeat(seq(choice(',', ';'), $.field)), optional(choice(',', ';')))), '}'),
 
     field: ($) =>
       choice(

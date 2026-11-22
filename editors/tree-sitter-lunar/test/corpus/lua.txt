@@ -77,3 +77,75 @@ local x = 0xFF + 1e-9 + .5; local y = 1
     (typed_name
       (identifier))
     (number)))
+
+==================
+Lua names, goto and attributes
+==================
+
+local from, match, class = 1, 2, 3
+local t = { from = 1; class = 2, }
+print(t.class, s:match("%d"), type "x")
+for _, p in ipairs { 1 } do goto continue ::continue:: end
+local x <const> = 5
+
+---
+
+(chunk
+  (variable_declaration
+    (typed_name
+      (identifier))
+    (typed_name
+      (identifier))
+    (typed_name
+      (identifier))
+    (number)
+    (number)
+    (number))
+  (variable_declaration
+    (typed_name
+      (identifier))
+    (table_constructor
+      (field
+        (identifier)
+        (number))
+      (field
+        (identifier)
+        (number))))
+  (call_statement
+    (call
+      (identifier)
+      (arguments
+        (dot_index
+          (identifier)
+          (identifier))
+        (method_call
+          (identifier)
+          (identifier)
+          (arguments
+            (string)))
+        (call
+          (identifier)
+          (arguments
+            (string))))))
+  (for_generic_statement
+    (typed_name
+      (identifier))
+    (typed_name
+      (identifier))
+    (call
+      (identifier)
+      (arguments
+        (table_constructor
+          (field
+            (number)))))
+    (block
+      (goto_statement
+        (identifier))
+      (label_statement
+        (identifier))))
+  (variable_declaration
+    (typed_name
+      (identifier)
+      (attribute
+        (identifier)))
+    (number)))

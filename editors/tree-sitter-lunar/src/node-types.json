@@ -150,6 +150,10 @@
         "named": true
       },
       {
+        "type": "goto_statement",
+        "named": true
+      },
+      {
         "type": "if_statement",
         "named": true
       },
@@ -159,6 +163,10 @@
       },
       {
         "type": "interface_declaration",
+        "named": true
+      },
+      {
+        "type": "label_statement",
         "named": true
       },
       {
@@ -457,6 +465,22 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "attribute",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -1805,6 +1829,22 @@
     }
   },
   {
+    "type": "goto_statement",
+    "named": true,
+    "fields": {
+      "label": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "if_statement",
     "named": true,
     "fields": {
@@ -2024,6 +2064,22 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "label_statement",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -2873,6 +2929,16 @@
     "type": "typed_name",
     "named": true,
     "fields": {
+      "attribute": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "attribute",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,
@@ -3187,6 +3253,10 @@
     "named": false
   },
   {
+    "type": "::",
+    "named": false
+  },
+  {
     "type": ";",
     "named": false
   },
@@ -3369,6 +3439,10 @@
   },
   {
     "type": "get",
+    "named": false
+  },
+  {
+    "type": "goto",
     "named": false
   },
   {

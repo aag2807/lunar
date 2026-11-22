@@ -6,6 +6,7 @@ import (
 	"lunar/internal/lexer"
 	"lunar/internal/sourcemap"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -969,8 +970,14 @@ func (g *Generator) generateEnumDeclaration(node *ast.EnumDeclaration) string {
 	output.WriteString(g.generateIndent())
 	output.WriteString(fmt.Sprintf("local %s = {\n", enumName))
 
+	implicit := map[*ast.EnumMember]float64{}
+	values, _, _ := node.ImplicitValues()
+	for _, v := range values {
+		implicit[v.Member] = v.Value
+	}
+
 	g.indent++
-	for i, member := range node.Members {
+	for _, member := range node.Members {
 		output.WriteString(g.generateIndent())
 		output.WriteString(member.Name.Value)
 		output.WriteString(" = ")
@@ -978,8 +985,7 @@ func (g *Generator) generateEnumDeclaration(node *ast.EnumDeclaration) string {
 		if member.Value != nil {
 			output.WriteString(g.generateExpression(member.Value))
 		} else {
-			// Auto-increment starting from 0
-			output.WriteString(fmt.Sprintf("%d", i))
+			output.WriteString(strconv.FormatFloat(implicit[member], 'g', -1, 64))
 		}
 
 		output.WriteString(",\n")

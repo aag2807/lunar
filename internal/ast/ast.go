@@ -1235,6 +1235,50 @@ type EnumMember struct {
 	Value Expression // optional - can be nil
 }
 
+// EnumValue is the number an enum member without an explicit value takes.
+type EnumValue struct {
+	Member *EnumMember
+	Value  float64
+}
+
+// ImplicitValues numbers the members that have no explicit value: the first
+// member is 0 and every other one is the previous member's number plus one,
+// so after `Elite = 10` comes 11. When the previous member's value is not a
+// number literal, numbering stops and that member is returned as blocked,
+// together with the member whose value could not be continued.
+func (ed *EnumDeclaration) ImplicitValues() (values []EnumValue, blocked, previous *EnumMember) {
+	next := 0.0
+	numbered := true
+	for i, member := range ed.Members {
+		if member.Value != nil {
+			n, ok := numberLiteralValue(member.Value)
+			next, numbered = n+1, ok
+			continue
+		}
+		if !numbered {
+			return values, member, ed.Members[i-1]
+		}
+		values = append(values, EnumValue{Member: member, Value: next})
+		next++
+	}
+	return values, nil, nil
+}
+
+// numberLiteralValue reads a number literal, possibly negated.
+func numberLiteralValue(expr Expression) (float64, bool) {
+	switch e := expr.(type) {
+	case *NumberLiteral:
+		return e.Value, true
+	case *PrefixExpression:
+		if e.Operator == "-" {
+			if n, ok := numberLiteralValue(e.Right); ok {
+				return -n, true
+			}
+		}
+	}
+	return 0, false
+}
+
 func (em *EnumMember) statementNode()       {}
 func (em *EnumMember) TokenLiteral() string { return em.Token.Literal }
 func (em *EnumMember) String() string {

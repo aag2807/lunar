@@ -9,6 +9,12 @@ local Status = {
     Inactive = 0,
 }
 
+local Rank = {
+    Grunt = 0,
+    Elite = 10,
+    Boss = 11,
+}
+
 function colorName(c)
     if c == Color.Red then
         return "red"
@@ -32,3 +38,5 @@ assert(colorName(Color.Green) == "green")
 assert(colorName(Color.Blue) == "blue")
 
 assert(Status.Active == 1 and Status.Inactive == 0)
+
+assert(Rank.Grunt == 0 and Rank.Elite == 10 and Rank.Boss == 11)

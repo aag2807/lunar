@@ -864,6 +864,11 @@ func (c *Checker) registerEnum(node *ast.EnumDeclaration) {
 	c.enums[enumType.Name] = enumType
 	c.env.Set(enumType.Name, enumType)
 
+	if _, blocked, previous := node.ImplicitValues(); blocked != nil {
+		c.addError(fmt.Sprintf("Enum member '%s' needs an explicit value because '%s' is not a number literal",
+			blocked.Name.Value, previous.Name.Value), blocked.Token)
+	}
+
 	for _, member := range node.Members {
 		if member.Value != nil {
 			// Validate the value expression (should be number or string)

@@ -1,0 +1,10 @@
+-- A subclass constructor has to run its parent's: without super(...) the
+-- parent's fields are never set.
+class Base
+    hp: number = 3
+end
+class Sub extends Base
+    constructor(n: number)
+    end
+end
+-- error: must call super(...)

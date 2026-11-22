@@ -9,9 +9,12 @@ end
 local Box = {}
 Box.__index = Box
 
-function Box.new(value)
-    local self = setmetatable({}, Box)
+function Box.__init(self, value)
     self.value = value
+end
+function Box.new(...)
+    local self = setmetatable({}, Box)
+    Box.__init(self, ...)
     return self
 end
 
@@ -23,10 +26,13 @@ end
 local Pair = {}
 Pair.__index = Pair
 
-function Pair.new(left, right)
-    local self = setmetatable({}, Pair)
+function Pair.__init(self, left, right)
     self.left = left
     self.right = right
+end
+function Pair.new(...)
+    local self = setmetatable({}, Pair)
+    Pair.__init(self, ...)
     return self
 end
 

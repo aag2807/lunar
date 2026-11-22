@@ -3,10 +3,13 @@ Account.__index = Account
 Account.__getters = {}
 Account.__setters = {}
 
-function Account.new(id, balance)
-    local self = setmetatable({}, Account)
+function Account.__init(self, id, balance)
     self.id = id
     self.balance = balance
+end
+function Account.new(...)
+    local self = setmetatable({}, Account)
+    Account.__init(self, ...)
     return self
 end
 
@@ -40,10 +43,13 @@ end
 local Point = {}
 Point.__index = Point
 
-function Point.new(x, y)
-    local self = setmetatable({}, Point)
+function Point.__init(self, x, y)
     self.x = x
     self.y = y
+end
+function Point.new(...)
+    local self = setmetatable({}, Point)
+    Point.__init(self, ...)
     return self
 end
 
@@ -66,10 +72,13 @@ Savings.__index = Savings
 Savings.__getters = setmetatable({}, {__index = Account.__getters})
 Savings.__setters = setmetatable({}, {__index = Account.__setters})
 
-function Savings.new(id, balance, rate)
-    local self = setmetatable({}, Savings)
-    do local __parent = Account.new(id, balance); for __k, __v in pairs(__parent) do self[__k] = __v end end
+function Savings.__init(self, id, balance, rate)
+    Account.__init(self, id, balance)
     self.rate = rate
+end
+function Savings.new(...)
+    local self = setmetatable({}, Savings)
+    Savings.__init(self, ...)
     return self
 end
 
@@ -98,9 +107,12 @@ local Plain = {}
 setmetatable(Plain, {__index = Account})
 Plain.__index = Plain
 
-function Plain.new(id)
+function Plain.__init(self, id)
+    Account.__init(self, id, 1)
+end
+function Plain.new(...)
     local self = setmetatable({}, Plain)
-    do local __parent = Account.new(id, 1); for __k, __v in pairs(__parent) do self[__k] = __v end end
+    Plain.__init(self, ...)
     return self
 end
 

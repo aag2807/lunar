@@ -1,8 +1,7 @@
 local Ball = {}
 Ball.__index = Ball
 
-function Ball.new(x, y)
-    local self = setmetatable({}, Ball)
+function Ball.__init(self, x, y)
     self.x = x
     self.y = y
     self.vx = math.random(- 260, 260)
@@ -11,6 +10,10 @@ function Ball.new(x, y)
     self.red = 0.35 + math.random() * 0.65
     self.green = 0.35 + math.random() * 0.65
     self.blue = 0.35 + math.random() * 0.65
+end
+function Ball.new(...)
+    local self = setmetatable({}, Ball)
+    Ball.__init(self, ...)
     return self
 end
 

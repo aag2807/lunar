@@ -1,9 +1,12 @@
 local Stack = {}
 Stack.__index = Stack
 
-function Stack.new()
-    local self = setmetatable({}, Stack)
+function Stack.__init(self)
     self.items = 0
+end
+function Stack.new(...)
+    local self = setmetatable({}, Stack)
+    Stack.__init(self, ...)
     return self
 end
 

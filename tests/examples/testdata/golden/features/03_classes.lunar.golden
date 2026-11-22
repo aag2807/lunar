@@ -1,10 +1,13 @@
 local Animal = {}
 Animal.__index = Animal
 
-function Animal.new(name, legs)
-    local self = setmetatable({}, Animal)
+function Animal.__init(self, name, legs)
     self.name = name
     self.legs = legs
+end
+function Animal.new(...)
+    local self = setmetatable({}, Animal)
+    Animal.__init(self, ...)
     return self
 end
 
@@ -25,9 +28,12 @@ local Dog = {}
 setmetatable(Dog, {__index = Animal})
 Dog.__index = Dog
 
-function Dog.new(name)
+function Dog.__init(self, name)
+    Animal.__init(self, name, 4)
+end
+function Dog.new(...)
     local self = setmetatable({}, Dog)
-    do local __parent = Animal.new(name, 4); for __k, __v in pairs(__parent) do self[__k] = __v end end
+    Dog.__init(self, ...)
     return self
 end
 
@@ -72,9 +78,12 @@ local Puppy = {}
 setmetatable(Puppy, {__index = Dog})
 Puppy.__index = Puppy
 
+function Puppy.__init(self, ...)
+    Dog.__init(self, ...)
+end
 function Puppy.new(...)
     local self = setmetatable({}, Puppy)
-    do local __parent = Dog.new(...); for __k, __v in pairs(__parent) do self[__k] = __v end end
+    Puppy.__init(self, ...)
     return self
 end
 

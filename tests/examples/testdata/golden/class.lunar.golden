@@ -1,10 +1,13 @@
 local Point = {}
 Point.__index = Point
 
-function Point.new(x, y)
-    local self = setmetatable({}, Point)
+function Point.__init(self, x, y)
     self.x = x
     self.y = y
+end
+function Point.new(...)
+    local self = setmetatable({}, Point)
+    Point.__init(self, ...)
     return self
 end
 

@@ -7,10 +7,13 @@ local Priority = {
 local TodoList = {}
 TodoList.__index = TodoList
 
-function TodoList.new()
-    local self = setmetatable({}, TodoList)
+function TodoList.__init(self)
     self.tasks = {}
     self.nextId = 1
+end
+function TodoList.new(...)
+    local self = setmetatable({}, TodoList)
+    TodoList.__init(self, ...)
     return self
 end
 

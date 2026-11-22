@@ -3911,6 +3911,25 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 			c.define(param.Name.Token, SymParameter, paramType)
 		}
 
+		// A subclass's constructor runs its parent's with super(...): the
+		// object is built in place, so without it the parent's fields are
+		// never set.
+		if parent, ok := c.classes[classNameOf(node.Extends)]; ok && !parent.Ambient && node.Constructor.Body != nil {
+			calls := false
+			for _, stmt := range node.Constructor.Body.Statements {
+				if es, ok := stmt.(*ast.ExpressionStatement); ok {
+					if call, ok := es.Expression.(*ast.CallExpression); ok {
+						if _, isSuper := call.Function.(*ast.SuperExpression); isSuper {
+							calls = true
+						}
+					}
+				}
+			}
+			if !calls {
+				c.addError(fmt.Sprintf("The constructor of '%s' must call super(...) to run '%s''s constructor", node.Name.Value, parent.Name), node.Constructor.Token)
+			}
+		}
+
 		// Check constructor body (allow readonly assignments in constructor)
 		prevInConstructor := c.inConstructor
 		c.inConstructor = true
@@ -4307,6 +4326,14 @@ func (c *Checker) checkFieldFunction(node *ast.FunctionDeclaration) {
 	target := &ast.DotExpression{Token: node.Name.Token, Left: node.Receiver, Right: node.Name}
 	c.checkAssignmentTarget(&ast.AssignmentStatement{Token: node.Name.Token, Targets: []ast.Expression{target}},
 		target, fnType)
+}
+
+// classNameOf is the name in an extends clause, or "".
+func classNameOf(e ast.Expression) string {
+	if ident, ok := e.(*ast.Identifier); ok {
+		return ident.Value
+	}
+	return ""
 }
 
 // withoutFirstParameter is fn as called with ':', which supplies the first

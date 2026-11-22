@@ -1,9 +1,12 @@
 local Vehicle = {}
 Vehicle.__index = Vehicle
 
-function Vehicle.new(wheels)
-    local self = setmetatable({}, Vehicle)
+function Vehicle.__init(self, wheels)
     self.wheels = wheels
+end
+function Vehicle.new(...)
+    local self = setmetatable({}, Vehicle)
+    Vehicle.__init(self, ...)
     return self
 end
 
@@ -16,9 +19,12 @@ local Car = {}
 setmetatable(Car, {__index = Vehicle})
 Car.__index = Car
 
-function Car.new()
+function Car.__init(self)
+    Vehicle.__init(self, 4)
+end
+function Car.new(...)
     local self = setmetatable({}, Car)
-    do local __parent = Vehicle.new(4); for __k, __v in pairs(__parent) do self[__k] = __v end end
+    Car.__init(self, ...)
     return self
 end
 

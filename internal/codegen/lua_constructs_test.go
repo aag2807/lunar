@@ -35,7 +35,7 @@ class Dog extends Animal
 end
 `)
 
-	assertContains(t, output, "do local __parent = Animal.new(name)")
-	assertContains(t, output, "self[__k] = __v")
+	assertContains(t, output, "Animal.__init(self, name)")
+	assertNotContains(t, output, "__parent")
 	assertNotContains(t, output, "\n    (function()")
 }

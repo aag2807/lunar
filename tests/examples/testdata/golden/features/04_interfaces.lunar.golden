@@ -1,9 +1,12 @@
 local Circle = {}
 Circle.__index = Circle
 
-function Circle.new(radius)
-    local self = setmetatable({}, Circle)
+function Circle.__init(self, radius)
     self.radius = radius
+end
+function Circle.new(...)
+    local self = setmetatable({}, Circle)
+    Circle.__init(self, ...)
     return self
 end
 
@@ -19,9 +22,12 @@ end
 local Square = {}
 Square.__index = Square
 
-function Square.new(side)
-    local self = setmetatable({}, Square)
+function Square.__init(self, side)
     self.side = side
+end
+function Square.new(...)
+    local self = setmetatable({}, Square)
+    Square.__init(self, ...)
     return self
 end
 

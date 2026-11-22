@@ -59,9 +59,12 @@ end
 local Database = {}
 Database.__index = Database
 
-function Database.new(conn)
-    local self = setmetatable({}, Database)
+function Database.__init(self, conn)
     self.connection = conn
+end
+function Database.new(...)
+    local self = setmetatable({}, Database)
+    Database.__init(self, ...)
     return self
 end
 

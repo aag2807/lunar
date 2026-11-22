@@ -43,8 +43,8 @@ end
 	}
 
 	// Check that properties are initialized in the new() function
-	if !strings.Contains(output, "function Person.new()") {
-		t.Errorf("Expected Person.new() function to be generated")
+	if !strings.Contains(output, "function Person.__init(self)") {
+		t.Errorf("Expected Person.__init(self) to be generated")
 	}
 }
 
@@ -118,7 +118,7 @@ end
 	}
 
 	// Static properties should NOT be in the constructor
-	constructorStart := strings.Index(output, "function Counter.new()")
+	constructorStart := strings.Index(output, "function Counter.__init(self)")
 	constructorEnd := strings.Index(output[constructorStart:], "end")
 	if constructorStart != -1 && constructorEnd != -1 {
 		constructor := output[constructorStart : constructorStart+constructorEnd]
@@ -187,7 +187,7 @@ end
 	output := g.Generate(statements)
 
 	// Should generate a constructor even if none was defined
-	if !strings.Contains(output, "function NoConstructor.new()") {
+	if !strings.Contains(output, "function NoConstructor.new(...)") {
 		t.Errorf("Expected constructor to be generated for class with properties")
 	}
 

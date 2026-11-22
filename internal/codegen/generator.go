@@ -632,6 +632,20 @@ func (g *Generator) generateAssignmentStatement(node *ast.AssignmentStatement) s
 
 	output.WriteString(g.generateIndent())
 
+	// super.x = v runs the parent's setter for x with this object as self,
+	// or sets the field when the parent has none.
+	if len(node.Targets) == 1 && len(node.Values) == 1 {
+		if dot, ok := node.Targets[0].(*ast.DotExpression); ok {
+			if _, isSuper := dot.Left.(*ast.SuperExpression); isSuper {
+				if name, ok := dot.Right.(*ast.Identifier); ok {
+					output.WriteString(fmt.Sprintf("do local __v = %s; local __s = %s.__setters; __s = __s and __s.%s; if __s then __s(self, __v) else rawset(self, %q, __v) end end\n",
+						g.generateExpression(node.Values[0]), g.generateExpression(dot.Left), name.Value, name.Value))
+					return output.String()
+				}
+			}
+		}
+	}
+
 	for i, target := range node.Targets {
 		if i > 0 {
 			output.WriteString(", ")
@@ -651,6 +665,20 @@ func (g *Generator) generateAssignmentStatement(node *ast.AssignmentStatement) s
 	output.WriteString("\n")
 
 	return output.String()
+}
+
+// isSuperCall reports whether a statement is a call of super(...).
+func isSuperCall(stmt ast.Statement) bool {
+	es, ok := stmt.(*ast.ExpressionStatement)
+	if !ok {
+		return false
+	}
+	call, ok := es.Expression.(*ast.CallExpression)
+	if !ok {
+		return false
+	}
+	_, isSuper := call.Function.(*ast.SuperExpression)
+	return isSuper
 }
 
 // accessorTables creates a class's __getters and __setters tables, chained to
@@ -745,70 +773,90 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 	}
 	output.WriteString("\n")
 
-	// Generate constructor as new() function. Every class needs one: the
-	// generator turns `Calculator()` into `Calculator.new()`, so a class with
-	// only methods was impossible to instantiate without it.
+	// Construction happens in place. __init(self, ...) runs the field
+	// initialisers and the constructor body on the object it is given;
+	// super(...) runs the parent's __init on that same object, so the
+	// instance is one table throughout: a subclass's field values win, the
+	// parent sees the real self, and methods it calls dispatch to the
+	// subclass. new(...) makes the object and runs __init. Every class
+	// needs one: `Calculator()` compiles to `Calculator.new()`.
 	{
-		output.WriteString(g.generateIndent())
-		output.WriteString(fmt.Sprintf("function %s.new(", className))
-
-		// If there's a constructor, use its parameters. A subclass without
-		// one takes whatever its parent's takes.
 		inheritsConstructor := node.Constructor == nil && parentName != ""
-		if node.Constructor != nil {
-			params := make([]string, len(node.Constructor.Parameters))
-			for i, param := range node.Constructor.Parameters {
-				params[i] = param.Name.Value
-			}
-			output.WriteString(strings.Join(params, ", "))
-		} else if inheritsConstructor {
-			output.WriteString("...")
-		}
-		output.WriteString(")\n")
 
+		// Field initialisers and constructor parameter properties, run
+		// after the parent's constructor (TypeScript's order).
+		var inits strings.Builder
 		g.indent++
-		output.WriteString(g.generateIndent())
-		output.WriteString("local self = setmetatable({}, " + className + ")\n")
-
-		// Initialize instance properties with their default values
-		// A field with no initial value is nil until set: no line for it.
 		for _, prop := range node.Properties {
 			if !prop.IsStatic && prop.Value != nil {
-				output.WriteString(g.generateIndent())
-				value := g.generateExpression(prop.Value)
-				output.WriteString(fmt.Sprintf("self.%s = %s\n", prop.Name.Value, value))
+				inits.WriteString(g.generateIndent())
+				inits.WriteString(fmt.Sprintf("self.%s = %s\n", prop.Name.Value, g.generateExpression(prop.Value)))
 			}
 		}
-
-		// Run the parent's constructor and keep the fields it set, as an
-		// explicit super(...) does.
-		if inheritsConstructor {
-			output.WriteString(g.generateIndent())
-			output.WriteString(fmt.Sprintf("do local __parent = %s.new(...); for __k, __v in pairs(__parent) do self[__k] = __v end end\n", parentName))
-		}
-
-		// Initialize constructor parameter properties (if there's a constructor)
 		if node.Constructor != nil {
 			for _, param := range node.Constructor.Parameters {
-				if param.Visibility != "" {
-					output.WriteString(g.generateIndent())
-					output.WriteString(fmt.Sprintf("self.%s = %s\n", param.Name.Value, param.Name.Value))
+				if param.Visibility != "" || param.IsReadonly {
+					inits.WriteString(g.generateIndent())
+					inits.WriteString(fmt.Sprintf("self.%s = %s\n", param.Name.Value, param.Name.Value))
 				}
 			}
-
-			// Execute constructor body
-			for _, stmt := range node.Constructor.Body.Statements {
-				output.WriteString(g.generateStatement(stmt))
-			}
 		}
-
-		output.WriteString(g.generateIndent())
-		output.WriteString("return self\n")
 		g.indent--
 
 		output.WriteString(g.generateIndent())
+		output.WriteString(fmt.Sprintf("function %s.__init(self", className))
+		switch {
+		case node.Constructor != nil:
+			for _, param := range node.Constructor.Parameters {
+				output.WriteString(", " + param.Name.Value)
+			}
+		case inheritsConstructor:
+			output.WriteString(", ...")
+		}
+		output.WriteString(")\n")
+		g.indent++
+		if inheritsConstructor {
+			output.WriteString(g.generateIndent())
+			output.WriteString(fmt.Sprintf("%s.__init(self, ...)\n", parentName))
+		}
+		if node.Constructor == nil {
+			output.WriteString(inits.String())
+		} else {
+			// The initialisers go right after the super(...) call, or first
+			// when there is none.
+			superAt := -1
+			for i, stmt := range node.Constructor.Body.Statements {
+				if isSuperCall(stmt) {
+					superAt = i
+					break
+				}
+			}
+			if superAt < 0 {
+				output.WriteString(inits.String())
+			}
+			for i, stmt := range node.Constructor.Body.Statements {
+				output.WriteString(g.generateStatement(stmt))
+				if i == superAt {
+					output.WriteString(inits.String())
+				}
+			}
+		}
+		g.indent--
+		output.WriteString(g.generateIndent())
 		output.WriteString("end\n")
-		output.WriteString("\n")
+
+		output.WriteString(g.generateIndent())
+		output.WriteString(fmt.Sprintf("function %s.new(...)\n", className))
+		g.indent++
+		output.WriteString(g.generateIndent())
+		output.WriteString("local self = setmetatable({}, " + className + ")\n")
+		output.WriteString(g.generateIndent())
+		output.WriteString(fmt.Sprintf("%s.__init(self, ...)\n", className))
+		output.WriteString(g.generateIndent())
+		output.WriteString("return self\n")
+		g.indent--
+		output.WriteString(g.generateIndent())
+		output.WriteString("end\n\n")
 	}
 
 	// Generate static properties
@@ -1434,15 +1482,24 @@ func (g *Generator) generateCallExpression(node *ast.CallExpression) string {
 	// generated Lua, so any subclass crashed on construction.
 	if _, isSuper := node.Function.(*ast.SuperExpression); isSuper {
 		parent := g.generateExpression(node.Function)
-		args := make([]string, len(node.Arguments))
-		for i, arg := range node.Arguments {
-			args[i] = g.generateExpression(arg)
+		args := []string{"self"}
+		for _, arg := range node.Arguments {
+			args = append(args, g.generateExpression(arg))
 		}
-		// A do block, not a call expression: a statement starting with '(' would
-		// be read as a continuation of the preceding line.
-		return fmt.Sprintf(
-			"do local __parent = %s.new(%s); for __k, __v in pairs(__parent) do self[__k] = __v end end",
-			parent, strings.Join(args, ", "))
+		return fmt.Sprintf("%s.__init(%s)", parent, strings.Join(args, ", "))
+	}
+
+	// super.m(...) is the parent's m with this object as self.
+	if dot, ok := node.Function.(*ast.DotExpression); ok {
+		if _, isSuper := dot.Left.(*ast.SuperExpression); isSuper {
+			if name, ok := dot.Right.(*ast.Identifier); ok {
+				args := []string{"self"}
+				for _, arg := range node.Arguments {
+					args = append(args, g.generateExpression(arg))
+				}
+				return fmt.Sprintf("%s.%s(%s)", g.generateExpression(dot.Left), name.Value, strings.Join(args, ", "))
+			}
+		}
 	}
 
 	// Optional call (fn?.()) evaluates the callee once and yields nil when it
@@ -1634,6 +1691,14 @@ func (g *Generator) generateTemplateLiteral(node *ast.TemplateLiteral) string {
 
 // generateDotExpression generates code for a dot expression
 func (g *Generator) generateDotExpression(node *ast.DotExpression) string {
+	// super.x is the parent's getter for x with this object as self, or the
+	// field itself.
+	if _, isSuper := node.Left.(*ast.SuperExpression); isSuper && !node.IsMethodCall {
+		if name, ok := node.Right.(*ast.Identifier); ok {
+			return fmt.Sprintf("(function(o) local g = %s.__getters; g = g and g.%s; if g then return g(o) end return rawget(o, %q) end)(self)",
+				g.generateExpression(node.Left), name.Value, name.Value)
+		}
+	}
 	left := g.asReceiver(node.Left)
 	right := g.generateExpression(node.Right)
 

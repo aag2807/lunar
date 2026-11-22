@@ -15,7 +15,7 @@ end
 local c = Calculator()
 `)
 
-	assertContains(t, output, "function Calculator.new()")
+	assertContains(t, output, "function Calculator.new(...)")
 	assertContains(t, output, "setmetatable({}, Calculator)")
 	assertContains(t, output, "Calculator.new()")
 }

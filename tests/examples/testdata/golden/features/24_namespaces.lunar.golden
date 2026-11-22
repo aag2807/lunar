@@ -10,9 +10,12 @@ local Game = {}
 local Orc = {}
 Orc.__index = Orc
 
-function Orc.new(hp)
-    local self = setmetatable({}, Orc)
+function Orc.__init(self, hp)
     self.hp = hp
+end
+function Orc.new(...)
+    local self = setmetatable({}, Orc)
+    Orc.__init(self, ...)
     return self
 end
 

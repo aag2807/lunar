@@ -252,7 +252,8 @@ func TestGenerateClass(t *testing.T) {
 	expectedParts := []string{
 		"local Car = {}",
 		"Car.__index = Car",
-		"function Car.new(brand)",
+		"function Car.__init(self, brand)",
+		"function Car.new(...)",
 		"local self = setmetatable({}, Car)",
 		"self.brand = brand",
 		"return self",

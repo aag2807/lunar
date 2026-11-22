@@ -1,0 +1,108 @@
+-- super(...) runs the parent's constructor on the same object; super.m()
+-- calls the parent's method with that object as self.
+local registry: any[] = {}
+
+class Base
+    kind: string = "base"
+    n: number = 1
+    label: string = ""
+    constructor()
+        table.insert(registry, self)
+        self.label = self.describe()
+    end
+    describe(): string
+        return "base"
+    end
+    who(): string
+        return "A" .. tostring(self.n)
+    end
+end
+
+class Thing extends Base
+    kind: string = "thing"
+    constructor()
+        super()
+    end
+    describe(): string
+        return "thing"
+    end
+    who(): string
+        return "B" .. super.who()
+    end
+end
+
+local t = Thing()
+assert(t.who() == "BA1")
+assert(t.kind == "thing")
+assert(registry[1] == t)
+assert(t.label == "thing")
+
+-- No constructor of its own: the parent's runs on the instance, and the
+-- subclass's field values win.
+class Plain extends Base
+    kind: string = "plain"
+end
+local p = Plain()
+assert(p.kind == "plain" and p.n == 1 and registry[2] == p and p.label == "base")
+
+-- An abstract method called from the parent's constructor runs the
+-- subclass's implementation.
+abstract class Widget
+    made: string = ""
+    constructor(prefix: string)
+        self.made = prefix .. self.create()
+    end
+    abstract create(): string
+end
+class Button extends Widget
+    create(): string
+        return "button"
+    end
+end
+assert(Button("a ").made == "a button")
+assert(Button.new("b ").made == "b button")
+
+-- Three levels, each passing arguments up.
+class L1
+    v: number = 0
+    constructor(v: number)
+        self.v = v
+    end
+end
+class L2 extends L1
+    w: number = 0
+    constructor(v: number, w: number)
+        super(v * 10)
+        self.w = w
+    end
+end
+class L3 extends L2
+    constructor()
+        super(1, 2)
+    end
+end
+local l3 = L3()
+assert(l3.v == 10 and l3.w == 2)
+
+-- super.x reads the parent's getter (or the field) and super.x = v runs the
+-- parent's setter, with this object as self.
+class Temp
+    c: number = 0
+    get celsius(): number
+        return self.c
+    end
+    set celsius(v: number)
+        self.c = v
+    end
+end
+class Offset extends Temp
+    get celsius(): number
+        return super.celsius + 100
+    end
+    set celsius(v: number)
+        super.celsius = v * 2
+    end
+end
+local o = Offset()
+o.celsius = 5
+assert(o.c == 10 and o.celsius == 110)

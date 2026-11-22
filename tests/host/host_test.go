@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -91,6 +92,56 @@ func TestHostRejectsChunkThatDoesNotReturnATable(t *testing.T) {
 		}
 		if !strings.Contains(stderr, "must return a table") {
 			t.Errorf("%s: unexpected stderr %q", pkg, stderr)
+		}
+	}
+}
+
+// TestCompiledDataFilesLoadWithoutLibraries compiles every examples/data
+// program and loads the Lua in the no-libraries host, comparing the table
+// it returns with testdata/<name>.expected.
+func TestCompiledDataFilesLoadWithoutLibraries(t *testing.T) {
+	hosts := buildHosts(t)
+
+	lunar := filepath.Join(t.TempDir(), "lunar")
+	if runtime.GOOS == "windows" {
+		lunar += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", lunar, "./cmd/lunar")
+	build.Dir = filepath.Join("..", "..")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("building lunar: %v\n%s", err, out)
+	}
+
+	sources, err := filepath.Glob(filepath.Join("..", "..", "examples", "data", "*.lunar"))
+	if err != nil || len(sources) == 0 {
+		t.Fatalf("no data files found: %v", err)
+	}
+	for _, src := range sources {
+		name := strings.TrimSuffix(filepath.Base(src), ".lunar")
+		for _, target := range []string{"lua53", "lua54"} {
+			out := filepath.Join(t.TempDir(), name+".lua")
+			cmd := exec.Command(lunar, "--target", target, "-o", out, filepath.Base(src))
+			cmd.Dir = filepath.Dir(src)
+			if msg, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("compiling %s: %v\n%s", src, err, msg)
+			}
+			want, err := os.ReadFile(filepath.Join("testdata", name+".expected"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for pkg, bin := range hosts {
+				if target == "lua54" && pkg != "lua5.4" {
+					continue
+				}
+				got, stderr, err := runHost(bin, out)
+				if err != nil {
+					t.Errorf("%s (%s) in %s: %v\n%s", name, target, pkg, err, stderr)
+					continue
+				}
+				if got != string(want) {
+					t.Errorf("%s (%s) in %s: dump differs\n--- want\n%s--- got\n%s", name, target, pkg, want, got)
+				}
+			}
 		}
 	}
 }

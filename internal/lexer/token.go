@@ -48,15 +48,16 @@ const (
 	ELLIPSIS = "..."
 
 	//delimeters
-	COMMA    = ","
-	COLON    = ":"
-	DOT      = "."
-	LPAREN   = "("
-	RPAREN   = ")"
-	LBRACKET = "["
-	RBRACKET = "]"
-	LBRACE   = "{"
-	RBRACE   = "}"
+	COMMA     = ","
+	SEMICOLON = ";"
+	COLON     = ":"
+	DOT       = "."
+	LPAREN    = "("
+	RPAREN    = ")"
+	LBRACKET  = "["
+	RBRACKET  = "]"
+	LBRACE    = "{"
+	RBRACE    = "}"
 
 	// keywords specific to lunar
 	CLASS       = "class"

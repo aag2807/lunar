@@ -243,6 +243,10 @@ type Checker struct {
 	// treated as an overload of itself.
 	hoisted map[string]*FunctionType
 
+	// chunkReturns are the return statements of the chunk itself, outside
+	// any function.
+	chunkReturns []*ast.ReturnStatement
+
 	// shells holds the empty interface, class and enum types published by
 	// predeclareTypeNames, keyed by name, until their declaration fills them.
 	shells map[string]Type
@@ -421,7 +425,29 @@ func (c *Checker) Check(statements []ast.Statement) []*TypeError {
 		c.checkStatement(stmt)
 	}
 
+	c.checkModuleShape(statements)
+
 	return c.errors
+}
+
+// checkModuleShape rejects a file that both exports names and returns a
+// value from its chunk: the module's value is one or the other, and the
+// generated Lua would otherwise end in two returns.
+func (c *Checker) checkModuleShape(statements []ast.Statement) {
+	if len(c.chunkReturns) == 0 {
+		return
+	}
+	for _, stmt := range statements {
+		if _, ok := stmt.(*ast.ExportStatement); ok {
+			for _, ret := range c.chunkReturns {
+				if len(ret.ReturnValues) > 0 {
+					c.addError("A module cannot both 'export' names and 'return' a value", ret.Token)
+					return
+				}
+			}
+			return
+		}
+	}
 }
 
 // hoistFunctionSignatures registers a placeholder signature for every function
@@ -2496,7 +2522,12 @@ func combineReturnTypes(types []Type) Type {
 // checkReturnStatement checks a return statement
 func (c *Checker) checkReturnStatement(node *ast.ReturnStatement) {
 	if c.currentFunctionReturnType == nil {
-		c.addError("Return statement outside of function", node.Token)
+		// A return in the chunk itself: Lua runs a file as a function, so a
+		// data file ends in `return { ... }` and a script may return early.
+		for _, value := range node.ReturnValues {
+			c.checkExpression(value)
+		}
+		c.chunkReturns = append(c.chunkReturns, node)
 		return
 	}
 

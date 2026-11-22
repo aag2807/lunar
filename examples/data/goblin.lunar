@@ -1,0 +1,22 @@
+-- A data file. The engine loads it in a Lua state with no libraries opened
+-- and reads the table it returns, so it may build tables and nothing else.
+interface Stats
+    atk: number
+    def: number
+end
+
+interface EnemyDef
+    name: string
+    hp: number
+    tags: string[]
+    stats: Stats
+end
+
+local goblin: EnemyDef = {
+    name = "goblin",
+    hp = 10,
+    tags = { "melee", "green" },
+    stats = { atk = 3, def = 1 },
+}
+
+return goblin

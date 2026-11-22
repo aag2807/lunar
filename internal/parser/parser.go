@@ -710,14 +710,31 @@ func (p *Parser) Errors() []*ParseError {
 
 // Parse parses the entire program and returns a slice of statements
 func (p *Parser) Parse() []ast.Statement {
-	statements := []ast.Statement{}
-
 	// Note: New() already initializes curToken and peekToken by calling nextToken() twice
 	// So we don't need to call nextToken() here
 
-	for !p.curTokenIs(lexer.EOF) {
+	return p.parseStatements(lexer.EOF)
+}
+
+// parseStatements parses statements up to terminator or end of input. As in
+// Lua, a return has to be the last statement of its block; anything after it
+// is reported once, since the emitted Lua would not load.
+func (p *Parser) parseStatements(terminator lexer.TokenType) []ast.Statement {
+	statements := []ast.Statement{}
+	var returned *ast.ReturnStatement
+	reported := false
+
+	for !p.curTokenIs(terminator) && !p.curTokenIs(lexer.EOF) {
+		start := p.curToken
 		stmt := p.parseStatement()
 		if stmt != nil {
+			if returned != nil && !reported {
+				p.addError("'return' must be the last statement in a block", start)
+				reported = true
+			}
+			if ret, ok := stmt.(*ast.ReturnStatement); ok {
+				returned = ret
+			}
 			statements = append(statements, stmt)
 		}
 		p.nextToken()
@@ -2167,30 +2184,27 @@ func (p *Parser) parseBlockStatementUntil(terminator lexer.TokenType) *ast.Block
 	}
 
 	p.nextToken()
-
-	for !p.curTokenIs(terminator) && !p.curTokenIs(lexer.EOF) {
-		stmt := p.parseStatement()
-		if stmt != nil {
-			block.Statements = append(block.Statements, stmt)
-		}
-		p.nextToken()
-	}
+	block.Statements = p.parseStatements(terminator)
 
 	return block
 }
 
 func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 	stmt := &ast.ReturnStatement{Token: p.curToken}
-
-	p.nextToken() // move past 'return'
-
-	// Parse multiple return values separated by commas
 	stmt.ReturnValues = []ast.Expression{}
 
-	// If we hit a newline or end, return empty
-	if p.curTokenIs(lexer.EOF) || p.curToken.Line != stmt.Token.Line {
+	// A return has no values when the block ends right after it. Anything
+	// else, on this line or the next, is its value list, as in Lua: a data
+	// file's `return` is often followed by its table on the next line.
+	switch p.peekToken.Type {
+	case lexer.END, lexer.ELSE, lexer.ELSEIF, lexer.UNTIL, lexer.EOF:
+		return stmt
+	case lexer.SEMICOLON:
+		p.nextToken()
 		return stmt
 	}
+
+	p.nextToken() // move past 'return'
 
 	// Parse first return value
 	stmt.ReturnValues = append(stmt.ReturnValues, p.parseExpression(LOWEST))
@@ -2259,6 +2273,9 @@ func (p *Parser) parseExpressionStatement() ast.Statement {
 
 func (p *Parser) parseStatement() ast.Statement {
 	switch p.curToken.Type {
+	case lexer.SEMICOLON:
+		// Lua's empty statement.
+		return nil
 	case lexer.FUNCTION:
 		return p.parseFunctionDeclaration()
 	case lexer.ASYNC:

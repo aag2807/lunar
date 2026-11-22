@@ -1275,7 +1275,9 @@ func findDefinitionInStatement(stmt interface{}, word string, uri string) *Locat
 	case interface{ GetName() string }:
 		if name, ok := s.(interface{ GetName() string }); ok {
 			if name.GetName() == word {
-				if tok, ok := s.(interface{ GetToken() interface{ GetLine() int } }); ok {
+				if tok, ok := s.(interface {
+					GetToken() interface{ GetLine() int }
+				}); ok {
 					line := tok.GetToken().GetLine() - 1
 					return &Location{
 						URI: uri,
@@ -1382,49 +1384,49 @@ func (s *Server) handleSemanticTokens(content json.RawMessage, id interface{}) e
 // getSemanticTokens returns semantic tokens for a document
 func (s *Server) getSemanticTokens(doc *Document) SemanticTokens {
 	tokens := []uint32{}
-	
+
 	l := lexer.New(doc.Content)
-	
+
 	// Token type indices (must match the legend order in handleInitialize)
 	const (
-		tokenTypeKeyword = 0
-		tokenTypeType = 1
-		tokenTypeClass = 2
+		tokenTypeKeyword   = 0
+		tokenTypeType      = 1
+		tokenTypeClass     = 2
 		tokenTypeInterface = 3
-		tokenTypeFunction = 4
-		tokenTypeVariable = 5
+		tokenTypeFunction  = 4
+		tokenTypeVariable  = 5
 		tokenTypeParameter = 6
-		tokenTypeProperty = 7
-		tokenTypeString = 8
-		tokenTypeNumber = 9
-		tokenTypeComment = 10
-		tokenTypeOperator = 11
-		tokenTypeModifier = 12
+		tokenTypeProperty  = 7
+		tokenTypeString    = 8
+		tokenTypeNumber    = 9
+		tokenTypeComment   = 10
+		tokenTypeOperator  = 11
+		tokenTypeModifier  = 12
 	)
-	
+
 	// Token modifier indices
 	const (
 		modifierDeclaration = 0
-		modifierDefinition = 1
-		modifierReadonly = 2
+		modifierDefinition  = 1
+		modifierReadonly    = 2
 	)
-	
+
 	prevLine := 0
 	prevChar := 0
-	
+
 	for {
 		tok := l.NextToken()
 		if tok.Type == lexer.EOF {
 			break
 		}
-		
+
 		// Get token position (line is 0-indexed in LSP)
 		line := tok.Line - 1
 		char := tok.Column
-		
+
 		var tokenType int = -1
 		var tokenModifiers uint32 = 0
-		
+
 		// Map token types to semantic token types
 		switch tok.Type {
 		// Keywords
@@ -1473,36 +1475,36 @@ func (s *Server) getSemanticTokens(doc *Document) SemanticTokens {
 			lexer.CARET, lexer.TILDE, lexer.LEFT_SHIFT, lexer.RIGHT_SHIFT:
 			tokenType = tokenTypeOperator
 		}
-		
+
 		// Skip tokens we don't want to highlight
 		if tokenType == -1 {
 			continue
 		}
-		
+
 		// Calculate deltas (LSP semantic tokens use delta encoding)
 		deltaLine := line - prevLine
 		deltaChar := char
 		if deltaLine == 0 {
 			deltaChar = char - prevChar
 		}
-		
+
 		length := len(tok.Literal)
 		if length == 0 {
 			length = 1
 		}
-		
+
 		// Append token (format: deltaLine, deltaStart, length, tokenType, tokenModifiers)
-		tokens = append(tokens, 
+		tokens = append(tokens,
 			uint32(deltaLine),
 			uint32(deltaChar),
 			uint32(length),
 			uint32(tokenType),
 			tokenModifiers,
 		)
-		
+
 		prevLine = line
 		prevChar = char
 	}
-	
+
 	return SemanticTokens{Data: tokens}
 }

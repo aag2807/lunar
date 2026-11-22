@@ -224,9 +224,9 @@ type Checker struct {
 	genericTypeAliases map[string]*GenericTypeAlias
 
 	// Module system
-	exports        map[string]Type // Tracks exported names and their types
-	modules        map[string]*ModuleInfo // Tracks loaded modules
-	currentModule  string // Current module being checked
+	exports       map[string]Type        // Tracks exported names and their types
+	modules       map[string]*ModuleInfo // Tracks loaded modules
+	currentModule string                 // Current module being checked
 
 	// Standard library path
 	stdlibPath string // Path to the stdlib directory
@@ -304,17 +304,17 @@ func NewChecker(stdlibPath ...string) *Checker {
 func (c *Checker) registerUtilityTypes() {
 	// These will be handled specially in resolveTypeExpression when instantiated
 	// We just mark them as existing so they can be referenced
-	c.env.Set("Exclude", Any)       // Exclude<T, U>
-	c.env.Set("Extract", Any)       // Extract<T, U>
-	c.env.Set("NonNullable", Any)   // NonNullable<T>
-	c.env.Set("Pick", Any)          // Pick<T, K>
-	c.env.Set("Omit", Any)          // Omit<T, K>
-	c.env.Set("Record", Any)        // Record<K, V>
-	c.env.Set("Partial", Any)       // Partial<T>
-	c.env.Set("Required", Any)      // Required<T>
-	c.env.Set("Readonly", Any)      // Readonly<T>
-	c.env.Set("ReturnType", Any)    // ReturnType<F>
-	c.env.Set("Parameters", Any)    // Parameters<F>
+	c.env.Set("Exclude", Any)     // Exclude<T, U>
+	c.env.Set("Extract", Any)     // Extract<T, U>
+	c.env.Set("NonNullable", Any) // NonNullable<T>
+	c.env.Set("Pick", Any)        // Pick<T, K>
+	c.env.Set("Omit", Any)        // Omit<T, K>
+	c.env.Set("Record", Any)      // Record<K, V>
+	c.env.Set("Partial", Any)     // Partial<T>
+	c.env.Set("Required", Any)    // Required<T>
+	c.env.Set("Readonly", Any)    // Readonly<T>
+	c.env.Set("ReturnType", Any)  // ReturnType<F>
+	c.env.Set("Parameters", Any)  // Parameters<F>
 }
 
 // loadStdlib loads the Lua standard library type definitions
@@ -553,22 +553,22 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 	}
 
 	classType := &ClassType{
-		Name:                node.Name.Value,
-		Properties:          make(map[string]Type),
-		Methods:             make(map[string]*FunctionType),
-		StaticProperties:    make(map[string]Type),
-		StaticMethods:       make(map[string]*FunctionType),
-		ReadonlyProps:       make(map[string]bool),
-		AbstractMethods:     make(map[string]bool),
-		PropertyVisibility:  make(map[string]string),
-		MethodVisibility:    make(map[string]string),
-		Implements:          []*InterfaceType{},
-		IsAbstract:          node.IsAbstract,
-		GenericParams:       genericParams,
-		Getters:             make(map[string]*FunctionType),
-		Setters:             make(map[string]*FunctionType),
-		GetterVisibility:    make(map[string]string),
-		SetterVisibility:    make(map[string]string),
+		Name:               node.Name.Value,
+		Properties:         make(map[string]Type),
+		Methods:            make(map[string]*FunctionType),
+		StaticProperties:   make(map[string]Type),
+		StaticMethods:      make(map[string]*FunctionType),
+		ReadonlyProps:      make(map[string]bool),
+		AbstractMethods:    make(map[string]bool),
+		PropertyVisibility: make(map[string]string),
+		MethodVisibility:   make(map[string]string),
+		Implements:         []*InterfaceType{},
+		IsAbstract:         node.IsAbstract,
+		GenericParams:      genericParams,
+		Getters:            make(map[string]*FunctionType),
+		Setters:            make(map[string]*FunctionType),
+		GetterVisibility:   make(map[string]string),
+		SetterVisibility:   make(map[string]string),
 	}
 
 	// Publish the (still empty) class before resolving its members so that a
@@ -904,10 +904,10 @@ func (c *Checker) registerTypeAlias(node *ast.TypeDeclaration) {
 	} else if len(node.Properties) > 0 {
 		// Object shape: type Name ... end
 		interfaceType := &InterfaceType{
-			Name:       node.Name.Value,
-			Properties: make(map[string]Type),
-			Methods:    make(map[string]*FunctionType),
-			Extends:    []*InterfaceType{},
+			Name:        node.Name.Value,
+			Properties:  make(map[string]Type),
+			Methods:     make(map[string]*FunctionType),
+			Extends:     []*InterfaceType{},
 			StaticProps: make(map[string]bool),
 		}
 
@@ -1488,9 +1488,9 @@ func (c *Checker) pickType(t Type, keys Type) Type {
 	switch objType := t.(type) {
 	case *InterfaceType:
 		picked := &InterfaceType{
-			Name:       objType.Name + "_Picked",
-			Properties: make(map[string]Type),
-			Methods:    make(map[string]*FunctionType),
+			Name:        objType.Name + "_Picked",
+			Properties:  make(map[string]Type),
+			Methods:     make(map[string]*FunctionType),
 			StaticProps: make(map[string]bool),
 		}
 
@@ -1545,9 +1545,9 @@ func (c *Checker) omitType(t Type, keys Type) Type {
 // Constructs a type with a set of properties K of type V
 func (c *Checker) recordType(keys Type, valueType Type) Type {
 	record := &InterfaceType{
-		Name:       "Record",
-		Properties: make(map[string]Type),
-		Methods:    make(map[string]*FunctionType),
+		Name:        "Record",
+		Properties:  make(map[string]Type),
+		Methods:     make(map[string]*FunctionType),
 		StaticProps: make(map[string]bool),
 	}
 
@@ -1612,9 +1612,9 @@ func (c *Checker) partialType(t Type) Type {
 	switch objType := t.(type) {
 	case *InterfaceType:
 		partial := &InterfaceType{
-			Name:       objType.Name + "_Partial",
-			Properties: make(map[string]Type),
-			Methods:    make(map[string]*FunctionType),
+			Name:        objType.Name + "_Partial",
+			Properties:  make(map[string]Type),
+			Methods:     make(map[string]*FunctionType),
 			StaticProps: make(map[string]bool),
 		}
 
@@ -1656,9 +1656,9 @@ func (c *Checker) requiredType(t Type) Type {
 	switch objType := t.(type) {
 	case *InterfaceType:
 		required := &InterfaceType{
-			Name:       objType.Name + "_Required",
-			Properties: make(map[string]Type),
-			Methods:    make(map[string]*FunctionType),
+			Name:        objType.Name + "_Required",
+			Properties:  make(map[string]Type),
+			Methods:     make(map[string]*FunctionType),
 			StaticProps: make(map[string]bool),
 		}
 
@@ -1834,19 +1834,19 @@ func (c *Checker) instantiateGenericClass(classType *ClassType, typeArgs []Type)
 
 	// Create a new class type with substituted types
 	instantiated := &ClassType{
-		Name:              classType.Name,
-		Properties:        make(map[string]Type),
-		Methods:           make(map[string]*FunctionType),
-		StaticProperties:  make(map[string]Type),
-		StaticMethods:     make(map[string]*FunctionType),
-		Constructor:       nil,
-		Parent:            classType.Parent,
-		Implements:        classType.Implements,
-		IsAbstract:        classType.IsAbstract,
-		AbstractMethods:   classType.AbstractMethods,
-		GenericParams:     []string{}, // Instantiated classes are not generic
+		Name:               classType.Name,
+		Properties:         make(map[string]Type),
+		Methods:            make(map[string]*FunctionType),
+		StaticProperties:   make(map[string]Type),
+		StaticMethods:      make(map[string]*FunctionType),
+		Constructor:        nil,
+		Parent:             classType.Parent,
+		Implements:         classType.Implements,
+		IsAbstract:         classType.IsAbstract,
+		AbstractMethods:    classType.AbstractMethods,
+		GenericParams:      []string{}, // Instantiated classes are not generic
 		PropertyVisibility: classType.PropertyVisibility,
-		MethodVisibility:  classType.MethodVisibility,
+		MethodVisibility:   classType.MethodVisibility,
 	}
 
 	// Substitute properties
@@ -4981,7 +4981,7 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 			c.env.Set(decl.Name.Value, funcType)
 		}
 
-	// Class, Interface, Enum, Type declarations are already handled in registerTypeDefinition
+		// Class, Interface, Enum, Type declarations are already handled in registerTypeDefinition
 	}
 }
 
@@ -5126,7 +5126,7 @@ func (c *Checker) resolveMappedType(node *ast.MappedType, constraintType Type) T
 
 	// Create an interface type with these properties
 	interfaceType := &InterfaceType{
-		Name:       "",  // Anonymous mapped type
+		Name:       "", // Anonymous mapped type
 		Properties: properties,
 	}
 

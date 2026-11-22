@@ -9,7 +9,7 @@ import (
 func TestTemplateStringBasic(t *testing.T) {
 	input := `
 local name = "World"
-local greeting: string = `+"`Hello ${name}`"+`
+local greeting: string = ` + "`Hello ${name}`" + `
 `
 
 	l := lexer.New(input)
@@ -34,7 +34,7 @@ local greeting: string = `+"`Hello ${name}`"+`
 func TestTemplateStringWithNumber(t *testing.T) {
 	input := `
 local age = 25
-local message: string = `+"`You are ${age} years old`"+`
+local message: string = ` + "`You are ${age} years old`" + `
 `
 
 	l := lexer.New(input)
@@ -61,7 +61,7 @@ func TestTemplateStringMultipleExpressions(t *testing.T) {
 local firstName = "John"
 local lastName = "Doe"
 local age = 30
-local bio: string = `+"`${firstName} ${lastName} is ${age} years old`"+`
+local bio: string = ` + "`${firstName} ${lastName} is ${age} years old`" + `
 `
 
 	l := lexer.New(input)
@@ -85,7 +85,7 @@ local bio: string = `+"`${firstName} ${lastName} is ${age} years old`"+`
 
 func TestTemplateStringNoInterpolation(t *testing.T) {
 	input := `
-local message: string = `+"`Just a plain string`"+`
+local message: string = ` + "`Just a plain string`" + `
 `
 
 	l := lexer.New(input)
@@ -111,7 +111,7 @@ func TestTemplateStringWithExpression(t *testing.T) {
 	input := `
 local x = 5
 local y = 10
-local result: string = `+"`${x} + ${y} = ${x + y}`"+`
+local result: string = ` + "`${x} + ${y} = ${x + y}`" + `
 `
 
 	l := lexer.New(input)
@@ -140,7 +140,7 @@ function greet(message: string): void
 end
 
 local name = "Alice"
-greet(`+"`Hello, ${name}!`"+`)
+greet(` + "`Hello, ${name}!`" + `)
 `
 
 	l := lexer.New(input)
@@ -165,7 +165,7 @@ greet(`+"`Hello, ${name}!`"+`)
 func TestTemplateStringNested(t *testing.T) {
 	input := `
 local obj = {name = "Test", value = 42}
-local result: string = `+"`Object: ${obj.name} with value ${obj.value}`"+`
+local result: string = ` + "`Object: ${obj.name} with value ${obj.value}`" + `
 `
 
 	l := lexer.New(input)
@@ -189,7 +189,7 @@ local result: string = `+"`Object: ${obj.name} with value ${obj.value}`"+`
 
 func TestTemplateStringEmpty(t *testing.T) {
 	input := `
-local empty: string = `+"``"+`
+local empty: string = ` + "``" + `
 `
 
 	l := lexer.New(input)

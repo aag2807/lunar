@@ -9,22 +9,22 @@ import (
 )
 
 const (
-	_            int = iota
+	_ int = iota
 	LOWEST
-	PIPE_PREC    // |> pipeline operator
-	OR_PREC      // or
-	BITWISE_OR   // |
-	BITWISE_XOR  // ^
-	BITWISE_AND  // &
-	AND_PREC     // and
-	EQUALS       // ==
-	LESSGREATER  // > OR <
-	SHIFT        // << >>
-	SUM          // +
-	PRODUCT      // * / %
-	PREFIX       // -X OR !X OR not OR ~X
-	DOT          // foo.bar
-	CALL         // function(x)
+	PIPE_PREC   // |> pipeline operator
+	OR_PREC     // or
+	BITWISE_OR  // |
+	BITWISE_XOR // ^
+	BITWISE_AND // &
+	AND_PREC    // and
+	EQUALS      // ==
+	LESSGREATER // > OR <
+	SHIFT       // << >>
+	SUM         // +
+	PRODUCT     // * / %
+	PREFIX      // -X OR !X OR not OR ~X
+	DOT         // foo.bar
+	CALL        // function(x)
 )
 
 var precedences = map[lexer.TokenType]int{
@@ -53,7 +53,7 @@ var precedences = map[lexer.TokenType]int{
 	lexer.FLOOR_DIV:        PRODUCT,
 	lexer.MODULO:           PRODUCT,
 	lexer.DOT:              DOT,
-	lexer.OPTIONAL_CHAIN:   DOT, // ?. has same precedence as .
+	lexer.OPTIONAL_CHAIN:   DOT,  // ?. has same precedence as .
 	lexer.LBRACKET:         CALL, // index has same precedence as function call
 	lexer.LPAREN:           CALL,
 	lexer.CONCAT:           SUM,

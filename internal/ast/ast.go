@@ -56,8 +56,8 @@ func (i *StringLiteral) String() string {
 }
 
 type TemplateLiteral struct {
-	Token       lexer.Token // the backtick token
-	Parts       []string    // string parts between ${}
+	Token       lexer.Token  // the backtick token
+	Parts       []string     // string parts between ${}
 	Expressions []Expression // expressions inside ${}
 }
 
@@ -236,9 +236,9 @@ func (ta *TypeAssertion) String() string {
 }
 
 type TableLiteral struct {
-	Token  lexer.Token // '{' token
+	Token  lexer.Token               // '{' token
 	Pairs  map[Expression]Expression // for key-value pairs
-	Values []Expression // for array-style values
+	Values []Expression              // for array-style values
 }
 
 func (tl *TableLiteral) expressionNode()      {}
@@ -408,12 +408,12 @@ func (ct *ConditionalType) String() string {
 // MappedType represents a mapped type: { [K in keyof T]: U }
 // or with optional/readonly modifiers: { readonly [K in keyof T]?: U }
 type MappedType struct {
-	Token        lexer.Token // The '{' token
-	TypeParam    *Identifier // K - the type parameter
-	Constraint   Expression  // keyof T - what K iterates over
-	ValueType    Expression  // U - the mapped value type
-	IsOptional   bool        // true if has ? modifier
-	IsReadonly   bool        // true if has readonly modifier
+	Token      lexer.Token // The '{' token
+	TypeParam  *Identifier // K - the type parameter
+	Constraint Expression  // keyof T - what K iterates over
+	ValueType  Expression  // U - the mapped value type
+	IsOptional bool        // true if has ? modifier
+	IsReadonly bool        // true if has readonly modifier
 }
 
 func (mt *MappedType) expressionNode()      {}
@@ -682,12 +682,12 @@ func (fd *FunctionDeclaration) String() string {
 
 // FunctionExpression represents an anonymous function expression
 type FunctionExpression struct {
-	Token         lexer.Token       // The 'function' token
-	GenericParams []*Identifier     // generic type parameters like <T, U>
+	Token         lexer.Token   // The 'function' token
+	GenericParams []*Identifier // generic type parameters like <T, U>
 	Parameters    []*Parameter
 	ReturnType    Expression
 	Body          *BlockStatement
-	IsAsync       bool              // async function expression
+	IsAsync       bool // async function expression
 }
 
 func (fe *FunctionExpression) expressionNode()      {}
@@ -819,12 +819,12 @@ func (rs *RepeatStatement) String() string {
 }
 
 type ForStatement struct {
-	Token     lexer.Token // 'for' token
+	Token     lexer.Token   // 'for' token
 	Variables []*Identifier // loop variables (can be multiple for generic for loops)
-	Start     Expression // for numeric: start value
-	End       Expression // for numeric: end value
-	Step      Expression // for numeric: step value (optional)
-	Iterator  Expression // for generic: iterator expression
+	Start     Expression    // for numeric: start value
+	End       Expression    // for numeric: end value
+	Step      Expression    // for numeric: step value (optional)
+	Iterator  Expression    // for generic: iterator expression
 	Body      *BlockStatement
 	IsGeneric bool // true if generic for, false if numeric for
 }
@@ -941,8 +941,8 @@ func (as *AssignmentStatement) Value() Expression {
 type ClassDeclaration struct {
 	Token          lexer.Token // 'class' token
 	Name           *Identifier
-	GenericParams  []*Identifier              // generic type parameters like <T, U>
-	Extends        Expression                 // parent class name (single inheritance)
+	GenericParams  []*Identifier // generic type parameters like <T, U>
+	Extends        Expression    // parent class name (single inheritance)
 	Properties     []*PropertyDeclaration
 	Methods        []*FunctionDeclaration
 	Constructor    *ConstructorDeclaration
@@ -1066,7 +1066,7 @@ type PropertyDeclaration struct {
 	IsReadonly bool        // readonly property
 	Name       *Identifier
 	Type       Expression
-	Value      Expression  // initial/default value
+	Value      Expression // initial/default value
 }
 
 func (pd *PropertyDeclaration) statementNode()       {}
@@ -1247,8 +1247,8 @@ func (em *EnumMember) String() string {
 type TypeDeclaration struct {
 	Token         lexer.Token // 'type' token
 	Name          *Identifier
-	GenericParams []*Identifier            // generic type parameters (e.g., T, U)
-	Type          Expression               // the type being aliased (for type Name = Type)
+	GenericParams []*Identifier          // generic type parameters (e.g., T, U)
+	Type          Expression             // the type being aliased (for type Name = Type)
 	Properties    []*PropertyDeclaration // for object shape (type Name ... end)
 }
 
@@ -1311,10 +1311,10 @@ func (ns *NamespaceDeclaration) String() string {
 
 // ImportStatement represents an import declaration
 type ImportStatement struct {
-	Token   lexer.Token   // 'import' token
-	Names   []*Identifier // names being imported
-	Module  string        // module path (string literal)
-	IsWildcard bool       // true if using * import
+	Token      lexer.Token   // 'import' token
+	Names      []*Identifier // names being imported
+	Module     string        // module path (string literal)
+	IsWildcard bool          // true if using * import
 }
 
 func (is *ImportStatement) statementNode()       {}
@@ -1403,9 +1403,9 @@ type WildcardPattern struct {
 	Token lexer.Token // The '_' token (IDENT with value "_")
 }
 
-func (wp *WildcardPattern) patternNode()           {}
-func (wp *WildcardPattern) TokenLiteral() string   { return wp.Token.Literal }
-func (wp *WildcardPattern) String() string         { return "_" }
+func (wp *WildcardPattern) patternNode()         {}
+func (wp *WildcardPattern) TokenLiteral() string { return wp.Token.Literal }
+func (wp *WildcardPattern) String() string       { return "_" }
 
 // LiteralPattern represents matching a literal value
 type LiteralPattern struct {
@@ -1413,8 +1413,8 @@ type LiteralPattern struct {
 	Value Expression // NumberLiteral, StringLiteral, BooleanLiteral, etc.
 }
 
-func (lp *LiteralPattern) patternNode()           {}
-func (lp *LiteralPattern) TokenLiteral() string   { return lp.Token.Literal }
+func (lp *LiteralPattern) patternNode()         {}
+func (lp *LiteralPattern) TokenLiteral() string { return lp.Token.Literal }
 func (lp *LiteralPattern) String() string {
 	if lp.Value != nil {
 		return lp.Value.String()
@@ -1428,18 +1428,18 @@ type BindingPattern struct {
 	Name  string      // The variable name to bind to
 }
 
-func (bp *BindingPattern) patternNode()           {}
-func (bp *BindingPattern) TokenLiteral() string   { return bp.Token.Literal }
-func (bp *BindingPattern) String() string         { return bp.Name }
+func (bp *BindingPattern) patternNode()         {}
+func (bp *BindingPattern) TokenLiteral() string { return bp.Token.Literal }
+func (bp *BindingPattern) String() string       { return bp.Name }
 
 // StructPattern represents object destructuring { key: pattern, ... }
 type StructPattern struct {
-	Token  lexer.Token           // The '{' token
-	Fields map[string]Pattern    // Field patterns
+	Token  lexer.Token        // The '{' token
+	Fields map[string]Pattern // Field patterns
 }
 
-func (sp *StructPattern) patternNode()           {}
-func (sp *StructPattern) TokenLiteral() string   { return sp.Token.Literal }
+func (sp *StructPattern) patternNode()         {}
+func (sp *StructPattern) TokenLiteral() string { return sp.Token.Literal }
 func (sp *StructPattern) String() string {
 	var out strings.Builder
 	out.WriteString("{ ")
@@ -1461,8 +1461,8 @@ type TypePattern struct {
 	Binding  string      // Optional variable name to bind to (empty if none)
 }
 
-func (tp *TypePattern) patternNode()           {}
-func (tp *TypePattern) TokenLiteral() string   { return tp.Token.Literal }
+func (tp *TypePattern) patternNode()         {}
+func (tp *TypePattern) TokenLiteral() string { return tp.Token.Literal }
 func (tp *TypePattern) String() string {
 	if tp.Binding != "" {
 		return fmt.Sprintf("%s: %s", tp.Binding, tp.TypeName)

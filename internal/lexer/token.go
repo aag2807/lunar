@@ -13,19 +13,19 @@ const (
 	TEMPLATE_STRING = "TEMPLATE_STRING" // backtick string with ${} interpolation
 
 	//operators
-	ASSIGN   = "="
-	PLUS     = "+"
-	MINUS    = "-"
-	BANG     = "!"
-	ASTERISK  = "*"
-	SLASH     = "/"
-	FLOOR_DIV = "//"
-	MODULO    = "%"
-	HASH      = "#"
-	AMPERSAND = "&" // for intersection types Type1 & Type2, and bitwise AND
-	AT        = "@" // for decorators @decoratorName
-	CARET     = "^" // for bitwise XOR
-	TILDE     = "~" // for bitwise NOT
+	ASSIGN      = "="
+	PLUS        = "+"
+	MINUS       = "-"
+	BANG        = "!"
+	ASTERISK    = "*"
+	SLASH       = "/"
+	FLOOR_DIV   = "//"
+	MODULO      = "%"
+	HASH        = "#"
+	AMPERSAND   = "&" // for intersection types Type1 & Type2, and bitwise AND
+	AT          = "@" // for decorators @decoratorName
+	CARET       = "^" // for bitwise XOR
+	TILDE       = "~" // for bitwise NOT
 	LEFT_SHIFT  = "<<"
 	RIGHT_SHIFT = ">>"
 
@@ -100,12 +100,12 @@ const (
 	IMPORT      = "import"
 	FROM        = "from"
 	DECLARE     = "declare"
-	IS          = "is" // for type guards: value is Type
-	AS          = "as" // for type assertions: value as Type
-	KEYOF       = "keyof" // for keyof operator: keyof T
+	IS          = "is"     // for type guards: value is Type
+	AS          = "as"     // for type assertions: value as Type
+	KEYOF       = "keyof"  // for keyof operator: keyof T
 	TYPEOF      = "typeof" // for typeof operator: typeof value
-	MATCH       = "match" // for pattern matching: match value with | pattern -> expr end
-	WITH        = "with"  // for pattern matching: separates value from cases
+	MATCH       = "match"  // for pattern matching: match value with | pattern -> expr end
+	WITH        = "with"   // for pattern matching: separates value from cases
 
 	//types
 	ANY         = "any"
@@ -126,8 +126,8 @@ const (
 	PIPE_OP    = "|>" // Pipeline operator
 
 	// Optional chaining and nullish coalescing
-	OPTIONAL_CHAIN     = "?."
-	NULLISH_COALESCE   = "??"
+	OPTIONAL_CHAIN   = "?."
+	NULLISH_COALESCE = "??"
 )
 
 // Map of keywords

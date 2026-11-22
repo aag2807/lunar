@@ -144,7 +144,7 @@ func TestGenerateReturnStatement(t *testing.T) {
 func TestGenerateIfStatement(t *testing.T) {
 	// if true then return 1 end
 	stmt := &ast.IfStatement{
-		Token: lexer.Token{Type: lexer.IF, Literal: "if"},
+		Token:     lexer.Token{Type: lexer.IF, Literal: "if"},
 		Condition: &ast.BooleanLiteral{Value: true},
 		Consequence: &ast.BlockStatement{
 			Statements: []ast.Statement{
@@ -171,7 +171,7 @@ func TestGenerateIfStatement(t *testing.T) {
 func TestGenerateWhileStatement(t *testing.T) {
 	// while true do break end
 	stmt := &ast.WhileStatement{
-		Token: lexer.Token{Type: lexer.WHILE, Literal: "while"},
+		Token:     lexer.Token{Type: lexer.WHILE, Literal: "while"},
 		Condition: &ast.BooleanLiteral{Value: true},
 		Body: &ast.BlockStatement{
 			Statements: []ast.Statement{
@@ -391,13 +391,13 @@ func TestTypeDeclarationGeneratesNoCode(t *testing.T) {
 func TestGenerateMultipleStatements(t *testing.T) {
 	statements := []ast.Statement{
 		&ast.VariableDeclaration{
-			Token: lexer.Token{Type: lexer.LOCAL, Literal: "local"},
-			Names: []*ast.Identifier{{Value: "x"}},
+			Token:  lexer.Token{Type: lexer.LOCAL, Literal: "local"},
+			Names:  []*ast.Identifier{{Value: "x"}},
 			Values: []ast.Expression{&ast.NumberLiteral{Token: lexer.Token{Literal: "10"}, Value: 10}},
 		},
 		&ast.VariableDeclaration{
-			Token: lexer.Token{Type: lexer.LOCAL, Literal: "local"},
-			Names: []*ast.Identifier{{Value: "y"}},
+			Token:  lexer.Token{Type: lexer.LOCAL, Literal: "local"},
+			Names:  []*ast.Identifier{{Value: "y"}},
 			Values: []ast.Expression{&ast.NumberLiteral{Token: lexer.Token{Literal: "20"}, Value: 20}},
 		},
 	}

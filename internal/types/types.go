@@ -446,12 +446,12 @@ func (t *TableType) IsAssignableTo(other Type) bool {
 
 // FunctionType represents a function type
 type FunctionType struct {
-	Parameters        []Type
-	ReturnType        Type
-	GenericParams     []string        // Generic type parameter names (e.g., ["T", "U"])
-	HasRestParameter  bool            // True if the last parameter is a rest parameter
-	OptionalParams    []bool          // True for each parameter that is optional
-	Overloads         []*FunctionType // Additional overload signatures (for method overloading)
+	Parameters       []Type
+	ReturnType       Type
+	GenericParams    []string        // Generic type parameter names (e.g., ["T", "U"])
+	HasRestParameter bool            // True if the last parameter is a rest parameter
+	OptionalParams   []bool          // True for each parameter that is optional
+	Overloads        []*FunctionType // Additional overload signatures (for method overloading)
 }
 
 func (t *FunctionType) String() string {
@@ -776,25 +776,25 @@ func (t *TupleType) IsAssignableTo(other Type) bool {
 
 // ClassType represents a class type
 type ClassType struct {
-	Name                string
-	Parent              *ClassType                // Parent class (single inheritance)
-	Properties          map[string]Type           // Instance properties
-	Methods             map[string]*FunctionType  // Instance methods
-	StaticProperties    map[string]Type           // Static properties
-	StaticMethods       map[string]*FunctionType  // Static methods
-	ReadonlyProps       map[string]bool           // Readonly property names
-	AbstractMethods     map[string]bool           // Abstract method names
-	PropertyVisibility  map[string]string         // Property visibility (public, private, protected)
-	MethodVisibility    map[string]string         // Method visibility (public, private, protected)
-	Constructor         *FunctionType             // Constructor signature
-	Implements          []*InterfaceType
-	IsAbstract          bool                      // Whether class is abstract
-	GenericParams       []string                  // Generic type parameter names (e.g., ["T", "U"])
-	IndexSignature      *IndexSignature           // [key: KeyType]: ValueType
-	Getters             map[string]*FunctionType  // Property getters
-	Setters             map[string]*FunctionType  // Property setters
-	GetterVisibility    map[string]string         // Getter visibility
-	SetterVisibility    map[string]string         // Setter visibility
+	Name               string
+	Parent             *ClassType               // Parent class (single inheritance)
+	Properties         map[string]Type          // Instance properties
+	Methods            map[string]*FunctionType // Instance methods
+	StaticProperties   map[string]Type          // Static properties
+	StaticMethods      map[string]*FunctionType // Static methods
+	ReadonlyProps      map[string]bool          // Readonly property names
+	AbstractMethods    map[string]bool          // Abstract method names
+	PropertyVisibility map[string]string        // Property visibility (public, private, protected)
+	MethodVisibility   map[string]string        // Method visibility (public, private, protected)
+	Constructor        *FunctionType            // Constructor signature
+	Implements         []*InterfaceType
+	IsAbstract         bool                     // Whether class is abstract
+	GenericParams      []string                 // Generic type parameter names (e.g., ["T", "U"])
+	IndexSignature     *IndexSignature          // [key: KeyType]: ValueType
+	Getters            map[string]*FunctionType // Property getters
+	Setters            map[string]*FunctionType // Property setters
+	GetterVisibility   map[string]string        // Getter visibility
+	SetterVisibility   map[string]string        // Setter visibility
 }
 
 func (t *ClassType) String() string {
@@ -949,10 +949,10 @@ type InterfaceType struct {
 	Methods        map[string]*FunctionType
 	Properties     map[string]Type
 	Extends        []*InterfaceType
-	IndexSignature *IndexSignature         // [key: KeyType]: ValueType
-	ReadonlyProps  map[string]bool         // Track readonly properties (for as const)
-	StaticProps    map[string]bool         // Track static properties
-	StaticMethods  map[string]bool         // Track static methods
+	IndexSignature *IndexSignature // [key: KeyType]: ValueType
+	ReadonlyProps  map[string]bool // Track readonly properties (for as const)
+	StaticProps    map[string]bool // Track static properties
+	StaticMethods  map[string]bool // Track static methods
 }
 
 // IndexSignature represents an index signature like [key: string]: number

@@ -120,19 +120,19 @@ type ServerInfo struct {
 
 // ServerCapabilities represents server capabilities
 type ServerCapabilities struct {
-	TextDocumentSync           *TextDocumentSyncOptions   `json:"textDocumentSync,omitempty"`
-	HoverProvider              bool                       `json:"hoverProvider,omitempty"`
-	CompletionProvider         *CompletionOptions         `json:"completionProvider,omitempty"`
-	SignatureHelpProvider      *SignatureHelpOptions      `json:"signatureHelpProvider,omitempty"`
-	DefinitionProvider         bool                       `json:"definitionProvider,omitempty"`
-	ReferencesProvider         bool                       `json:"referencesProvider,omitempty"`
-	DocumentSymbolProvider     bool                       `json:"documentSymbolProvider,omitempty"`
-	WorkspaceSymbolProvider    bool                       `json:"workspaceSymbolProvider,omitempty"`
-	DocumentFormattingProvider bool                       `json:"documentFormattingProvider,omitempty"`
-	RenameProvider             bool                       `json:"renameProvider,omitempty"`
-	CodeActionProvider         *CodeActionOptions         `json:"codeActionProvider,omitempty"`
-	InlayHintProvider          *InlayHintOptions          `json:"inlayHintProvider,omitempty"`
-	SemanticTokensProvider     *SemanticTokensOptions     `json:"semanticTokensProvider,omitempty"`
+	TextDocumentSync           *TextDocumentSyncOptions `json:"textDocumentSync,omitempty"`
+	HoverProvider              bool                     `json:"hoverProvider,omitempty"`
+	CompletionProvider         *CompletionOptions       `json:"completionProvider,omitempty"`
+	SignatureHelpProvider      *SignatureHelpOptions    `json:"signatureHelpProvider,omitempty"`
+	DefinitionProvider         bool                     `json:"definitionProvider,omitempty"`
+	ReferencesProvider         bool                     `json:"referencesProvider,omitempty"`
+	DocumentSymbolProvider     bool                     `json:"documentSymbolProvider,omitempty"`
+	WorkspaceSymbolProvider    bool                     `json:"workspaceSymbolProvider,omitempty"`
+	DocumentFormattingProvider bool                     `json:"documentFormattingProvider,omitempty"`
+	RenameProvider             bool                     `json:"renameProvider,omitempty"`
+	CodeActionProvider         *CodeActionOptions       `json:"codeActionProvider,omitempty"`
+	InlayHintProvider          *InlayHintOptions        `json:"inlayHintProvider,omitempty"`
+	SemanticTokensProvider     *SemanticTokensOptions   `json:"semanticTokensProvider,omitempty"`
 }
 
 // TextDocumentSyncOptions represents text document sync options
@@ -368,9 +368,9 @@ type SignatureHelpContext struct {
 type SignatureHelpTriggerKind int
 
 const (
-	SignatureHelpInvoked           SignatureHelpTriggerKind = 1
-	SignatureHelpTriggerCharacter  SignatureHelpTriggerKind = 2
-	SignatureHelpContentChange     SignatureHelpTriggerKind = 3
+	SignatureHelpInvoked          SignatureHelpTriggerKind = 1
+	SignatureHelpTriggerCharacter SignatureHelpTriggerKind = 2
+	SignatureHelpContentChange    SignatureHelpTriggerKind = 3
 )
 
 // SignatureHelp represents signature help
@@ -439,10 +439,10 @@ type WorkspaceSymbolParams struct {
 
 // SymbolInformation represents a workspace symbol
 type SymbolInformation struct {
-	Name          string   `json:"name"`
+	Name          string     `json:"name"`
 	Kind          SymbolKind `json:"kind"`
-	Location      Location `json:"location"`
-	ContainerName string   `json:"containerName,omitempty"`
+	Location      Location   `json:"location"`
+	ContainerName string     `json:"containerName,omitempty"`
 }
 
 // ReferenceParams represents references parameters
@@ -519,12 +519,12 @@ type InlayHintParams struct {
 
 // InlayHint represents an inlay hint
 type InlayHint struct {
-	Position     Position               `json:"position"`
-	Label        string                 `json:"label"`
-	Kind         int                    `json:"kind,omitempty"`
-	PaddingLeft  bool                   `json:"paddingLeft,omitempty"`
-	PaddingRight bool                   `json:"paddingRight,omitempty"`
-	Tooltip      *MarkupContent         `json:"tooltip,omitempty"`
+	Position     Position       `json:"position"`
+	Label        string         `json:"label"`
+	Kind         int            `json:"kind,omitempty"`
+	PaddingLeft  bool           `json:"paddingLeft,omitempty"`
+	PaddingRight bool           `json:"paddingRight,omitempty"`
+	Tooltip      *MarkupContent `json:"tooltip,omitempty"`
 }
 
 // InlayHint kinds
@@ -558,27 +558,27 @@ type SemanticTokens struct {
 
 // Semantic token types
 const (
-	SemanticTokenTypeNamespace        = "namespace"
-	SemanticTokenTypeType             = "type"
-	SemanticTokenTypeClass            = "class"
-	SemanticTokenTypeEnum             = "enum"
-	SemanticTokenTypeInterface        = "interface"
-	SemanticTokenTypeStruct           = "struct"
-	SemanticTokenTypeTypeParameter    = "typeParameter"
-	SemanticTokenTypeParameter        = "parameter"
-	SemanticTokenTypeVariable         = "variable"
-	SemanticTokenTypeProperty         = "property"
-	SemanticTokenTypeEnumMember       = "enumMember"
-	SemanticTokenTypeFunction         = "function"
-	SemanticTokenTypeMethod           = "method"
-	SemanticTokenTypeMacro            = "macro"
-	SemanticTokenTypeKeyword          = "keyword"
-	SemanticTokenTypeModifier         = "modifier"
-	SemanticTokenTypeComment          = "comment"
-	SemanticTokenTypeString           = "string"
-	SemanticTokenTypeNumber           = "number"
-	SemanticTokenTypeRegexp           = "regexp"
-	SemanticTokenTypeOperator         = "operator"
+	SemanticTokenTypeNamespace     = "namespace"
+	SemanticTokenTypeType          = "type"
+	SemanticTokenTypeClass         = "class"
+	SemanticTokenTypeEnum          = "enum"
+	SemanticTokenTypeInterface     = "interface"
+	SemanticTokenTypeStruct        = "struct"
+	SemanticTokenTypeTypeParameter = "typeParameter"
+	SemanticTokenTypeParameter     = "parameter"
+	SemanticTokenTypeVariable      = "variable"
+	SemanticTokenTypeProperty      = "property"
+	SemanticTokenTypeEnumMember    = "enumMember"
+	SemanticTokenTypeFunction      = "function"
+	SemanticTokenTypeMethod        = "method"
+	SemanticTokenTypeMacro         = "macro"
+	SemanticTokenTypeKeyword       = "keyword"
+	SemanticTokenTypeModifier      = "modifier"
+	SemanticTokenTypeComment       = "comment"
+	SemanticTokenTypeString        = "string"
+	SemanticTokenTypeNumber        = "number"
+	SemanticTokenTypeRegexp        = "regexp"
+	SemanticTokenTypeOperator      = "operator"
 )
 
 // Semantic token modifiers
@@ -597,12 +597,12 @@ const (
 
 // Code action kinds
 const (
-	CodeActionKindQuickFix      = "quickfix"
-	CodeActionKindRefactor      = "refactor"
-	CodeActionKindRefactorExtract = "refactor.extract"
-	CodeActionKindRefactorInline  = "refactor.inline"
-	CodeActionKindRefactorRewrite = "refactor.rewrite"
-	CodeActionKindSource          = "source"
+	CodeActionKindQuickFix              = "quickfix"
+	CodeActionKindRefactor              = "refactor"
+	CodeActionKindRefactorExtract       = "refactor.extract"
+	CodeActionKindRefactorInline        = "refactor.inline"
+	CodeActionKindRefactorRewrite       = "refactor.rewrite"
+	CodeActionKindSource                = "source"
 	CodeActionKindSourceOrganizeImports = "source.organizeImports"
 )
 
@@ -626,8 +626,8 @@ type DidChangeWatchedFilesParams struct {
 
 // FileEvent represents a file change event
 type FileEvent struct {
-	URI  string           `json:"uri"`
-	Type FileChangeType   `json:"type"`
+	URI  string         `json:"uri"`
+	Type FileChangeType `json:"type"`
 }
 
 // FileChangeType represents the type of file change
@@ -641,9 +641,9 @@ const (
 
 // FileSystemWatcherRegistration represents dynamic file watcher registration
 type FileSystemWatcherRegistration struct {
-	ID              string              `json:"id"`
-	Method          string              `json:"method"`
-	RegisterOptions RegisterOptions     `json:"registerOptions"`
+	ID              string          `json:"id"`
+	Method          string          `json:"method"`
+	RegisterOptions RegisterOptions `json:"registerOptions"`
 }
 
 // RegisterOptions represents file watcher registration options

@@ -38,3 +38,29 @@ func TestConstAssertionKeepsLiteralType(t *testing.T) {
 		t.Errorf("unexpected type error: %s", err.Message)
 	}
 }
+
+// An inferred array of literals is an array of their base type, as a
+// single literal widens: `local xs = {1, 2, 3}` is number[].
+func TestArrayOfLiteralsWidens(t *testing.T) {
+	for _, err := range checkSource(t, `
+local xs = {1, 2, 3}
+local y: number = xs[1] + 1
+xs[2] = 10
+local names = {"a", "b"}
+names[1] = "c"
+`) {
+		t.Errorf("unexpected type error: %s", err.Message)
+	}
+}
+
+// Arithmetic works on a union of numbers.
+func TestArithmeticOnANumberLiteralUnion(t *testing.T) {
+	for _, err := range checkSource(t, `
+type Die = 1 | 2 | 3
+local function step(d: Die): number
+    return d + 1
+end
+`) {
+		t.Errorf("unexpected type error: %s", err.Message)
+	}
+}

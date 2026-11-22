@@ -1420,12 +1420,19 @@ func (t *GenericType) IsAssignableTo(other Type) bool {
 
 // IsNumericType checks if a type is numeric
 func IsNumericType(t Type) bool {
-	_, ok := t.(*NumberType)
-	if ok {
+	switch typ := t.(type) {
+	case *NumberType, *NumberLiteralType:
 		return true
+	case *UnionType:
+		// 1 | 2 | 3 is a number whichever it is.
+		for _, m := range typ.Types {
+			if m == nil || !IsNumericType(m) {
+				return false
+			}
+		}
+		return len(typ.Types) > 0
 	}
-	_, ok = t.(*NumberLiteralType)
-	return ok
+	return false
 }
 
 // IsStringType checks if a type is a string

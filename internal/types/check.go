@@ -2457,13 +2457,37 @@ func paramIsOptional(param *ast.Parameter, resolved Type) bool {
 // base type, so `local state = "idle"` is a string rather than the type "idle".
 // An explicit annotation or `as const` is how a literal type is kept.
 func widenLiteralType(t Type) Type {
-	switch t.(type) {
+	switch typ := t.(type) {
 	case *StringLiteralType:
 		return String
 	case *NumberLiteralType:
 		return Number
 	case *BooleanLiteralType:
 		return Boolean
+	case *ArrayType:
+		// `local xs = {1, 2, 3}` holds numbers, not just 1, 2 and 3.
+		if elem := widenLiteralType(typ.ElementType); elem != typ.ElementType {
+			return &ArrayType{ElementType: elem}
+		}
+	case *UnionType:
+		var members []Type
+		seen := map[string]bool{}
+		changed := false
+		for _, m := range typ.Types {
+			w := widenLiteralType(m)
+			changed = changed || w != m
+			if key := w.String(); !seen[key] {
+				seen[key] = true
+				members = append(members, w)
+			}
+		}
+		if !changed {
+			return t
+		}
+		if len(members) == 1 {
+			return members[0]
+		}
+		return &UnionType{Types: members}
 	}
 
 	return t

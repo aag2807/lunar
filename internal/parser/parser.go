@@ -3243,6 +3243,23 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 			}
 			parent = &ast.DotExpression{Token: dot, Left: parent, Right: p.parseFieldName()}
 		}
+		// extends Container<number>: the parent instantiated (the type
+		// arguments used to be dropped, leaving its members typed T).
+		if p.peekTokenIs(lexer.LT) {
+			tok := p.curToken
+			p.nextToken() // '<'
+			p.nextToken()
+			args := []ast.Expression{p.parseType()}
+			for p.peekTokenIs(lexer.COMMA) {
+				p.nextToken()
+				p.nextToken()
+				args = append(args, p.parseType())
+			}
+			if !p.expectPeekGT() {
+				return nil
+			}
+			parent = &ast.GenericType{Token: tok, BaseType: parent, TypeArguments: args}
+		}
 		class.Extends = parent
 	}
 

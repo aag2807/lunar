@@ -1,0 +1,28 @@
+-- A subclass of an instantiated generic class, and a generic class's own
+-- type used inside it.
+class Container<T>
+    items: T[] = {}
+    add(x: T): void
+        table.insert(self.items, x)
+    end
+    first(): T
+        return self.items[1]
+    end
+end
+class Numbers extends Container<number>
+end
+local c = Numbers()
+c.add(1)
+local n: number = c.first()
+class Box<T>
+    v: T
+    constructor(v: T)
+        self.v = v
+    end
+    again(): Box<T>
+        return self
+    end
+end
+local b = Box<string>("x")
+local s: string = b.again().again().v
+assert(n == 1 and s == "x")

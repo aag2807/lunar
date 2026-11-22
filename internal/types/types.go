@@ -831,6 +831,11 @@ type ClassType struct {
 	Setters            map[string]*FunctionType // Property setters
 	GetterVisibility   map[string]string        // Getter visibility
 	SetterVisibility   map[string]string        // Setter visibility
+	// GenericOrigin and TypeArgs are set on an instantiation, Box<number>:
+	// the generic class it came from, and its arguments, so a Box<T>
+	// inside Box becomes Box<number> when T does.
+	GenericOrigin *ClassType
+	TypeArgs      []Type
 }
 
 func (t *ClassType) String() string {

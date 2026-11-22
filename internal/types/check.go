@@ -358,6 +358,9 @@ type Checker struct {
 	// resolvingTypeof: a type alias using typeof is being resolved where it
 	// is declared, not in the early registration pass.
 	resolvingTypeof bool
+	// classInstances are the instantiations of generic classes made so
+	// far, by class and arguments.
+	classInstances map[string]*ClassType
 
 	// exprTypes records the type computed for each expression checked.
 	exprTypes map[ast.Expression]Type
@@ -2694,10 +2697,30 @@ func (c *Checker) substituteTypeParams(body ast.Expression, typeParams []string,
 
 // instantiateGenericClass creates a new ClassType with type parameters substituted
 func (c *Checker) instantiateGenericClass(classType *ClassType, typeArgs []Type) *ClassType {
+	if classType.GenericOrigin != nil {
+		classType = classType.GenericOrigin
+	}
 	// Create substitution map
 	substitutions := make(map[string]Type)
 	for i, param := range classType.GenericParams {
-		substitutions[param] = typeArgs[i]
+		if i < len(typeArgs) {
+			substitutions[param] = typeArgs[i]
+		}
+	}
+	// One instance per concrete set of arguments, registered before its
+	// members are substituted: a method returning Box<T> refers back to it.
+	concrete := true
+	key := fmt.Sprintf("%p", classType)
+	for _, a := range typeArgs {
+		key += "|" + a.String()
+		if containsGenericParam(a) {
+			concrete = false
+		}
+	}
+	if concrete {
+		if inst, ok := c.classInstances[key]; ok {
+			return inst
+		}
 	}
 
 	// Create a new class type with substituted types
@@ -2715,6 +2738,15 @@ func (c *Checker) instantiateGenericClass(classType *ClassType, typeArgs []Type)
 		GenericParams:      []string{}, // Instantiated classes are not generic
 		PropertyVisibility: classType.PropertyVisibility,
 		MethodVisibility:   classType.MethodVisibility,
+		MemberSyms:         classType.MemberSyms,
+		GenericOrigin:      classType,
+		TypeArgs:           typeArgs,
+	}
+	if concrete {
+		if c.classInstances == nil {
+			c.classInstances = map[string]*ClassType{}
+		}
+		c.classInstances[key] = instantiated
 	}
 
 	// Substitute properties
@@ -2769,10 +2801,41 @@ func (c *Checker) substituteFunctionType(funcType *FunctionType, substitutions m
 	newReturnType := c.substituteType(funcType.ReturnType, substitutions)
 
 	return &FunctionType{
-		Parameters:    newParams,
-		ReturnType:    newReturnType,
-		GenericParams: []string{}, // Instantiated functions are not generic
+		Parameters:       newParams,
+		ReturnType:       newReturnType,
+		GenericParams:    []string{}, // Instantiated functions are not generic
+		OptionalParams:   funcType.OptionalParams,
+		HasRestParameter: funcType.HasRestParameter,
+		ParamNames:       funcType.ParamNames,
+		Untyped:          funcType.Untyped,
 	}
+}
+
+// containsGenericParam says whether a type still names a type parameter.
+func containsGenericParam(t Type) bool {
+	switch v := t.(type) {
+	case *GenericParamType:
+		return true
+	case *ArrayType:
+		return containsGenericParam(v.ElementType)
+	case *OptionalType:
+		return containsGenericParam(v.BaseType)
+	case *UnionType:
+		for _, m := range v.Types {
+			if containsGenericParam(m) {
+				return true
+			}
+		}
+	case *TableType:
+		return containsGenericParam(v.KeyType) || containsGenericParam(v.ValueType)
+	case *ClassType:
+		for _, a := range v.TypeArgs {
+			if containsGenericParam(a) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // substituteType replaces type parameter references with actual types
@@ -2818,8 +2881,19 @@ func (c *Checker) substituteType(typ Type, substitutions map[string]Type) Type {
 		}
 		return &TupleType{Elements: newElements}
 
+	case *ClassType:
+		// Box<T> inside Box: instantiated again with what T now is.
+		if t.GenericOrigin != nil && containsGenericParam(t) {
+			args := make([]Type, len(t.TypeArgs))
+			for i, a := range t.TypeArgs {
+				args[i] = c.substituteType(a, substitutions)
+			}
+			return c.instantiateGenericClass(t.GenericOrigin, args)
+		}
+		return t
+
 	default:
-		// For all other types (primitives, classes, etc.), return as-is
+		// For all other types (primitives, etc.), return as-is
 		return t
 	}
 }

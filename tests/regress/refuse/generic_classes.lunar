@@ -1,0 +1,24 @@
+-- Inherited and self-referring generic members take the arguments given.
+class Container<T>
+    items: T[] = {}
+    add(x: T): void
+        table.insert(self.items, x)
+    end
+end
+class Numbers extends Container<number>
+end
+local c = Numbers()
+-- error: Argument 1: cannot pass type
+c.add("one")
+class Box<T>
+    v: T
+    constructor(v: T)
+        self.v = v
+    end
+    again(): Box<T>
+        return self
+    end
+end
+local b = Box<number>(1)
+-- error: Cannot assign type 'number'
+local s: string = b.again().v

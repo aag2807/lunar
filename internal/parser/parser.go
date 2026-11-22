@@ -3462,6 +3462,7 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 		}
 	}
 	p.unclosedAtEOF("end", class.Token)
+	class.EndToken = p.curToken
 
 	return class
 }
@@ -3776,6 +3777,7 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 		}
 	}
 	p.unclosedAtEOF("end", iface.Token)
+	iface.EndToken = p.curToken
 
 	return iface
 }
@@ -3896,6 +3898,7 @@ func (p *Parser) parseEnumDeclaration() *ast.EnumDeclaration {
 		p.nextToken()
 	}
 	p.unclosedAtEOF("end", enum.Token)
+	enum.EndToken = p.curToken
 
 	return enum
 }
@@ -4095,6 +4098,7 @@ func (p *Parser) parseNamespaceDeclaration() *ast.NamespaceDeclaration {
 		p.nextToken()
 	}
 	p.unclosedAtEOF("end", ns.Token)
+	ns.EndToken = p.curToken
 
 	return ns
 }

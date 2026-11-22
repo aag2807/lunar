@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"fmt"
+	"lunar/internal/ast"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -326,10 +327,21 @@ func (s *Server) documentSymbols(uri string) []DocumentSymbol {
 	if ix == nil {
 		return out
 	}
+	// Where each declaration starts and ends, by its name: an outline entry
+	// spans the whole declaration, so an editor can tell which holds the
+	// cursor.
+	extents := map[int]declExtent{}
+	ctors := map[string]*ast.ConstructorDeclaration{}
+	if m := s.modules[path]; m != nil {
+		declExtents(m.Statements, extents, ctors)
+	}
 	containers := map[string]int{}
 	for _, sym := range ownSymbols(path, ix) {
 		ds := DocumentSymbol{Name: sym.Name, Detail: typeString(sym.Type), Kind: symbolKind(sym.Kind),
 			Range: s.tokenRange(sym.Decl), SelectionRange: s.tokenRange(sym.Decl)}
+		if ext, ok := extents[sym.Decl.Offset]; ok && ext.end.Line > 0 {
+			ds.Range = Range{Start: s.tokenRange(ext.start).Start, End: s.tokenRange(ext.end).End}
+		}
 		if sym.Container != "" {
 			if i, ok := containers[sym.Container]; ok {
 				out[i].Children = append(out[i].Children, ds)
@@ -345,7 +357,68 @@ func (s *Server) documentSymbols(uri string) []DocumentSymbol {
 		}
 		out = append(out, ds)
 	}
+	for class, ctor := range ctors {
+		i, ok := containers[class]
+		if !ok || ctor.Body == nil {
+			continue
+		}
+		out[i].Children = append(out[i].Children, DocumentSymbol{Name: "constructor", Kind: ConstructorSymbol,
+			Range:          Range{Start: s.tokenRange(ctor.Token).Start, End: s.tokenRange(ctor.Body.EndToken).End},
+			SelectionRange: s.tokenRange(ctor.Token)})
+	}
 	return out
+}
+
+// declExtent is where a declaration starts and ends.
+type declExtent struct{ start, end lexer.Token }
+
+// declExtents records the extent of each declaration in stmts by the
+// offset of its name, and each class's constructor by class name.
+func declExtents(stmts []ast.Statement, out map[int]declExtent, ctors map[string]*ast.ConstructorDeclaration) {
+	for _, st := range stmts {
+		var start lexer.Token
+		if exp, ok := st.(*ast.ExportStatement); ok && exp.Statement != nil {
+			start, st = exp.Token, exp.Statement
+		}
+		from := func(tok lexer.Token) lexer.Token {
+			if start.Line > 0 {
+				return start
+			}
+			return tok
+		}
+		switch n := st.(type) {
+		case *ast.FunctionDeclaration:
+			if n.Name != nil && n.Body != nil {
+				out[n.Name.Token.Offset] = declExtent{from(n.Token), n.Body.EndToken}
+			}
+		case *ast.ClassDeclaration:
+			if n.Name == nil {
+				continue
+			}
+			out[n.Name.Token.Offset] = declExtent{from(n.Token), n.EndToken}
+			for _, m := range n.Methods {
+				if m.Name != nil && m.Body != nil {
+					out[m.Name.Token.Offset] = declExtent{m.Token, m.Body.EndToken}
+				}
+			}
+			if n.Constructor != nil {
+				ctors[n.Name.Value] = n.Constructor
+			}
+		case *ast.InterfaceDeclaration:
+			if n.Name != nil {
+				out[n.Name.Token.Offset] = declExtent{from(n.Token), n.EndToken}
+			}
+		case *ast.EnumDeclaration:
+			if n.Name != nil {
+				out[n.Name.Token.Offset] = declExtent{from(n.Token), n.EndToken}
+			}
+		case *ast.NamespaceDeclaration:
+			if n.Name != nil {
+				out[n.Name.Token.Offset] = declExtent{from(n.Token), n.EndToken}
+			}
+			declExtents(n.Statements, out, ctors)
+		}
+	}
 }
 
 func (s *Server) workspaceSymbols(query string) []SymbolInformation {

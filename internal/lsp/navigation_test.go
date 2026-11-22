@@ -136,3 +136,37 @@ func TestHoverDetails(t *testing.T) {
 		t.Errorf("k.level: %q", got)
 	}
 }
+
+// Outline entries span their whole declaration, so an editor can tell
+// which one holds the cursor, and a class lists its constructor.
+func TestDocumentSymbolRanges(t *testing.T) {
+	text := "class Enemy\n    hp: number = 1\n    constructor(hp: number)\n        self.hp = hp\n    end\n    hit(n: number): void\n        self.hp = self.hp - n\n    end\nend\nfunction spawn(): Enemy\n    return Enemy(1)\nend\n"
+	root := writeTree(t, map[string]string{"lunar.config.json": `{"outDir": "../out"}`, "a.lunar": text})
+	c := newClientAt(t, root)
+	c.open("a.lunar")
+	syms := decode[[]DocumentSymbol](t, c.request("textDocument/documentSymbol", map[string]any{
+		"textDocument": map[string]any{"uri": c.uri("a.lunar")}}))
+	byName := map[string]DocumentSymbol{}
+	var children []string
+	for _, s := range syms {
+		byName[s.Name] = s
+		if s.Name == "Enemy" {
+			for _, ch := range s.Children {
+				byName[ch.Name] = ch
+				children = append(children, ch.Name)
+			}
+		}
+	}
+	if e := byName["Enemy"]; e.Range.Start.Line != 0 || e.Range.End.Line != 8 || e.SelectionRange.Start.Line != 0 {
+		t.Errorf("Enemy: %+v", e)
+	}
+	if h := byName["hit"]; h.Range.Start.Line != 5 || h.Range.End.Line != 7 {
+		t.Errorf("hit: %+v", h)
+	}
+	if f := byName["spawn"]; f.Range.Start.Line != 9 || f.Range.End.Line != 11 {
+		t.Errorf("spawn: %+v", f)
+	}
+	if ctor, ok := byName["constructor"]; !ok || ctor.Kind != ConstructorSymbol || ctor.Range.End.Line != 4 {
+		t.Errorf("constructor: %+v (children %v)", ctor, children)
+	}
+}

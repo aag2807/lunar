@@ -1025,6 +1025,8 @@ type ClassDeclaration struct {
 	// IsAmbient marks a `declare class`, which describes a Lua class Lunar
 	// did not compile; its construction is not Lunar's ClassName.new.
 	IsAmbient bool
+	// EndToken is the closing `end`, for editors.
+	EndToken lexer.Token
 }
 
 // GetterDeclaration represents a property getter
@@ -1210,6 +1212,8 @@ type InterfaceDeclaration struct {
 	Properties     []*PropertyDeclaration
 	IndexSignature *IndexSignatureDeclaration // [key: KeyType]: ValueType
 	Extends        []Expression               // parent interface names
+	// EndToken is the closing `end`, for editors.
+	EndToken lexer.Token
 }
 
 func (id *InterfaceDeclaration) statementNode()       {}
@@ -1284,6 +1288,8 @@ type EnumDeclaration struct {
 	Token   lexer.Token // 'enum' token
 	Name    *Identifier
 	Members []*EnumMember
+	// EndToken is the closing `end`, for editors.
+	EndToken lexer.Token
 }
 
 func (ed *EnumDeclaration) statementNode()       {}
@@ -1411,6 +1417,8 @@ type NamespaceDeclaration struct {
 	Token      lexer.Token // 'namespace' token
 	Name       *Identifier
 	Statements []Statement // declarations inside the namespace
+	// EndToken is the closing `end`, for editors.
+	EndToken lexer.Token
 }
 
 func (ns *NamespaceDeclaration) statementNode()       {}

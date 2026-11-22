@@ -341,7 +341,7 @@ func TestDocumentAndWorkspaceSymbols(t *testing.T) {
 	c.open("actors/enemy.lunar")
 	syms := decode[[]DocumentSymbol](t, c.request("textDocument/documentSymbol", map[string]any{
 		"textDocument": map[string]any{"uri": c.uri("actors/enemy.lunar")}}))
-	if len(syms) != 1 || syms[0].Name != "Enemy" || len(syms[0].Children) != 2 {
+	if len(syms) != 1 || syms[0].Name != "Enemy" || len(syms[0].Children) != 3 { // hp, hit and the constructor
 		t.Fatalf("document symbols: %+v", syms)
 	}
 

@@ -87,30 +87,29 @@ func (b *Builder) encodeMappings() string {
 
 	var result strings.Builder
 
-	// Track previous values for delta encoding
-	prevGenLine := 0
+	// Generated lines are 1-based here: line 1 is the first group. Groups
+	// are separated by ';', segments within one by ','. (A ',' used to
+	// start the group of a line after an unmapped one: an empty segment.)
+	line := 1
+	onLine := false
 	prevGenCol := 0
 	prevSrcLine := 0
 	prevSrcCol := 0
 	prevNameIndex := 0
 
-	for i, m := range b.mappings {
-		// Add semicolons for each line
-		for prevGenLine < m.GeneratedLine {
-			if prevGenLine > 0 || i > 0 {
-				result.WriteString(";")
-			}
-			prevGenLine++
-			prevGenCol = 0 // Reset column for new line
+	for _, m := range b.mappings {
+		for line < m.GeneratedLine {
+			result.WriteString(";")
+			line++
+			prevGenCol = 0
+			onLine = false
 		}
-
-		// Add comma between segments on the same line
-		if i > 0 && m.GeneratedLine == prevGenLine {
+		if onLine {
 			result.WriteString(",")
 		}
+		onLine = true
 
-		// Encode the segment:
-		// 1. Generated column (delta from previous)
+		// 1. Generated column (delta from previous on this line)
 		result.WriteString(EncodeVLQ(m.GeneratedColumn - prevGenCol))
 		prevGenCol = m.GeneratedColumn
 

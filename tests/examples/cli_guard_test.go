@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -71,5 +72,21 @@ func TestOutputToStdoutRedirectedToAFile(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(dir, "out.lua")); string(data) != "print(1)\n" {
 		t.Errorf("out.lua = %q", data)
+	}
+}
+
+// -o out.lua --source-map writes out.lua.map, and both name each other.
+func TestSourceMapFollowsTheOutputName(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.lunar"), []byte("print(1)\n"), 0o644)
+	cmd := exec.Command(compilerBin, "a.lunar", "-o", "out.lua", "--source-map")
+	cmd.Dir = dir
+	if code := exitCode(cmd.Run()); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	lua, _ := os.ReadFile(filepath.Join(dir, "out.lua"))
+	sm, err := os.ReadFile(filepath.Join(dir, "out.lua.map"))
+	if err != nil || !strings.Contains(string(lua), "sourceMappingURL=out.lua.map") || !strings.Contains(string(sm), `"file":"out.lua"`) {
+		t.Errorf("out.lua:\n%s\nout.lua.map: %s (%v)", lua, sm, err)
 	}
 }

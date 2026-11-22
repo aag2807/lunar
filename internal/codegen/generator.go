@@ -5,6 +5,7 @@ import (
 	"lunar/internal/ast"
 	"lunar/internal/lexer"
 	"lunar/internal/sourcemap"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -146,11 +147,6 @@ func (g *Generator) Generate(statements []ast.Statement) string {
 	}
 
 	for i, stmt := range statements {
-		// Track mapping at the start of each statement
-		if g.sourceMapBuilder != nil {
-			g.trackStatementMapping(stmt)
-		}
-
 		code := g.generateStatement(stmt)
 		if code != "" {
 			g.write(code)
@@ -172,6 +168,9 @@ func (g *Generator) Generate(statements []ast.Statement) string {
 		output.WriteString(returnStmt)
 	}
 
+	if g.sourceMapBuilder != nil {
+		return g.placeMappings(output.String())
+	}
 	return output.String()
 }
 
@@ -289,6 +288,58 @@ func (g *Generator) getExpressionToken(expr ast.Expression) lexer.Token {
 
 // generateStatement generates Lua code for a statement
 func (g *Generator) generateStatement(stmt ast.Statement) string {
+	code := g.generateStatementCode(stmt)
+	// With a source map, each statement, nested ones too, carries a marker
+	// of where it is in the source; Generate turns them into mappings.
+	if g.sourceMapBuilder != nil && code != "" {
+		if tok, ok := statementToken(stmt); ok && tok.Line > 0 {
+			code = fmt.Sprintf("\x01%d:%d\x02", tok.Line, tok.Column) + code
+		}
+	}
+	return code
+}
+
+// statementToken is the token a statement starts with.
+func statementToken(stmt ast.Statement) (lexer.Token, bool) {
+	v := reflect.ValueOf(stmt)
+	if v.Kind() != reflect.Ptr || v.IsNil() {
+		return lexer.Token{}, false
+	}
+	f := v.Elem().FieldByName("Token")
+	if !f.IsValid() {
+		return lexer.Token{}, false
+	}
+	tok, ok := f.Interface().(lexer.Token)
+	return tok, ok
+}
+
+// placeMappings removes the statements' markers from the code and maps
+// each place one was to the source position it names.
+func (g *Generator) placeMappings(code string) string {
+	var out strings.Builder
+	line, col := 1, 0
+	for i := 0; i < len(code); {
+		c := code[i]
+		if c == '\x01' {
+			end := strings.IndexByte(code[i:], '\x02')
+			var srcLine, srcCol int
+			fmt.Sscanf(code[i+1:i+end], "%d:%d", &srcLine, &srcCol)
+			g.sourceMapBuilder.AddMapping(line, col, srcLine, srcCol-1, "")
+			i += end + 1
+			continue
+		}
+		out.WriteByte(c)
+		if c == '\n' {
+			line, col = line+1, 0
+		} else if c < 0x80 || c >= 0xC0 {
+			col++ // a character, not a UTF-8 continuation byte
+		}
+		i++
+	}
+	return out.String()
+}
+
+func (g *Generator) generateStatementCode(stmt ast.Statement) string {
 	if stmt == nil {
 		return ""
 	}

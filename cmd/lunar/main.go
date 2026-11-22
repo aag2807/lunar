@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -341,13 +343,26 @@ func writeSingle(outs []project.Output, output string) error {
 	}
 	for _, o := range outs {
 		target := output
+		content := o.Content
+		// The Lua and its map name each other by file name, which -o may
+		// change: out.lua and out.lua.map, not the source's a.lua.map.
 		if strings.HasSuffix(o.Rel, ".map") {
 			target = output + ".map"
+			var sm map[string]any
+			if json.Unmarshal(content, &sm) == nil {
+				sm["file"] = filepath.Base(output)
+				if data, err := json.Marshal(sm); err == nil {
+					content = data
+				}
+			}
 		} else if !strings.HasSuffix(o.Rel, ".lua") {
 			continue
+		} else {
+			from := "sourceMappingURL=" + filepath.Base(o.Rel) + ".map"
+			content = bytes.Replace(content, []byte(from), []byte("sourceMappingURL="+filepath.Base(output)+".map"), 1)
 		}
 		tmp := target + ".lunar-tmp"
-		if err := os.WriteFile(tmp, o.Content, 0o644); err != nil {
+		if err := os.WriteFile(tmp, content, 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", target, err)
 		}
 		if err := os.Rename(tmp, target); err != nil {

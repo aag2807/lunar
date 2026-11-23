@@ -114,6 +114,9 @@ their changelog described features that did not work.
   array, an assertion cannot turn one kind of value into another (`5 as
   string`), and decorators apply to `local function` too. `_ENV` is
   declared, and `ipairs`/`pairs` values are never nil.
+- Standard library functions that return nil only to report failure
+  (`io.open`, `os.getenv`, `math.type`, ...) are declared by their success
+  type, as in Teal, so plain Lua using their results compiles.
 - Untyped Lua is checked as Lua: `and`/`or` have the type of the operand they
   return; empty locals, tables grown field by field, left-out untyped
   parameters, values adjusted to names, and `function M.f()` /

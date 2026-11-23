@@ -1,5 +1,10 @@
 -- Lua 5.3 and 5.4 I/O library
 -- https://www.lua.org/manual/5.4/manual.html#6.8
+--
+-- A function that returns nil (and a message) only to report failure is
+-- declared with what it returns on success, as Teal does: Lua code checks
+-- the failure as Lua does (assert(io.open(p)), os.getenv(k) or default),
+-- and plain Lua that uses the result directly compiles.
 
 -- A file handle. Its functions are methods, called with ':' (f:read("l"),
 -- io.stdout:write("x")). Functions that can fail return nil and a message
@@ -19,12 +24,12 @@ declare interface IOLib
 	flush: function(): any
 	input: function(file?: File | string): File
 	lines: function(filename?: string, ...formats: string | number): function(): any
-	open: function(filename: string, mode?: string): File | nil
+	open: function(filename: string, mode?: string): File
 	output: function(file?: File | string): File
-	popen: function(prog: string, mode?: string): File | nil
+	popen: function(prog: string, mode?: string): File
 	read: function(...formats: string | number): any
 	tmpfile: function(): File
-	type: function(obj: any): string | nil
+	type: function(obj: any): string
 	write: function(...values: string | number): any
 
 	stdin: File

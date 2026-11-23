@@ -1,0 +1,6 @@
+-- A library function's result is still typed by what it returns on
+-- success: a string from os.getenv is not a number.
+-- error: Cannot assign type 'string' to variable 'n' of type 'number'
+local n: number = os.getenv("HOME")
+-- error: Cannot assign type 'File' to variable 'm' of type 'string'
+local m: string = io.open("x")

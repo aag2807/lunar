@@ -11,6 +11,13 @@ available and nothing needs to be installed next to it.
 | `os.d.lunar`, `io.d.lunar`, `coroutine.d.lunar`, `debug.d.lunar`, `package.d.lunar` | those libraries |
 | `lua54.d.lunar` | what only Lua 5.4 has (`warn`); loaded for `--target lua54` |
 
+A function that returns `nil` (and a message) only to report failure, such
+as `io.open`, `os.getenv` or `math.type`, is declared with what it returns on
+success, as Teal does. Code checks the failure the way Lua code does
+(`assert(io.open(p))`, `os.getenv(k) or default`), and plain Lua that uses
+the result directly compiles. An engine's own declarations can say `T?`
+where they want callers to check.
+
 The list of files loaded is `Core` and `ForTarget` in `embed.go`. Errors in
 them are reported as `<stdlib>/<file>`, and a test checks they load with none.
 

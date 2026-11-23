@@ -1,5 +1,10 @@
 -- Lua 5.3 and 5.4 Math Library
 -- Type declarations for mathematical functions
+--
+-- A function that returns nil (and a message) only to report failure is
+-- declared with what it returns on success, as Teal does: Lua code checks
+-- the failure as Lua does (assert(io.open(p)), os.getenv(k) or default),
+-- and plain Lua that uses the result directly compiles.
 
 declare interface MathLib
 	-- Trigonometric Functions
@@ -45,8 +50,8 @@ declare interface MathLib
 	maxinteger: number
 	mininteger: number
 	-- Integers (Lua 5.3+): math.type gives "integer", "float" or nil
-	tointeger: function(x: any): number | nil
-	type: function(x: any): string | nil
+	tointeger: function(x: any): number
+	type: function(x: any): string
 	ult: function(m: number, n: number): boolean
 	huge: number
 end

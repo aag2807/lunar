@@ -1,5 +1,10 @@
 -- Lua 5.3 and 5.4 operating system library
 -- https://www.lua.org/manual/5.4/manual.html#6.9
+--
+-- A function that returns nil (and a message) only to report failure is
+-- declared with what it returns on success, as Teal does: Lua code checks
+-- the failure as Lua does (assert(io.open(p)), os.getenv(k) or default),
+-- and plain Lua that uses the result directly compiles.
 
 -- What os.time takes: year, month and day are required, the rest default.
 -- os.date("*t") gives every field.
@@ -22,10 +27,10 @@ declare interface OSLib
 	difftime: function(t2: number, t1?: number): number
 	execute: function(command?: string): any
 	exit: function(code?: boolean | number, close?: boolean): void
-	getenv: function(varname: string): string | nil
+	getenv: function(varname: string): string
 	remove: function(filename: string): any
 	rename: function(oldname: string, newname: string): any
-	setlocale: function(locale?: string, category?: string): string | nil
+	setlocale: function(locale?: string, category?: string): string
 	time: function(table?: DateTable): number
 	tmpname: function(): string
 end

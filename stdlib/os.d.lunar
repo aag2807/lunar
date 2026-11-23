@@ -24,7 +24,7 @@ declare interface OSLib
 	clock: function(): number
 	-- A string, or a table for the formats "*t" and "!*t".
 	date: function(format?: string, time?: number): any
-	difftime: function(t2: number, t1?: number): number
+	difftime: function(t2: number, t1: number): number
 	execute: function(command?: string): any
 	exit: function(code?: boolean | number, close?: boolean): void
 	getenv: function(varname: string): string

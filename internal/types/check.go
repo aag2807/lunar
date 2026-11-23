@@ -6503,7 +6503,14 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 
 	// If function has rest parameter, check minimum argument count
 	if !hasSpreadArgs && fnType.HasRestParameter && !fnType.Untyped && !lastIsMulti {
-		minArgs := len(fnType.Parameters) - 1 // All params except the rest parameter
+		// The parameters before the rest one, up to the first optional.
+		minArgs := len(fnType.Parameters) - 1
+		for i := 0; i < len(fnType.Parameters)-1 && i < len(fnType.OptionalParams); i++ {
+			if fnType.OptionalParams[i] {
+				minArgs = i
+				break
+			}
+		}
 		if len(node.Arguments) < minArgs {
 			c.addError(
 				fmt.Sprintf("Function expects at least %d arguments, got %d",

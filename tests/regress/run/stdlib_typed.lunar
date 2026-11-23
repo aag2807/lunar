@@ -1,0 +1,14 @@
+-- Typed code gets the standard library's results with their types.
+local n: number = math.floor(3.7) + math.max(1, 2) + string.len("ab") + os.time() * 0 + #"x"
+local s: string = string.rep("a", 2) .. string.format("%d", 1) .. table.concat({ "x" }) .. tostring(1) .. ("y"):upper()
+local b: boolean = rawequal(1, 1)
+local t: number = os.time({ year = 2020, month = 1, day = 1 })
+local kind: string = type(n) .. math.type(1) .. io.type(io.stdout)
+local f = io.open(os.tmpname(), "w")
+local ok: boolean = pcall(print, "")
+local parts: string[] = {}
+for word in ("a b"):gmatch("%a+") do
+    table.insert(parts, word)
+end
+assert(n == 8 and s == "aa1x1Y" and b and t > 0 and kind == "numberintegerfile" and ok and #parts == 2)
+if f then f:close() end

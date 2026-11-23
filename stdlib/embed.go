@@ -29,5 +29,5 @@ func ForTarget(target string) []string {
 	if target == "lua54" {
 		return []string{"lua54.d.lunar"}
 	}
-	return nil
+	return []string{"lua53.d.lunar"}
 }

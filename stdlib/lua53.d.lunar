@@ -1,0 +1,21 @@
+-- What only Lua 5.3 has: the bit32 library, kept from Lua 5.2 by the
+-- standard 5.3 build (LUA_COMPAT_5_2). Loaded when compiling for
+-- --target lua53; Lua 5.4 has the bitwise operators instead.
+-- https://www.lua.org/manual/5.2/manual.html#6.7
+
+declare interface Bit32Lib
+	arshift: function(x: number, disp: number): number
+	band: function(...values: number): number
+	bnot: function(x: number): number
+	bor: function(...values: number): number
+	btest: function(...values: number): boolean
+	bxor: function(...values: number): number
+	extract: function(n: number, field: number, width?: number): number
+	lrotate: function(x: number, disp: number): number
+	lshift: function(x: number, disp: number): number
+	replace: function(n: number, v: number, field: number, width?: number): number
+	rrotate: function(x: number, disp: number): number
+	rshift: function(x: number, disp: number): number
+end
+
+declare const bit32: Bit32Lib

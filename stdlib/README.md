@@ -10,6 +10,7 @@ available and nothing needs to be installed next to it.
 | `string.d.lunar`, `table.d.lunar`, `math.d.lunar`, `utf8.d.lunar` | those libraries |
 | `os.d.lunar`, `io.d.lunar`, `coroutine.d.lunar`, `debug.d.lunar`, `package.d.lunar` | those libraries |
 | `lua54.d.lunar` | what only Lua 5.4 has (`warn`); loaded for `--target lua54` |
+| `lua53.d.lunar` | what only Lua 5.3 has (`bit32`, from 5.2); loaded for `--target lua53` |
 
 A function that returns `nil` (and a message) only to report failure, such
 as `io.open`, `os.getenv` or `math.type`, is declared with what it returns on

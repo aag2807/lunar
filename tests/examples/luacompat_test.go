@@ -14,7 +14,8 @@ import (
 // compiles each file unchanged as a .lunar script, and runs both the
 // original and the compiled Lua: the compile must report nothing at all,
 // and the two must print the same. A file whose first line says
-// "-- needs: lua54" is compiled for lua54 only and run under Lua 5.4 only.
+// "-- needs: lua54" is compiled for lua54 only and run under Lua 5.4 only;
+// one saying "-- needs: lua53", for lua53 and under Lua 5.3 only.
 //
 // Lunar is Lua with types, so any Lua script is meant to pass through; to
 // add one, drop it in tests/luacompat.
@@ -32,8 +33,9 @@ func TestPlainLuaCompilesUnchanged(t *testing.T) {
 		}
 		name := strings.TrimSuffix(filepath.Base(file), ".lua")
 		needs54 := strings.HasPrefix(string(src), "-- needs: lua54")
+		needs53 := strings.HasPrefix(string(src), "-- needs: lua53")
 		for _, target := range []string{"lua53", "lua54"} {
-			if needs54 && target == "lua53" {
+			if needs54 && target == "lua53" || needs53 && target == "lua54" {
 				continue
 			}
 			t.Run(name+"/"+target, func(t *testing.T) {
@@ -60,7 +62,7 @@ func TestPlainLuaCompilesUnchanged(t *testing.T) {
 				}
 				compiled := filepath.Join(dir, "out", name+".lua")
 				for _, lua := range interps {
-					if (target == "lua54" || needs54) && lua.version != "5.4" {
+					if (target == "lua54" || needs54) && lua.version != "5.4" || needs53 && lua.version != "5.3" {
 						continue
 					}
 					want, wantErr := runLua(t, lua.path, corpus, file)

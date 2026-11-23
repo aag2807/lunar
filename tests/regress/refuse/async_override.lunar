@@ -1,0 +1,22 @@
+-- An async method cannot replace a plain one: code written against the
+-- parent calls it without await.
+class Actor
+    move(): void
+    end
+end
+
+class Enemy extends Actor
+    async move(): void
+    end
+end
+-- error: 'move' is async in 'Enemy' but not in 'Actor': callers of 'Actor' would call it without await
+
+interface Mover
+    step(): void
+end
+
+class Walker implements Mover
+    async step(): void
+    end
+end
+-- error: 'step' is async in 'Walker' but not in 'Mover': callers of 'Mover' would call it without await

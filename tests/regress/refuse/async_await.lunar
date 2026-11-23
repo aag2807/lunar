@@ -1,0 +1,27 @@
+-- await belongs inside an async function, on a call to an async function.
+declare async function wait(seconds: number): void
+
+function update(): void
+    await wait(1)
+end
+-- error: 'await' is only allowed inside an async function; 'update' is not async
+
+async function outer(): void
+    local f = function()
+        await wait(1)
+    end
+end
+-- error: 'await' is only allowed inside an async function; the function it is in is not async
+
+await wait(1)
+-- error: 'await' is only allowed inside an async function; the top level of a file is not async
+
+async function plainCalls(): void
+    local function plain(): number
+        return 1
+    end
+    local n = await plain()
+    local m = await n
+end
+-- error: 'await' needs a call to an async function: 'plain' does not pause
+-- error: 'await' needs a call to an async function: 'n' is not a call

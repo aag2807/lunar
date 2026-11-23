@@ -1,0 +1,35 @@
+-- Constructors, accessors, metamethods and generic-for iterators run
+-- without a call that could await them, so they cannot be async.
+class Box
+    constructor()
+    end
+
+    async __add(other: Box): Box
+        return self
+    end
+end
+-- error: a metamethod cannot be async: '__add' runs without a call that could await it
+
+class Crate
+    async constructor()
+    end
+end
+-- error: a constructor cannot be async
+
+class Jar
+    async get size(): number
+        return 1
+    end
+
+    async set size(value: number)
+    end
+end
+-- error: a getter cannot be async
+-- error: a setter cannot be async
+
+async function nextItem(): number
+    return 1
+end
+for x in nextItem do
+end
+-- error: an async function cannot be the iterator of a generic 'for'

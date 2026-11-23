@@ -75,6 +75,7 @@ module.exports = grammar({
     [$.spread_element, $.vararg_expression],
     [$.parameter, $.vararg_expression],
     [$.parameter, $._prefix_expression],
+    [$._identifier_like, $.function_type],
   ],
 
   rules: {
@@ -110,6 +111,8 @@ module.exports = grammar({
         $.import_statement,
         $.export_statement,
         $.decorated_declaration,
+        // await wait(1) on its own: it pauses, then carries on.
+        $.await_expression,
       ),
 
     block: ($) => repeat1($._statement),
@@ -119,7 +122,7 @@ module.exports = grammar({
         seq(
           choice('local', 'const', seq('local', 'const')),
           choice(
-            seq('function', field('name', $.identifier), $._function_rest),
+            seq(optional('async'), 'function', field('name', $.identifier), $._function_rest),
             seq(
               commaSep1($.typed_name),
               optional(seq('=', commaSep1($._expression))),
@@ -316,11 +319,14 @@ module.exports = grammar({
       ),
 
     constructor_definition: ($) =>
-      seq(optional('function'), 'constructor', field('parameters', $.parameters), optional($.block), 'end'),
+      seq(optional('async'), optional('function'), 'constructor', field('parameters', $.parameters), optional($.block), 'end'),
 
+    // async on a constructor or accessor is the compiler's to refuse, with
+    // its own message; parsing it keeps the rest of the class whole.
     getter: ($) =>
       seq(
         repeat($.modifier),
+        optional('async'),
         'get',
         field('name', $._identifier_like),
         '(',
@@ -333,6 +339,7 @@ module.exports = grammar({
     setter: ($) =>
       seq(
         repeat($.modifier),
+        optional('async'),
         'set',
         field('name', $._identifier_like),
         field('parameters', $.parameters),
@@ -366,7 +373,9 @@ module.exports = grammar({
       ),
 
     method_signature: ($) =>
-      prec.right(seq(repeat($.modifier), field('name', $._identifier_like), $._function_signature, optional(','))),
+      prec.right(
+        seq(repeat($.modifier), optional('async'), field('name', $._identifier_like), $._function_signature, optional(',')),
+      ),
 
     enum_declaration: ($) =>
       seq('enum', field('name', $.identifier), repeat($.enum_member), 'end'),
@@ -392,7 +401,7 @@ module.exports = grammar({
       seq(
         'declare',
         choice(
-          prec.right(seq('function', field('name', $.function_name), $._function_signature, optional('end'))),
+          prec.right(seq(optional('async'), 'function', field('name', $.function_name), $._function_signature, optional('end'))),
           $.declare_class,
           $.interface_declaration,
           $.enum_declaration,
@@ -427,7 +436,7 @@ module.exports = grammar({
         field('name', $.identifier),
         repeat(
           choice(
-            prec.right(seq('function', field('name', $.identifier), $._function_signature)),
+            prec.right(seq(optional('async'), 'function', field('name', $.identifier), $._function_signature)),
             seq(choice('local', 'const'), commaSep1($.typed_name)),
             $.interface_declaration,
             $.enum_declaration,
@@ -725,8 +734,12 @@ module.exports = grammar({
     function_type: ($) =>
       prec.right(
         choice(
-          seq('function', optional(seq(optional($.type_parameters), $.parameters, optional(seq(':', $._return_type))))),
-          seq(optional($.type_parameters), $.parameters, '=>', $._return_type),
+          seq(
+            optional('async'),
+            'function',
+            optional(seq(optional($.type_parameters), $.parameters, optional(seq(':', $._return_type)))),
+          ),
+          seq(optional('async'), optional($.type_parameters), $.parameters, '=>', $._return_type),
         ),
       ),
 

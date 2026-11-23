@@ -316,6 +316,15 @@ type Checker struct {
 
 	// Current function return type (for checking return statements)
 	currentFunctionReturnType Type
+	// fn is the function being checked, for async: whether it is async,
+	// and its name for messages. Outside every function it is zero.
+	fn fnContext
+	// fnExprName names the function checkFunctionExpression is about to
+	// check, when it was declared with one (function M.f()).
+	fnExprName string
+	// awaited records the calls written after await, and what checking
+	// each found it calls.
+	awaited map[*ast.CallExpression]calleeKind
 	// inferringReturn is set while checking a function that declared no return
 	// type; the return statements found are collected in inferredReturns.
 	inferringReturn bool
@@ -873,6 +882,7 @@ func (c *Checker) hoistedSignature(fn *ast.FunctionDeclaration) *FunctionType {
 		HasRestParameter: hasRestParam,
 		OptionalParams:   optionalParams,
 		Untyped:          untypedSignature(fn.Parameters, fn.ReturnType, len(fn.GenericParams)),
+		Async:            fn.IsAsync,
 	}
 }
 
@@ -1228,6 +1238,7 @@ func (c *Checker) registerClass(node *ast.ClassDeclaration) {
 			GenericParams:    methodGenerics,
 			OptionalParams:   optionalParams,
 			HasRestParameter: hasRestParam,
+			Async:            method.IsAsync,
 		}
 		methodName := method.Name.Value
 
@@ -1517,6 +1528,7 @@ func (c *Checker) buildInterface(node *ast.InterfaceDeclaration, name string, sy
 			ParamNames:       parameterNames(method.Parameters),
 			OptionalParams:   optional,
 			HasRestParameter: hasRest,
+			Async:            method.IsAsync,
 		}
 		setMemberSym(&interfaceType.MemberSyms, method.Name.Value,
 			c.memberSym(method.Name.Token, SymMethod, interfaceType.Methods[method.Name.Value], interfaceType.Name))
@@ -1831,6 +1843,7 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 			GenericParams:    []string{}, // Function types in annotations are not generic
 			OptionalParams:   optionalParams,
 			HasRestParameter: hasRestParam,
+			Async:            node.IsAsync,
 		}
 
 	case *ast.GenericType:
@@ -2833,6 +2846,7 @@ func (c *Checker) substituteFunctionType(funcType *FunctionType, substitutions m
 		HasRestParameter: funcType.HasRestParameter,
 		ParamNames:       funcType.ParamNames,
 		Untyped:          funcType.Untyped,
+		Async:            funcType.Async,
 	}
 }
 
@@ -3129,7 +3143,7 @@ func (c *Checker) checkVariableDeclaration(node *ast.VariableDeclaration) {
 			// literal is checked field by field, naming the field at fault.
 			if i < len(node.Values) && c.reportLiteralFields(node.Values[i], declaredType) {
 				// reported
-			} else if !valueType.IsAssignableTo(declaredType) {
+			} else if !valueType.IsAssignableTo(declaredType) && !c.reportAsyncMismatch(valueType, declaredType, node.Token) {
 				c.addError(
 					fmt.Sprintf("Cannot assign type '%s' to variable '%s' of type '%s'",
 						valueType.String(), name.Value, declaredType.String()),
@@ -3275,9 +3289,6 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		c.checkFieldFunction(node)
 		return
 	}
-	if node.IsAsync {
-		c.addErrorCode("not-supported", "'async' functions are not supported: nothing would resume them. Use coroutine.create and coroutine.resume", node.Token)
-	}
 
 	// Check decorators
 	for _, decorator := range node.Decorators {
@@ -3363,6 +3374,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 		HasRestParameter: hasRestParam,
 		OptionalParams:   optionalParams,
 		Untyped:          untypedSignature(node.Parameters, node.ReturnType, len(node.GenericParams)),
+		Async:            node.IsAsync,
 	}
 
 	// Restore environment and register function
@@ -3475,6 +3487,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	prevReturnType := c.currentFunctionReturnType
 	c.env = NewEnclosedEnvironment(c.env)
 	c.currentFunctionReturnType = returnType
+	leaveFunction := c.enterFunction(node.IsAsync, node.Name.Value)
 
 	// Without an annotation the return type is inferred from the body rather
 	// than forced to void, so plain Lua functions keep working; one that
@@ -3530,6 +3543,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	c.inferringReturn, c.inferredReturns = prevInferring, prevInferred
 	c.env = prevEnv
 	c.currentFunctionReturnType = prevReturnType
+	leaveFunction()
 }
 
 // parameterNames lists a signature's parameter names, for signature help.
@@ -4393,6 +4407,9 @@ func (c *Checker) checkForStatement(node *ast.ForStatement) {
 		for _, e := range node.IteratorRest {
 			c.checkExpression(e)
 		}
+		if asyncCallee(iterType) != nil {
+			c.addErrorCode("async", "an async function cannot be the iterator of a generic 'for': the loop calls it without await", node.Token)
+		}
 		c.env = NewEnclosedEnvironment(prevEnv)
 		// A call yielding (f, s, c) iterates with f.
 		if tuple, ok := iterType.(*TupleType); ok && len(tuple.Elements) > 0 {
@@ -4707,7 +4724,7 @@ func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target as
 		return
 	}
 
-	if !valueType.IsAssignableTo(targetType) {
+	if !valueType.IsAssignableTo(targetType) && !c.reportAsyncMismatch(valueType, targetType, node.Token) {
 		c.addError(
 			fmt.Sprintf("Cannot assign type '%s' to type '%s'",
 				valueType.String(), targetType.String()),
@@ -4796,6 +4813,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		c.env = NewEnclosedEnvironment(prevEnv)
 		c.currentFunctionReturnType = Void
 		c.currentClass = classType
+		leaveFunction := c.enterFunction(false, "constructor")
 
 		// Add generic type parameters to scope
 		for _, genericParam := range node.GenericParams {
@@ -4847,6 +4865,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		c.scopeEnd = prevScopeEnd
 		c.inConstructor = prevInConstructor
 
+		leaveFunction()
 		c.env = prevEnv
 		c.currentFunctionReturnType = prevReturnType
 		c.currentClass = prevClass
@@ -4875,6 +4894,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 			returnType = c.resolveTypeExpression(method.ReturnType)
 		}
 		c.currentFunctionReturnType = returnType
+		leaveFunction := c.enterFunction(method.IsAsync, method.Name.Value)
 
 		// Add self to scope
 		c.env.Set("self", classType)
@@ -4899,6 +4919,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		c.checkBlockStatement(method.Body)
 		c.scopeEnd = prevScopeEnd
 
+		leaveFunction()
 		c.env = prevEnv
 		c.currentFunctionReturnType = prevReturnType
 		c.currentClass = prevClass
@@ -4923,6 +4944,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 			returnType = c.resolveTypeExpression(getter.ReturnType)
 		}
 		c.currentFunctionReturnType = returnType
+		leaveFunction := c.enterFunction(false, getter.Name.Value)
 
 		// Add self to scope
 		c.env.Set("self", classType)
@@ -4931,6 +4953,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		// Check getter body
 		c.checkBlockStatement(getter.Body)
 
+		leaveFunction()
 		c.env = prevEnv
 		c.currentFunctionReturnType = prevReturnType
 		c.currentClass = prevClass
@@ -4951,6 +4974,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 
 		// Setters return void
 		c.currentFunctionReturnType = Void
+		leaveFunction := c.enterFunction(false, setter.Name.Value)
 
 		// Add self to scope
 		c.env.Set("self", classType)
@@ -4968,10 +4992,13 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		// Check setter body
 		c.checkBlockStatement(setter.Body)
 
+		leaveFunction()
 		c.env = prevEnv
 		c.currentFunctionReturnType = prevReturnType
 		c.currentClass = prevClass
 	}
+
+	c.checkAsyncClassMembers(node)
 
 	// Check if class implements all interface methods
 	for _, impl := range classType.Implements {
@@ -4991,6 +5018,15 @@ func (c *Checker) checkClassImplementsInterface(class *ClassType, iface *Interfa
 				token,
 			)
 			continue
+		}
+
+		// An async method cannot stand for a plain one; a plain one may
+		// stand for an async one.
+		c.checkAsyncOverride(methodName, classMethod, class.Name, ifaceMethod, iface.Name, token)
+		if classMethod.Async != ifaceMethod.Async {
+			same := *classMethod
+			same.Async = ifaceMethod.Async
+			classMethod = &same
 		}
 
 		// Check method signature matches
@@ -5093,6 +5129,7 @@ func (c *Checker) checkMethodOverrides(class *ClassType, parent *ClassType, toke
 		if !hasParentMethod {
 			continue // Not an override, skip
 		}
+		c.checkAsyncOverride(methodName, childMethod, class.Name, parentMethod, parent.Name, token)
 
 		// Validate parameter count
 		if len(childMethod.Parameters) != len(parentMethod.Parameters) {
@@ -5232,8 +5269,12 @@ func (c *Checker) checkFieldFunction(node *ast.FunctionDeclaration) {
 		self := &ast.Parameter{Token: selfTok, Name: &ast.Identifier{Token: selfTok, Value: "self"}}
 		params = append([]*ast.Parameter{self}, params...)
 	}
+	c.fnExprName = exprText(node.Receiver) + "." + node.Name.Value
+	if node.IsMethod {
+		c.fnExprName = exprText(node.Receiver) + ":" + node.Name.Value
+	}
 	fnType := c.checkFunctionExpression(&ast.FunctionExpression{Token: node.Token, GenericParams: node.GenericParams,
-		Parameters: params, ReturnType: node.ReturnType, Body: node.Body})
+		Parameters: params, ReturnType: node.ReturnType, Body: node.Body, IsAsync: node.IsAsync})
 	if fn, ok := fnType.(*FunctionType); ok {
 		fn.ParamNames = parameterNames(params)
 	}
@@ -5758,6 +5799,9 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 	// Set currentFunctionReturnType for return statement checking
 	prevReturnType := c.currentFunctionReturnType
 	c.currentFunctionReturnType = returnType
+	name := c.fnExprName
+	c.fnExprName = ""
+	leaveFunction := c.enterFunction(node.IsAsync, name)
 
 	// Type check the body
 	prevScopeEnd := c.scopeEnd
@@ -5777,6 +5821,7 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 	// Restore environment and return type
 	c.env = prevEnv
 	c.currentFunctionReturnType = prevReturnType
+	leaveFunction()
 
 	// Return the function type
 	return &FunctionType{
@@ -5786,6 +5831,7 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 		HasRestParameter: hasRestParam,
 		OptionalParams:   optionalParams,
 		Untyped:          untypedSignature(node.Parameters, node.ReturnType, 0),
+		Async:            node.IsAsync,
 	}
 }
 
@@ -6159,6 +6205,7 @@ func (c *Checker) checkInfixExpression(node *ast.InfixExpression) Type {
 func (c *Checker) checkCallExpression(node *ast.CallExpression) Type {
 	c.callee = node.Function
 	funcType := c.checkExpression(node.Function)
+	c.checkAsyncCall(node, funcType)
 
 	// setmetatable(Stack, mt) can give Stack __call, __add and the rest.
 	if ident, ok := node.Function.(*ast.Identifier); ok && ident.Value == "setmetatable" && len(node.Arguments) > 0 {
@@ -6321,7 +6368,7 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 			if c.reportLiteralFields(arg, fnType.Parameters[i]) {
 				continue
 			}
-			if !argType.IsAssignableTo(fnType.Parameters[i]) {
+			if !argType.IsAssignableTo(fnType.Parameters[i]) && !c.reportAsyncMismatch(argType, fnType.Parameters[i], node.Token) {
 				c.addError(
 					fmt.Sprintf("Argument %d: cannot pass type '%s' to parameter of type '%s'",
 						i+1, argType.String(), fnType.Parameters[i].String()),
@@ -6551,7 +6598,7 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 			if _, isNil := argType.(*NilType); isNil && i < len(fnType.OptionalParams) && fnType.OptionalParams[i] {
 				continue
 			}
-			if !argType.IsAssignableTo(paramType) {
+			if !argType.IsAssignableTo(paramType) && !c.reportAsyncMismatch(argType, paramType, node.Token) {
 				c.addError(
 					fmt.Sprintf("Argument %d: cannot pass type '%s' to parameter of type '%s'",
 						i+1, argType.String(), paramType.String()),
@@ -7428,35 +7475,6 @@ func (c *Checker) applyConstToTableLiteral(node *ast.TableLiteral) Type {
 	return c.checkTableLiteral(node)
 }
 
-// checkAwaitExpression checks an await expression
-func (c *Checker) checkAwaitExpression(node *ast.AwaitExpression) Type {
-	c.addErrorCode("not-supported", "'await' is not supported: use coroutine.yield inside a coroutine", node.Token)
-
-	// Check the expression being awaited
-	exprType := c.checkExpression(node.Expression)
-
-	// If it's a PromiseType, unwrap it
-	if promiseType, ok := exprType.(*PromiseType); ok {
-		return promiseType.ResolveType
-	}
-
-	// If it's a function that returns a Promise, unwrap the return type
-	if funcType, ok := exprType.(*FunctionType); ok {
-		if promiseType, ok := funcType.ReturnType.(*PromiseType); ok {
-			return promiseType.ResolveType
-		}
-	}
-
-	// Allow awaiting Any type
-	if exprType.Equals(Any) {
-		return Any
-	}
-
-	// Warn if awaiting a non-promise type (but still allow it)
-	// In Lua, you can coroutine.yield anything
-	return exprType
-}
-
 func (c *Checker) checkTemplateLiteral(node *ast.TemplateLiteral) Type {
 	// Type check all expressions inside ${...}
 	for _, expr := range node.Expressions {
@@ -7706,6 +7724,7 @@ func (c *Checker) buildNamespace(node *ast.NamespaceDeclaration) *NamespaceType 
 				HasRestParameter: hasRest,
 				ParamNames:       parameterNames(s.Parameters),
 				Untyped:          untypedSignature(s.Parameters, s.ReturnType, len(s.GenericParams)),
+				Async:            s.IsAsync,
 			}
 			nsType.Members[s.Name.Value] = funcType
 			setMemberSym(&nsType.MemberSyms, s.Name.Value, c.defineMember(s.Name.Token, SymFunction, funcType, nsName))
@@ -8035,6 +8054,7 @@ func (c *Checker) declaredFunctionType(decl *ast.FunctionDeclaration) *FunctionT
 		ReturnType:       returnType,
 		GenericParams:    []string{}, // Ambient function declarations are not generic
 		HasRestParameter: hasRestParam,
+		Async:            decl.IsAsync,
 	}
 
 	return funcType
@@ -8134,6 +8154,7 @@ func (c *Checker) getFunctionType(stmt *ast.FunctionDeclaration) Type {
 		Parameters:    paramTypes,
 		ReturnType:    returnType,
 		GenericParams: genericParams,
+		Async:         stmt.IsAsync,
 	}
 }
 

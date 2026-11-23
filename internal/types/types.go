@@ -486,6 +486,9 @@ type FunctionType struct {
 	// Untyped is set for a function written with no annotations, as plain
 	// Lua is: its calls are not held to its parameter count.
 	Untyped bool
+	// Async is set for a function that may pause the coroutine it runs in:
+	// it is called only with await, inside another async function.
+	Async bool
 }
 
 func (t *FunctionType) String() string {
@@ -493,14 +496,18 @@ func (t *FunctionType) String() string {
 	for i, p := range t.Parameters {
 		params[i] = p.String()
 	}
-	return fmt.Sprintf("(%s) -> %s", strings.Join(params, ", "), t.ReturnType.String())
+	async := ""
+	if t.Async {
+		async = "async "
+	}
+	return fmt.Sprintf("%s(%s) -> %s", async, strings.Join(params, ", "), t.ReturnType.String())
 }
 func (t *FunctionType) Equals(other Type) bool {
 	otherFunc, ok := other.(*FunctionType)
 	if !ok {
 		return false
 	}
-	if len(t.Parameters) != len(otherFunc.Parameters) {
+	if len(t.Parameters) != len(otherFunc.Parameters) || t.Async != otherFunc.Async {
 		return false
 	}
 	for i, param := range t.Parameters {
@@ -525,6 +532,12 @@ func (t *FunctionType) IsAssignableTo(other Type) bool {
 	}
 	// Functions are contravariant in parameters and covariant in return type
 	if otherFunc, ok := other.(*FunctionType); ok {
+		// Whatever calls a plain function would not await an async one,
+		// which could then pause outside a coroutine. A plain function
+		// does fit where an async one is expected.
+		if t.Async && !otherFunc.Async {
+			return false
+		}
 		if len(t.Parameters) != len(otherFunc.Parameters) {
 			return false
 		}
@@ -1436,34 +1449,6 @@ func (t *NamespaceType) GetMember(name string) (Type, bool) {
 		return member, true
 	}
 	return nil, false
-}
-
-// PromiseType represents the return type of an async function (like Lua coroutine)
-type PromiseType struct {
-	ResolveType Type // The type that the promise resolves to
-}
-
-func (t *PromiseType) String() string {
-	return fmt.Sprintf("Promise<%s>", t.ResolveType.String())
-}
-func (t *PromiseType) Equals(other Type) bool {
-	otherPromise, ok := other.(*PromiseType)
-	if !ok {
-		return false
-	}
-	return t.ResolveType.Equals(otherPromise.ResolveType)
-}
-func (t *PromiseType) IsAssignableTo(other Type) bool {
-	if t.Equals(other) {
-		return true
-	}
-	if _, isAny := other.(*AnyType); isAny {
-		return true
-	}
-	if _, isUnknown := other.(*UnknownType); isUnknown {
-		return true
-	}
-	return false
 }
 
 // EnumType represents an enum type

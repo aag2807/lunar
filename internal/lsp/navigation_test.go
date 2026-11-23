@@ -137,6 +137,30 @@ func TestHoverDetails(t *testing.T) {
 	}
 }
 
+// Hover and signature help say a function is async: it must be awaited.
+func TestHoverShowsAsync(t *testing.T) {
+	text := "declare async function wait(seconds: number): void\n" +
+		"class Guard\n    async walk(n: number): void\n        await wait(n)\n    end\nend\n" +
+		"async function patrol(g: Guard): void\n    await g.walk(1)\n    await wait(2)\nend\n"
+	root := writeTree(t, map[string]string{"lunar.config.json": `{"outDir": "../out"}`, "a.lunar": text})
+	c := newClientAt(t, root)
+	c.open("a.lunar")
+	hover := func(word string, nth, delta int) string {
+		h := decode[Hover](t, c.request("textDocument/hover", map[string]any{
+			"textDocument": map[string]any{"uri": c.uri("a.lunar")}, "position": at(t, text, word, nth, delta)}))
+		return h.Contents.Value
+	}
+	if got := hover("wait(2)", 1, 0); !strings.Contains(got, "async function wait(seconds: number): void") {
+		t.Errorf("wait: %q", got)
+	}
+	if got := hover("walk(1)", 1, 0); !strings.Contains(got, "(method) async Guard.walk(n: number): void") {
+		t.Errorf("walk: %q", got)
+	}
+	if got := hover("patrol", 1, 0); !strings.Contains(got, "async function patrol(g: Guard): void") {
+		t.Errorf("patrol: %q", got)
+	}
+}
+
 // Outline entries span their whole declaration, so an editor can tell
 // which one holds the cursor, and a class lists its constructor.
 func TestDocumentSymbolRanges(t *testing.T) {

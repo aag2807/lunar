@@ -160,6 +160,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.FUNCTION, p.parseFunctionExpression)
 	p.registerPrefix(lexer.ELLIPSIS, p.parseSpreadExpression)
 	p.registerPrefix(lexer.AWAIT, p.parseAwaitOrName)
+	p.registerPrefix(lexer.ASYNC, p.parseAsyncOrName)
 	p.registerPrefix(lexer.MATCH, p.parseMatchOrName)
 	// Every other keyword of Lunar's own is a name in an expression.
 	for _, t := range lexer.SoftKeywordTypes() {
@@ -323,6 +324,34 @@ func (p *Parser) parseAwaitOrName() ast.Expression {
 	// `local u = await` then a new line is the name.
 	if p.peekTokenIsIdentOrContextual() && p.peekToken.Line == p.curToken.EndLine {
 		return p.parseAwaitExpression()
+	}
+	return p.parseIdentifier()
+}
+
+// parseAsyncOrName parses an async function expression, `async function()
+// ... end` or `async (x) => ...`, or the name async anywhere else: async(x),
+// async (x) and async then a new line are what they are in Lua.
+func (p *Parser) parseAsyncOrName() ast.Expression {
+	sameLine := p.peekToken.Line == p.curToken.EndLine
+	if sameLine && p.peekTokenIs(lexer.FUNCTION) {
+		p.nextToken()
+		exp := p.parseFunctionExpression()
+		if fe, ok := exp.(*ast.FunctionExpression); ok && fe != nil {
+			fe.IsAsync = true
+		}
+		return exp
+	}
+	if sameLine && p.peekTokenIs(lexer.LPAREN) {
+		state := p.SaveState()
+		errorsBefore := len(p.errors)
+		p.nextToken()
+		// An arrow function's token is its '('; (function() end) is not one.
+		if fe, ok := p.parseGroupedExpression().(*ast.FunctionExpression); ok && fe != nil &&
+			fe.Token.Type == lexer.LPAREN && len(p.errors) == errorsBefore {
+			fe.IsAsync = true
+			return fe
+		}
+		p.RestoreState(state)
 	}
 	return p.parseIdentifier()
 }
@@ -1484,6 +1513,8 @@ func (p *Parser) parseType() ast.Expression {
 	case lexer.FUNCTION:
 		// function(params): Return
 		return p.parseKeywordFunctionType()
+	case lexer.ASYNC:
+		return p.parseAsyncFunctionType()
 	case lexer.LBRACE:
 		// Mapped type: { [K in T]: U }
 		return p.parseMappedType()
@@ -1671,6 +1702,8 @@ func (p *Parser) parseSimpleType() ast.Expression {
 		return p.parseTypeSuffix(p.parseTupleOrFunctionType())
 	case lexer.FUNCTION:
 		return p.parseKeywordFunctionType()
+	case lexer.ASYNC:
+		return p.parseAsyncFunctionType()
 	case lexer.TABLE:
 		return p.parseTableType()
 	case lexer.IDENT, lexer.STRING_TYPE, lexer.NUMBER_TYPE, lexer.BOOLEAN, lexer.ANY, lexer.VOID, lexer.NIL, lexer.NEVER, lexer.UNKNOWN:
@@ -1684,6 +1717,27 @@ func (p *Parser) parseSimpleType() ast.Expression {
 // by declaration files, as in `insert: function(t: any, pos: number?): void`.
 // Without it the whole annotation was skipped and the member silently became
 // 'any' -- and the parameter names leaked out as extra interface properties.
+// parseAsyncFunctionType parses `async function(...): T` and
+// `async (...) => T`, starting on 'async'.
+func (p *Parser) parseAsyncFunctionType() ast.Expression {
+	asyncTok := p.curToken
+	var t ast.Expression
+	switch {
+	case p.peekTokenIs(lexer.FUNCTION):
+		p.nextToken()
+		t = p.parseKeywordFunctionType()
+	case p.peekTokenIs(lexer.LPAREN):
+		p.nextToken()
+		t = p.parseTypeSuffix(p.parseTupleOrFunctionType())
+	}
+	if ft, ok := t.(*ast.FunctionType); ok && ft != nil {
+		ft.IsAsync = true
+		return ft
+	}
+	p.addError("'async' must be followed by a function type: async function(...): T", asyncTok)
+	return t
+}
+
 func (p *Parser) parseKeywordFunctionType() ast.Expression {
 	funcType := &ast.FunctionType{
 		Token: p.curToken, // 'function'
@@ -1915,6 +1969,8 @@ func (p *Parser) parseSimpleTypeWithSuffixes(skipOptional bool) ast.Expression {
 		return p.parseTypeSuffix(p.parseTupleOrFunctionType())
 	case lexer.FUNCTION:
 		return p.parseKeywordFunctionType()
+	case lexer.ASYNC:
+		return p.parseAsyncFunctionType()
 	case lexer.TABLE:
 		typeExpr = p.parseTableType()
 	case lexer.KEYOF:
@@ -2071,6 +2127,8 @@ func (p *Parser) parseNonUnionIntersectionType(skipOptional bool) ast.Expression
 	case lexer.FUNCTION:
 		// function(params): Return, e.g. `string | function(s: string): string`
 		return p.parseKeywordFunctionType()
+	case lexer.ASYNC:
+		return p.parseAsyncFunctionType()
 	case lexer.TABLE:
 		// table<K, V>
 		typeExpr = p.parseTableType()
@@ -2630,48 +2688,19 @@ func (p *Parser) parseFunctionSignature() *ast.FunctionDeclaration {
 	return fd
 }
 
-// parseAsyncFunctionDeclaration parses async function declarations
+// parseAsyncFunctionDeclaration parses `async function ...`: any form of
+// function declaration (async function M.f(), async function o:m()),
+// starting on 'async'.
 func (p *Parser) parseAsyncFunctionDeclaration() *ast.FunctionDeclaration {
-	// Current token is 'async'
 	asyncToken := p.curToken
-
-	// Expect 'function' keyword
 	if !p.expectPeek(lexer.FUNCTION) {
 		return nil
 	}
-
-	fd := &ast.FunctionDeclaration{
-		Token:   asyncToken,
-		IsAsync: true,
+	fd := p.parseFunctionDeclaration()
+	if fd != nil {
+		fd.IsAsync = true
+		fd.Token = asyncToken
 	}
-
-	// Parse function name - allows context-aware keywords
-	if !p.expectPeekIdentOrContextual() {
-		return nil
-	}
-	fd.Name = p.parseIdentifierOrContextual()
-
-	// Parse generic parameters if present: <T, U>
-	if p.peekTokenIs(lexer.LT) {
-		p.nextToken() // consume <
-		fd.GenericParams = p.parseGenericParameters()
-	}
-
-	// Parse the parameters
-	if !p.expectPeek(lexer.LPAREN) {
-		return nil
-	}
-	fd.Parameters = p.parseFunctionParameters()
-
-	// Parse optional return type (a `::label::` first in the body is not one)
-	if p.peekStartsAnnotation() {
-		p.nextToken() // consume :
-		p.nextToken() // move onto return type
-		fd.ReturnType = p.parseType()
-	}
-
-	fd.Body = p.parseBlockStatement()
-
 	return fd
 }
 
@@ -2898,6 +2927,20 @@ func (p *Parser) parseStatementNode() ast.Statement {
 				fn.IsLocal = true
 			}
 			return fn
+		}
+		// local async function f(), with function on async's line; local
+		// async then a new line declares a local named async.
+		if p.curTokenIs(lexer.LOCAL) && p.peekTokenIs(lexer.ASYNC) {
+			state := p.SaveState()
+			p.nextToken() // move onto 'async'
+			if p.peekTokenIs(lexer.FUNCTION) && p.peekToken.Line == p.curToken.EndLine {
+				fn := p.parseAsyncFunctionDeclaration()
+				if fn != nil {
+					fn.IsLocal = true
+				}
+				return fn
+			}
+			p.RestoreState(state)
 		}
 		// const is a name in Lua: const(1) is a call, unless it is
 		// destructuring, const (a, b) = ...
@@ -3404,19 +3447,25 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 			p.nextToken()
 		}
 		methodsBefore := len(class.Methods)
+		gettersBefore, settersBefore, constructorBefore := len(class.Getters), len(class.Setters), class.Constructor
 
 		// Track modifiers for current member
 		isStatic := false
 		isAbstract := false
 		isReadonly := false
+		var asyncTok *lexer.Token
 		visibility := "public" // default visibility
 
 		// Parse modifiers. A modifier word followed by ':', '=', '?', '(' or
 		// '<' is the member's own name instead: static: boolean, public().
 		for (p.curToken.Type == lexer.PUBLIC || p.curToken.Type == lexer.PRIVATE || p.curToken.Type == lexer.PROTECTED ||
-			p.curToken.Type == lexer.STATIC || p.curToken.Type == lexer.ABSTRACT || p.curToken.Type == lexer.READONLY) &&
+			p.curToken.Type == lexer.STATIC || p.curToken.Type == lexer.ABSTRACT || p.curToken.Type == lexer.READONLY ||
+			p.curToken.Type == lexer.ASYNC) &&
 			!p.peekStartsMember() {
 			switch p.curToken.Type {
+			case lexer.ASYNC:
+				tok := p.curToken
+				asyncTok = &tok
 			case lexer.PUBLIC, lexer.PRIVATE, lexer.PROTECTED:
 				visibility = p.curToken.Literal
 			case lexer.STATIC:
@@ -3520,6 +3569,20 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 
 		default:
 			p.nextToken()
+		}
+		if asyncTok != nil {
+			switch {
+			case len(class.Methods) > methodsBefore:
+				class.Methods[len(class.Methods)-1].IsAsync = true
+			case class.Constructor != constructorBefore && class.Constructor != nil:
+				class.Constructor.IsAsync = true
+			case len(class.Getters) > gettersBefore:
+				class.Getters[len(class.Getters)-1].IsAsync = true
+			case len(class.Setters) > settersBefore:
+				class.Setters[len(class.Setters)-1].IsAsync = true
+			default:
+				p.addError("only methods can be async", *asyncTok)
+			}
 		}
 		if len(memberDecorators) > 0 {
 			if len(class.Methods) > methodsBefore {
@@ -3803,6 +3866,19 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 			if prop != nil {
 				prop.IsReadonly = true
 				iface.Properties = append(iface.Properties, prop)
+			}
+		} else if p.curTokenIs(lexer.ASYNC) && !p.peekStartsMember() {
+			// async step(): void
+			asyncTok := p.curToken
+			p.nextToken()
+			if p.curTokenIsIdentOrContextual() && (p.peekTokenIs(lexer.LPAREN) || p.peekTokenIs(lexer.LT)) {
+				if method := p.parseInterfaceMethod(); method != nil {
+					method.IsAsync = true
+					iface.Methods = append(iface.Methods, method)
+				}
+			} else {
+				p.addError("only methods can be async", asyncTok)
+				p.nextToken()
 			}
 		} else if p.curTokenIs(lexer.STATIC) {
 			// Handle static keyword
@@ -4204,13 +4280,21 @@ func (p *Parser) parseDeclareStatement() *ast.DeclareStatement {
 	switch p.curToken.Type {
 	case lexer.CONST, lexer.LOCAL:
 		declareStmt.Declaration = p.parseVariableDeclaration()
-	case lexer.FUNCTION:
+	case lexer.FUNCTION, lexer.ASYNC:
 		// A declaration has no body. The trailing 'end' that older
 		// declaration files write is accepted but not required, so leaving
 		// it out can no longer swallow the declarations that follow.
+		asyncTok, isAsync := p.curToken, p.curTokenIs(lexer.ASYNC)
+		if isAsync && !p.expectPeek(lexer.FUNCTION) {
+			return nil
+		}
 		fd := p.parseFunctionSignature()
 		if fd == nil {
 			return nil
+		}
+		if isAsync {
+			fd.IsAsync = true
+			fd.Token = asyncTok
 		}
 		p.bodilessDeclare = fd
 		if p.peekTokenIs(lexer.END) {

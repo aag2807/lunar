@@ -32,7 +32,10 @@ its fields, and a typed parameter must be passed.
 Only Lua's own reserved words are reserved. The words Lunar adds (`class`,
 `match`, `from`, `import`, `get`, `set`, `number`, ...) are names wherever a
 declaration of Lunar's cannot begin: `local from = 1`, `t.class`,
-`s:match("%d")`, `function f(public)`.
+`s:match("%d")`, `function f(public)`. `async(x)`, `await(x)` and `local
+async` are Lua's too; only `await f()` and `local async function f()`, all
+on one line, are Lunar's (in plain Lua they would be two statements side by
+side).
 
 ```lunar
 local function sum(...: number): number
@@ -407,6 +410,71 @@ declare interface Clock
 end
 ```
 
+## Async functions
+
+An async function may pause the coroutine it runs in and carry on later:
+wait two seconds, or wait for a texture to load. Lunar checks that it is
+only ever called with `await`, inside another async function, so nothing
+pauses outside a coroutine, where Lua would stop with "attempt to yield from
+outside a coroutine". `async` and `await` are erased, as types are: `await
+wait(2)` is `wait(2)` in the Lua. Lua's coroutines pause from any depth of
+calls, so the Lua needs nothing else.
+
+Something has to resume a paused coroutine: in a game, the engine, once a
+frame. The functions that really pause are the engine's, declared `async`;
+they yield the running coroutine, and the engine resumes it with their
+results (see [Scripts that pause](ENGINE_INTEGRATION.md#scripts-that-pause)).
+
+```lunar
+interface Texture
+    width: number
+end
+
+declare async function wait(seconds: number): void
+declare async function loadTexture(path: string): Texture
+declare function spawn(f: async function(): void): void
+
+class Door
+    open: boolean = false
+
+    async slide(): void
+        await wait(0.5)
+        self.open = true
+    end
+end
+
+async function cutscene(door: Door): void
+    local banner = await loadTexture("banner.png")
+    print(banner.width)
+    await door.slide()
+    await wait(2)
+end
+
+spawn(async function()
+    await cutscene(Door())
+end)
+```
+
+- `async` goes before any function: `async function f`, `local async
+  function f`, `async function M.f`, a method (`async slide()`), `declare
+  async function`, `async function() ... end` and `async (x) => ...`.
+  Function types say it too: `async function(): void`, `async () => void`.
+- An async function is called with `await`, and `await` is written only in an
+  async function. A plain function nested in an async one is not async.
+- `await f()` has the type of `f`'s results, all of them: `local a, b = await
+  f()`.
+- An async function cannot go where a plain function is expected, such as a
+  `table.sort` comparator or a parameter typed `function(): void`: whatever
+  calls it there would not await it. A plain function may go where an async
+  one is expected, as to `spawn` above.
+- An async method cannot override or implement a plain one. Constructors,
+  getters, setters, metamethods and the iterator of a generic `for` cannot be
+  async: nothing awaits them.
+- A value typed `any`, or a bare `function`, may hold either, unchecked.
+
+[`examples/features/25_async.lunar`](../examples/features/25_async.lunar)
+runs a small scheduler of its own.
+
 ## Decorators and namespaces
 
 A decorator is a function that receives a function or class and returns its
@@ -458,7 +526,6 @@ local s: string = raw as string
 
 - **Implementation overloads**: two bodies for one function name are an
   error; Lua keeps only the last.
-- **`async`/`await`**: refused; use `coroutine.create` and `coroutine.resume`.
 - **Targets other than Lua 5.3 and 5.4.**
 - **Code nested more than 200 levels deep** (blocks, or expressions inside
   expressions): Lua refuses to load it ("C stack overflow"), so Lunar

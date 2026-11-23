@@ -1,0 +1,17 @@
+-- An async function cannot go where a plain function is expected: whatever
+-- calls it there would not await it, and it would pause outside a coroutine.
+async function less(a: number, b: number): boolean
+    return a < b
+end
+local xs = { 3, 1, 2 }
+table.sort(xs, less)
+-- error: an async function cannot be used where a plain function is expected
+
+local cb: function(): void = async function() end
+-- error: an async function cannot be used where a plain function is expected
+
+local function each(f: (n: number) => void): void
+    f(1)
+end
+each(async (n: number) => print(n))
+-- error: an async function cannot be used where a plain function is expected

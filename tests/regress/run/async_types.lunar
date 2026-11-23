@@ -1,0 +1,40 @@
+-- await f() has the type of f's results, all of them.
+async function count(): number
+    return 3
+end
+
+async function pair(): (number, string)
+    return 1, "a"
+end
+
+async function relay(): (number, string)
+    return await pair()
+end
+
+local async function main(): void
+    local n: number = await count()
+    local a, b = await relay()
+    local s: string = `${await count()}`
+    local sum = 1 + await count()
+    assert(n == 3 and a == 1 and b == "a" and s == "3" and sum == 4)
+    local t: number[] = { await count(), await count() }
+    assert(#t == 2)
+end
+
+-- A plain function may go where an async one is expected.
+local function run(f: async function(): void): void
+    local co = coroutine.create(f)
+    local ok, err = coroutine.resume(co)
+    assert(ok, err)
+    assert(coroutine.status(co) == "dead")
+end
+run(main)
+local ran = false
+run(function()
+    ran = true
+end)
+assert(ran)
+
+-- An async function value of type any is not checked.
+local anything: any = count
+assert(coroutine.wrap(function() return anything() end)() == 3)

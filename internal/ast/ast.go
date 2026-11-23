@@ -544,6 +544,7 @@ type FunctionType struct {
 	Token      lexer.Token // '(' or first param token
 	Parameters []*Parameter
 	ReturnType Expression
+	IsAsync    bool // async function(...): T, async (...) => T
 }
 
 func (ft *FunctionType) expressionNode()      {}
@@ -553,7 +554,11 @@ func (ft *FunctionType) String() string {
 	for _, p := range ft.Parameters {
 		paramStrs = append(paramStrs, p.String())
 	}
-	return fmt.Sprintf("(%s) => %s", strings.Join(paramStrs, ", "), ft.ReturnType.String())
+	async := ""
+	if ft.IsAsync {
+		async = "async "
+	}
+	return fmt.Sprintf("%s(%s) => %s", async, strings.Join(paramStrs, ", "), ft.ReturnType.String())
 }
 
 type GenericType struct {
@@ -647,7 +652,7 @@ type FunctionDeclaration struct {
 	Body          *BlockStatement
 	IsStatic      bool         // static method (when used in class)
 	IsAbstract    bool         // abstract method (when used in class)
-	IsAsync       bool         // async function (returns Promise/coroutine)
+	IsAsync       bool         // async function: may pause the coroutine it runs in
 	IsLocal       bool         // declared as `local function f()`
 	Visibility    string       // visibility modifier: public, private, protected (when used in class)
 	Decorators    []*Decorator // decorators applied to the function
@@ -1036,6 +1041,7 @@ type GetterDeclaration struct {
 	Name       *Identifier // property name
 	ReturnType Expression  // return type
 	Body       *BlockStatement
+	IsAsync    bool // written async, which a getter cannot be
 }
 
 func (gd *GetterDeclaration) statementNode()       {}
@@ -1063,6 +1069,7 @@ type SetterDeclaration struct {
 	Name       *Identifier // property name
 	Parameter  *Parameter  // the setter parameter
 	Body       *BlockStatement
+	IsAsync    bool // written async, which a setter cannot be
 }
 
 func (sd *SetterDeclaration) statementNode()       {}
@@ -1183,6 +1190,7 @@ type ConstructorDeclaration struct {
 	Token      lexer.Token // 'constructor' token
 	Parameters []*Parameter
 	Body       *BlockStatement
+	IsAsync    bool // written async, which a constructor cannot be
 }
 
 func (cd *ConstructorDeclaration) statementNode()       {}
@@ -1260,6 +1268,7 @@ type InterfaceMethod struct {
 	Parameters    []*Parameter
 	ReturnType    Expression
 	IsStatic      bool // static method
+	IsAsync       bool // async step(): void
 }
 
 func (im *InterfaceMethod) statementNode()       {}

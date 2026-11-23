@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `async`/`await`, for scripts that pause (wait two seconds, wait for a
+  texture): an async function may only be called with `await`, inside
+  another async function, so nothing pauses outside a coroutine. They are
+  checked, then erased: the Lua is plain coroutines, which the engine
+  resumes. `async` goes before any function form, method, declaration or
+  function type. An async function cannot go where a plain one is expected
+  (a `table.sort` comparator), override or implement a plain method, or be a
+  constructor, accessor, metamethod or `for` iterator. Errors have the code
+  `async`; `not-supported` is no longer reported. Hover and signature help
+  say `async`. `docs/ENGINE_INTEGRATION.md` describes what the engine does to
+  resume scripts.
+
 ## 2.0.0 (2026-11-22)
 
 Lunar is now one compiler that does one thing, tested by running the Lua it

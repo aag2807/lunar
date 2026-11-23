@@ -84,14 +84,17 @@ unsupported.
   Missing field(s) 'hp' required by 'Enemy'
   ```
 - `Enemy.new(3)` and `Enemy(3)` both construct
+- `async`/`await` for scripts that pause: an async function is only ever
+  called with `await`, inside another async function, so nothing pauses
+  outside a coroutine. Both are erased: the Lua is plain coroutines, which
+  the engine resumes ([Scripts that pause](docs/ENGINE_INTEGRATION.md#scripts-that-pause))
 - Declarations: `declare function` (the trailing `end` is optional),
   `declare class`, `declare namespace`, interfaces that refer to themselves
   or to each other
 
 ## Not supported
 
-Function overloading is for `declare function` only, and `async`/`await` are
-refused with an error: Lua's coroutines do that job. Targets other than Lua
+Function overloading is for `declare function` only. Targets other than Lua
 5.3 and 5.4 (LuaJIT, 5.1, 5.2) are not supported. Code nested more than 200
 levels deep is refused, as Lua itself refuses to load it. Destructuring a
 table's fields and nested template strings are not supported yet; the full
@@ -181,7 +184,7 @@ Lines and columns are 1-based, columns count bytes, and the end is just past
 the span. `file` is absolute; errors in the bundled declarations read
 `<stdlib>/lua.d.lunar`. `code` names the kind of error and does not change
 between releases: `syntax`, `type`, `field-type`, `unknown-field`,
-`missing-fields`, `unknown-member`, `duplicate-function`, `not-supported`,
+`missing-fields`, `unknown-member`, `duplicate-function`, `async`,
 `usage`, `io`, `internal`. In watch mode every rebuild ends with a summary.
 
 Exit codes: `0` compiled, `1` the source has errors and nothing was written

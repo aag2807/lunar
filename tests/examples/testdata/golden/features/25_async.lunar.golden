@@ -1,0 +1,122 @@
+local Guard
+
+local frame = 0
+
+local tasks = {}
+
+local log = {}
+
+function wait(frames)
+    coroutine.yield("wait", frames)
+end
+
+function fetch(name)
+    local text, size = coroutine.yield("fetch", name)
+    return text, size
+end
+
+function spawn(f)
+    table.insert(tasks, {co = coroutine.create(f), wake = frame, results = {}, done = false})
+end
+
+local function resume(task)
+    local ok, why, arg = coroutine.resume(task.co, table.unpack(task.results))
+    assert(ok, why)
+    task.results = {}
+    if coroutine.status(task.co) == "dead" then
+        task.done = true
+    elseif why == "wait" then
+        task.wake = frame + arg
+    elseif why == "fetch" then
+        task.wake = frame + 1
+        task.results = {"text of " .. arg, # arg}
+    end
+end
+
+function update()
+    frame = frame + 1
+    for _, task in ipairs(tasks) do
+        if not task.done and task.wake <= frame then
+            resume(task)
+        end
+    end
+end
+
+Guard = {}
+Guard.__index = Guard
+
+function Guard.__init(self, name)
+    self.steps = 0
+    self.doneAt = 0
+    self.name = name
+end
+function Guard.new(...)
+    local self = setmetatable({}, Guard)
+    Guard.__init(self, ...)
+    return self
+end
+
+function Guard:walk(frames)
+    table.insert(log, self.name .. " walks")
+    wait(frames)
+    self.steps = self.steps + frames
+end
+
+function Guard:patrol()
+    self:walk(2)
+    self:walk(1)
+    table.insert(log, self.name .. " done")
+    self.doneAt = frame
+end
+
+
+local guard = Guard.new("ann")
+
+spawn(function()
+    guard:patrol()
+end)
+
+local loaded = ""
+
+local loadedSize = 0
+
+spawn(function()
+    local text, size = fetch("map")
+    loaded = text
+    loadedSize = size
+end)
+
+local function twice(n)
+    wait(1)
+    return n * 2
+end
+
+local quad = function(n)
+    return twice(twice(n))
+end
+
+local quadrupled = 0
+
+spawn(function()
+    quadrupled = quad(3)
+end)
+
+spawn(function()
+    table.insert(log, "plain")
+end)
+
+for _ = 1, 10 do
+    update()
+end
+
+assert(guard.steps == 3)
+
+assert(guard.doneAt == 4, guard.doneAt)
+
+assert(loaded == "text of map" and loadedSize == 3)
+
+assert(quadrupled == 12)
+
+assert(table.concat(log, ", ") == "ann walks, plain, ann walks, ann done", table.concat(log, ", "))
+
+print("async ok")

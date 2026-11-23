@@ -1,0 +1,122 @@
+-- Async functions: code that pauses, checked by the compiler.
+--
+-- An async function may pause the coroutine it runs in. Lunar checks that
+-- it is only ever called with `await`, inside another async function, so
+-- nothing pauses outside a coroutine; `async` and `await` leave no trace in
+-- the Lua. Something must resume the coroutines: in a game that is the
+-- engine, once a frame; here it is the small scheduler below.
+
+interface Task
+    co: any
+    wake: number
+    results: any[]
+    done: boolean
+end
+
+local frame = 0
+local tasks: Task[] = {}
+local log: string[] = {}
+
+-- The functions that pause yield the running coroutine, saying why; the
+-- scheduler resumes them later, with their results.
+async function wait(frames: number): void
+    coroutine.yield("wait", frames)
+end
+
+async function fetch(name: string): (string, number)
+    local text, size = coroutine.yield("fetch", name)
+    return text, size
+end
+
+-- spawn starts an async function; a plain function may be passed too.
+function spawn(f: async function(): void): void
+    table.insert(tasks, { co = coroutine.create(f), wake = frame, results = {}, done = false })
+end
+
+local function resume(task: Task): void
+    local ok, why, arg = coroutine.resume(task.co, table.unpack(task.results))
+    assert(ok, why)
+    task.results = {}
+    if coroutine.status(task.co) == "dead" then
+        task.done = true
+    elseif why == "wait" then
+        task.wake = frame + arg
+    elseif why == "fetch" then
+        -- A fetch finishes on the next frame, with the text and its size.
+        task.wake = frame + 1
+        task.results = { "text of " .. arg, #arg }
+    end
+end
+
+function update(): void
+    frame = frame + 1
+    for _, task in ipairs(tasks) do
+        if not task.done and task.wake <= frame then
+            resume(task)
+        end
+    end
+end
+
+-- Async methods, called with '.' or ':'.
+class Guard
+    name: string
+    steps: number = 0
+    doneAt: number = 0
+
+    constructor(name: string)
+        self.name = name
+    end
+
+    async walk(frames: number): void
+        table.insert(log, self.name .. " walks")
+        await wait(frames)
+        self.steps = self.steps + frames
+    end
+
+    async patrol(): void
+        await self.walk(2)
+        await self:walk(1)
+        table.insert(log, self.name .. " done")
+        self.doneAt = frame
+    end
+end
+
+local guard = Guard("ann")
+spawn(async function()
+    await guard.patrol()
+end)
+
+-- A result that arrives later, with all of its results.
+local loaded = ""
+local loadedSize = 0
+spawn(async function()
+    local text, size = await fetch("map")
+    loaded = text
+    loadedSize = size
+end)
+
+-- A local async function, and an async arrow.
+local async function twice(n: number): number
+    await wait(1)
+    return n * 2
+end
+local quad = async (n: number) => await twice(await twice(n))
+local quadrupled = 0
+spawn(async function()
+    quadrupled = await quad(3)
+end)
+
+spawn(function()
+    table.insert(log, "plain")
+end)
+
+for _ = 1, 10 do
+    update()
+end
+
+assert(guard.steps == 3)
+assert(guard.doneAt == 4, guard.doneAt)
+assert(loaded == "text of map" and loadedSize == 3)
+assert(quadrupled == 12)
+assert(table.concat(log, ", ") == "ann walks, plain, ann walks, ann done", table.concat(log, ", "))
+print("async ok")

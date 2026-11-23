@@ -38,6 +38,7 @@ func TestSignatureHelpCases(t *testing.T) {
 		{"Class.new", head + "Enemy.new(3, ", "new(", 1},
 		{"a generic call", head + "firstOf<number>(", "firstOf(", 0},
 		{"a string method through ':'", head + "local s = \"abc\"\nprint(s:sub(1, ", "sub(", 1},
+		{"an async function says so", "declare async function wait(seconds: number): void\nasync function f(): void\n    await wait(", "async wait(seconds: number): void", 0},
 	}
 	for _, tc := range cases {
 		label, active := sigAt(t, tc.text)

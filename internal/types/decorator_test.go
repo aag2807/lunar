@@ -3,7 +3,6 @@ package types
 import (
 	"lunar/internal/lexer"
 	"lunar/internal/parser"
-	"strings"
 	"testing"
 )
 
@@ -218,7 +217,7 @@ async function fetchData(): string
 	return "data"
 end
 `)
-	if len(errs) != 1 || !strings.Contains(errs[0].Message, "'async' functions are not supported") {
+	if len(errs) != 0 {
 		t.Fatalf("got %v", messages(errs))
 	}
 }

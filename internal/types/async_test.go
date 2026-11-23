@@ -1,40 +1,48 @@
 package types
 
 import (
-	"strings"
 	"testing"
+
+	"lunar/internal/lexer"
+	"lunar/internal/parser"
 )
 
-// async/await compiled to a coroutine that nothing ever resumed, so the body
-// never ran. Until there is a scheduler to run them, both are refused.
-func TestAsyncFunctionIsRefused(t *testing.T) {
+// Every async mistake has the code tools rely on, "async".
+func TestAsyncErrorsHaveTheirCode(t *testing.T) {
 	errs := checkSource(t, `
-async function fetchData(): string
-	return "data"
+declare async function wait(seconds: number): void
+function update(): void
+	wait(1)
+	await wait(1)
 end
+local cb: function(): void = async function() end
 `)
-	if len(errs) != 1 || !strings.Contains(errs[0].Message, "'async' functions are not supported") ||
-		!strings.Contains(errs[0].Message, "coroutine") {
+	if len(errs) != 3 {
 		t.Fatalf("got %v", messages(errs))
+	}
+	for _, e := range errs {
+		if e.Code != "async" {
+			t.Errorf("%q has code %q", e.Message, e.Code)
+		}
 	}
 }
 
-func TestAwaitIsRefused(t *testing.T) {
-	errs := checkSource(t, `
-function load(): any
-	return nil
+// An async function's type says so, and keeps it through assignment.
+func TestAsyncFunctionType(t *testing.T) {
+	p := parser.New(lexer.New(`
+async function fetch(name: string): number
+	return 1
 end
-function run(): void
-	local x = await load()
-end
-`)
-	found := false
-	for _, e := range errs {
-		if strings.Contains(e.Message, "'await' is not supported") {
-			found = true
-		}
-	}
-	if !found {
+local f = fetch
+`))
+	statements := p.Parse()
+	c := NewChecker("../../stdlib")
+	errs := c.Check(statements)
+	if len(errs) != 0 {
 		t.Fatalf("got %v", messages(errs))
+	}
+	f, _ := c.GetEnv().Get("f")
+	if got := f.String(); got != "async (string) -> number" {
+		t.Errorf("type of f: %s", got)
 	}
 }

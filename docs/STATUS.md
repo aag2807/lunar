@@ -4,7 +4,7 @@ What works, what does not, and how each is known. A line under **Works**
 names the test that proves it; CI runs every one on Linux (Lua 5.3 and 5.4)
 and Windows. Update this file in the same commit as the change it describes.
 
-Last updated for **2.0.0**.
+Last updated for **2.0.0**, plus what `CHANGELOG.md` lists as unreleased.
 
 ## Compiler
 
@@ -20,6 +20,7 @@ Last updated for **2.0.0**.
 | Typed Lunar: classes (inheritance, abstract, statics, accessors, metamethods), interfaces, enums, generics (constraints, methods, generic classes), `match`, namespaces, modules, utility types, default parameters, narrowing | `TestRegressions` (32 programs run under Lua, 20 that must be refused), `TestExamplesRun` (41 examples), `TestGoldenOutput` |
 | Every LANGUAGE.md example compiles (and those that run, run) | `TestDocumentationExamplesCompile` |
 | Code nested more than Lua's 200 levels is refused with Lua's reason; deep code compiles in linear time | `TestNestingLimit`, `TestNestedShapesCompileQuickly` |
+| `async`/`await`: an async function is only called with `await`, inside an async function; both are erased to plain coroutines | `examples/features/25_async.lunar` (a scheduler, run under 5.3 and 5.4), `tests/regress/run/async_types.lunar`, `tests/regress/refuse/async_*.lunar` (one per rule), `TestImportedAsyncFunctionMustBeAwaited`, `TestHoverShowsAsync` |
 | No crash on half-written code | `test/integration` (incomplete code), `internal/parser/hang_test.go`, `internal/project/robust_test.go` |
 | Fuzzing: 1,500 generated programs, against this release, printed the same compiled and not | the differential fuzzer (run by hand, not in CI) |
 
@@ -28,7 +29,6 @@ Last updated for **2.0.0**.
 | What | Notes |
 |---|---|
 | Targets other than Lua 5.3 and 5.4 (LuaJIT, 5.1, 5.2) | refused |
-| `async`/`await` | refused with an error; use coroutines |
 | Two implementations of one function (overloads) | refused; overloads belong in `declare` |
 | Destructuring a table's fields | only a call's results: `local (a, b) = f()` |
 | Nested template strings, a backtick inside `${...}` | refused |
@@ -91,4 +91,5 @@ Last updated for **2.0.0**.
 | Zed itself not tried | the extension builds; it has not been run inside Zed |
 | VS Code extension not published to the marketplace | install the `.vsix` CI builds |
 | The tree-sitter grammar reads `as` at the start of a line as an assertion on the line before | highlighting only; the compiler reads it right |
+| The tree-sitter grammar reads `await(x)`, a call of a function named `await`, as an await | highlighting only; the compiler reads it as Lua does |
 | The VS Code problem matcher keeps JSON escapes in messages | the language server's diagnostics have none |

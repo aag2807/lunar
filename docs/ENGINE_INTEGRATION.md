@@ -113,7 +113,8 @@ line (in watch mode, every rebuild does):
 | `module-name` | A file name `require` cannot express (a `.` in a folder or file name), or two modules with one `require` name (`a.lunar` and `a/init.lunar`). |
 | `output-conflict` | A `.lua` script and a `.lunar` one would write the same file. |
 | `data-file` | A data file uses something a state with no libraries lacks. |
-| `not-supported` | `async`/`await`. |
+| `async` | An async function called without `await`, `await` outside an async function, or an async function where a plain one is expected ([Scripts that pause](#scripts-that-pause)). |
+| `not-supported` | No longer reported: 2.0 refused `async`/`await` with it. |
 | `usage` | Bad flags or arguments. |
 | `config` | A bad or missing `lunar.config.json`, or no `outDir`. |
 | `io` | Reading or writing failed. |
@@ -248,6 +249,74 @@ call is emitted as written: write `obj:method()` to pass `self`.
   when they do not.
 - A method has to be called where it is named: `local f = e.hit` is an
   error, since `f(3)` would pass 3 as `self`. Wrap it in a function instead.
+
+## Scripts that pause
+
+A script that waits (`wait(2)`), or waits for something the engine finishes
+on a later frame (a texture that streams in), runs in a coroutine that the
+engine resumes. Lunar checks that it only pauses where it can: a function
+declared `async` may pause, and is only ever called with `await` inside
+another async function. `async` and `await` are erased, so the engine sees
+plain Lua coroutines.
+
+```lunar
+-- engine.d.lunar
+interface Texture
+    width: number
+end
+
+declare async function wait(seconds: number): void
+declare async function loadTexture(path: string): Texture
+declare function spawn(f: async function(): void): void
+```
+
+What the engine does:
+
+- An `async` function of the engine's pauses by yielding the running
+  coroutine: `coroutine.yield(...)` from Lua, `lua_yield` or `lua_yieldk`
+  from C. When it is done, the engine resumes that coroutine (`lua_resume`)
+  with the function's results: what it passes is what `await
+  loadTexture(path)` returns.
+- `spawn` (whatever the engine calls it) runs a script function in a new
+  coroutine: `lua_newthread`, then `lua_resume`. It may be given an async
+  function or a plain one.
+- A callback that may pause (`async function on_enter()`) is started the
+  same way, on a new thread with `lua_resume`, never with `lua_call` or
+  `lua_pcall`, which a yield cannot cross.
+- C that calls back into Lua that may pause uses `lua_callk` or
+  `lua_pcallk` with a continuation, as for any yield across C.
+
+A scheduler in Lua takes a few lines, and is enough to test scripts without
+the engine (this one knows only `wait`):
+
+```lua
+local tasks = {}
+local now = 0
+
+function wait(seconds)
+    coroutine.yield(now + seconds)
+end
+
+function spawn(f)
+    tasks[#tasks + 1] = { co = coroutine.create(f), at = now }
+end
+
+function update(dt) -- once a frame
+    now = now + dt
+    for i = #tasks, 1, -1 do
+        local t = tasks[i]
+        if t.at <= now then
+            local ok, at = coroutine.resume(t.co)
+            assert(ok, at)
+            if coroutine.status(t.co) == "dead" then
+                table.remove(tasks, i)
+            else
+                t.at = at
+            end
+        end
+    end
+end
+```
 
 ## Editors
 

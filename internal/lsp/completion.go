@@ -580,7 +580,7 @@ scan:
 
 	name := strings.Join(chain, ".")
 	params := paramLabels(fn)
-	info := SignatureInformation{Label: signature(name, fn)}
+	info := SignatureInformation{Label: asyncPrefix(fn) + signature(name, fn)}
 	for _, p := range params {
 		info.Parameters = append(info.Parameters, ParameterInformation{Label: p})
 	}

@@ -34,3 +34,13 @@ print(f(1, 2, 3, 4, 5, 6, 7, 8))
 for from, to in ipairs({ 10, 20 }) do
     print(from, to)
 end
+
+-- async and await stay names, called or not.
+local function async(x) return x + 1 end
+local function await(x) return x * 2 end
+print(async(1), await(2), async (3), await (4))
+local w = { async = 5, await = 6 }
+print(w.async, w.await, w["async"])
+local r = async
+(7)
+print(r)

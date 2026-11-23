@@ -143,11 +143,11 @@ func describe(sym *types.Symbol) string {
 	switch sym.Kind {
 	case types.SymFunction:
 		if fn, ok := sym.Type.(*types.FunctionType); ok {
-			return "function " + signature(qualified, fn)
+			return asyncPrefix(fn) + "function " + signature(qualified, fn)
 		}
 	case types.SymMethod:
 		if fn, ok := sym.Type.(*types.FunctionType); ok {
-			return "(method) " + signature(qualified, fn)
+			return "(method) " + asyncPrefix(fn) + signature(qualified, fn)
 		}
 	case types.SymProperty:
 		if sym.Optional {
@@ -171,6 +171,14 @@ func typeString(t types.Type) string {
 		return "any"
 	}
 	return t.String()
+}
+
+// asyncPrefix is "async " for an async function: it must be awaited.
+func asyncPrefix(fn *types.FunctionType) string {
+	if fn.Async {
+		return "async "
+	}
+	return ""
 }
 
 // signature renders "name(a: number, b?: string): string".

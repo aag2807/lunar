@@ -234,3 +234,116 @@ end
               (identifier))))
         (type_identifier
           (identifier))))))
+
+================================================================================
+Async functions and await
+================================================================================
+
+declare async function wait(seconds: number): void
+declare function spawn(f: async function(): void, g: async () => void): void
+interface Mover
+    async step(n: number): void
+end
+local async function twice(n: number): number
+    await wait(1)
+    return n * 2
+end
+local quad = async (n: number) => await twice(n)
+spawn(async function() await wait(1) end)
+print(async(1))
+
+--------------------------------------------------------------------------------
+
+(chunk
+  (declare_statement
+    (function_name
+      (identifier))
+    (parameters
+      (parameter
+        (identifier)
+        (type_identifier
+          (identifier))))
+    (type_identifier
+      (identifier)))
+  (declare_statement
+    (function_name
+      (identifier))
+    (parameters
+      (parameter
+        (identifier)
+        (function_type
+          (parameters)
+          (type_identifier
+            (identifier))))
+      (parameter
+        (identifier)
+        (function_type
+          (parameters)
+          (type_identifier
+            (identifier)))))
+    (type_identifier
+      (identifier)))
+  (interface_declaration
+    (identifier)
+    (method_signature
+      (identifier)
+      (parameters
+        (parameter
+          (identifier)
+          (type_identifier
+            (identifier))))
+      (type_identifier
+        (identifier))))
+  (variable_declaration
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (type_identifier
+          (identifier))))
+    (type_identifier
+      (identifier))
+    (block
+      (await_expression
+        (call
+          (identifier)
+          (arguments
+            (number))))
+      (return_statement
+        (binary_expression
+          (identifier)
+          (number)))))
+  (variable_declaration
+    (typed_name
+      (identifier))
+    (arrow_function
+      (parameters
+        (parameter
+          (identifier)
+          (type_identifier
+            (identifier))))
+      (await_expression
+        (call
+          (identifier)
+          (arguments
+            (identifier))))))
+  (call_statement
+    (call
+      (identifier)
+      (arguments
+        (function_definition
+          (parameters)
+          (block
+            (await_expression
+              (call
+                (identifier)
+                (arguments
+                  (number)))))))))
+  (call_statement
+    (call
+      (identifier)
+      (arguments
+        (call
+          (identifier)
+          (arguments
+            (number)))))))

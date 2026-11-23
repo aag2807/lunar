@@ -1,0 +1,33 @@
+-- An async function can pause, so it is called only with await, inside an
+-- async function.
+declare async function wait(seconds: number): void
+
+async function patrol(): void
+    wait(1)
+end
+-- error: 'wait' can pause: write 'await wait(...)'
+
+function update(dt: number): void
+    wait(dt)
+end
+-- error: 'wait' can pause, so it can only be called with 'await' inside an async function; 'update' is not async
+
+local cb = function()
+    wait(1)
+end
+-- error: 'wait' can pause, so it can only be called with 'await' inside an async function; the function it is in is not async
+
+wait(2)
+-- error: 'wait' can pause, so it can only be called with 'await' inside an async function; the top level of a file is not async
+
+class Guard
+    async walk(): void
+    end
+end
+local g = Guard()
+g.walk()
+-- error: 'walk' can pause, so it can only be called with 'await' inside an async function; the top level of a file is not async
+function tick(): void
+    g:walk()
+end
+-- error: 'walk' can pause, so it can only be called with 'await' inside an async function; 'tick' is not async

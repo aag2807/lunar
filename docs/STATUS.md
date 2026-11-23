@@ -19,9 +19,12 @@ Last updated for **2.0.0**, plus what `CHANGELOG.md` lists as unreleased.
 | Untyped Lua is checked as Lua (missing arguments are nil, `{}` takes any key, forward-declared locals, shadowed library names, fields cleared with nil or set to nil first, a function replaced by one with fewer parameters or a vararg wrapper) | `tests/luacompat/idioms2.lua`, `idioms3.lua`, `fields.lua` |
 | Functions defined into a table made with `local M = {}` keep their types: their calls are checked, an async one must be awaited, in importing modules too | `tests/regress/run/empty_table_functions.lunar`, `tests/regress/refuse/empty_table_functions.lunar`, `TestImportedTableAsyncFunctionMustBeAwaited` |
 | A function fits where it is passed more arguments than it takes, and where it is passed fewer if the rest may be left out; a vararg one takes any number | `tests/regress/run/function_params.lunar`, `tests/regress/refuse/function_params.lunar` |
-| Typed Lunar: classes (inheritance, abstract, statics, accessors, metamethods), interfaces, enums, generics (constraints, methods, generic classes), `match`, namespaces, modules, utility types, default parameters, narrowing | `TestRegressions` (37 programs run under Lua, 29 that must be refused), `TestExamplesRun` (41 examples), `TestGoldenOutput` |
+| Typed Lunar: classes (inheritance, abstract, statics, accessors, metamethods), interfaces, enums, generics (constraints, methods, generic classes), `match`, namespaces, modules, utility types, default parameters, narrowing | `TestRegressions` (39 programs run under Lua, 31 that must be refused), `TestExamplesRun` (41 examples), `TestGoldenOutput` |
 | Every LANGUAGE.md example compiles (and those that run, run) | `TestDocumentationExamplesCompile` |
-| Code nested more than Lua's 200 levels is refused with Lua's reason; deep code compiles in linear time | `TestNestingLimit`, `TestNestedShapesCompileQuickly` |
+| Code nested more than Lua's 200 levels is refused with Lua's reason; deep code compiles in linear time, nested `async(` and `match(` calls of Lua functions too | `TestNestingLimit`, `TestNestedShapesCompileQuickly` |
+| Type arguments after `-`, `#`, `not`, `^`, `==` and `await` (`await fetch<T>(p)`) | `tests/regress/run/generic_after_unary.lunar` |
+| An interface's `static` methods (`static async` and `async static` too) are implemented by the class's static methods | `tests/regress/run/interface_static.lunar`, `tests/regress/refuse/interface_static.lunar` |
+| `declare` overloads that mix async and plain are refused | `tests/regress/refuse/async_overloads.lunar` |
 | Class fields' initial values are checked against their types | `tests/regress/refuse/class_field_values.lunar` |
 | `async`/`await`: an async function is only called with `await`, inside an async function; both are erased to plain coroutines | `examples/features/25_async.lunar` (a scheduler, run under 5.3 and 5.4), `tests/regress/run/async_types.lunar`, `tests/regress/refuse/async_*.lunar` (one per rule), `TestImportedAsyncFunctionMustBeAwaited`, `TestHoverShowsAsync` |
 | No crash on half-written code | `test/integration` (incomplete code), `internal/parser/hang_test.go`, `internal/project/robust_test.go` |
@@ -33,6 +36,7 @@ Last updated for **2.0.0**, plus what `CHANGELOG.md` lists as unreleased.
 |---|---|
 | Targets other than Lua 5.3 and 5.4 (LuaJIT, 5.1, 5.2) | refused |
 | Two implementations of one function (overloads) | refused; overloads belong in `declare` |
+| Plain Lua `f(a < b, c > (d))` reads as a generic call, as in TypeScript | refused with "'a' is not a generic type or function"; write `c > d` |
 | Destructuring a table's fields | only a call's results: `local (a, b) = f()` |
 | Nested template strings, a backtick inside `${...}` | refused |
 | `s.f(...)` on a string where the arguments do not fill `string.f`'s parameters is taken as `s:f(...)` | `s.rep("ab", 2)` means `s:rep("ab", 2)`; write `string.rep("ab", 2)` for the plain call |
@@ -85,6 +89,7 @@ Last updated for **2.0.0**, plus what `CHANGELOG.md` lists as unreleased.
 | A request the server fails on is answered with an error, and the server goes on | `TestPanickingRequestIsAnError` |
 | Neovim 0.12: filetype, tree-sitter highlighting, the server attaching, definition, diagnostics | `editors/nvim/test/run.sh` (CI) |
 | Tree-sitter grammar: every `.lunar` file and the Lua corpus parse cleanly | `editors/tree-sitter-lunar/check.sh` (CI) |
+| Tree-sitter reads `await` as the compiler does: Lunar's keyword before a name on the same line, Lua's name in `await(x)`, `await (x)` and `local a = await` | corpus test "await as a name" (`src/scanner.c`) |
 | VS Code extension and Zed extension build and package | CI |
 | VS Code TextMate grammar | checked by hand with vscode-textmate; no test in CI |
 
@@ -95,5 +100,4 @@ Last updated for **2.0.0**, plus what `CHANGELOG.md` lists as unreleased.
 | Zed itself not tried | the extension builds; it has not been run inside Zed |
 | VS Code extension not published to the marketplace | install the `.vsix` CI builds |
 | The tree-sitter grammar reads `as` at the start of a line as an assertion on the line before | highlighting only; the compiler reads it right |
-| The tree-sitter grammar reads `await(x)`, a call of a function named `await`, as an await | highlighting only; the compiler reads it as Lua does |
 | The VS Code problem matcher keeps JSON escapes in messages | the language server's diagnostics have none |

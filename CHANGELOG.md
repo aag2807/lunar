@@ -36,6 +36,19 @@
   fewer parameters (`M.log = function() end`) or a vararg wrapper
   (`function(...)`). A function now fits where it is passed more arguments
   than it takes, as in Lua; it used to need exactly as many parameters.
+- Type arguments after `-`, `#`, `not`, `^`, a comparison or `await` were
+  read as comparisons: `await fetch<Texture>(p)` and `-id<number>(2)` did
+  not compile.
+- An interface's `static` methods could not be implemented: the class's
+  static methods were not looked at. `static async` and `async static`
+  were not accepted in interfaces, nor `static m<T>()`.
+- `declare` overloads that mixed async and plain took async-ness from the
+  first; they are refused now.
+- Nested `match(` calls of a Lua function named `match` took twice as long
+  per level: 20 levels took over a second, 40 would not finish.
+- Tree-sitter read `await(x)` and `await (x)`, calls of a Lua function named
+  `await`, as awaits, and `local a = await` as an await of the next line.
+  The grammar has a small external scanner (`src/scanner.c`) for it.
 
 ## 2.0.0 (2026-11-22)
 

@@ -1,0 +1,23 @@
+-- A static method of an interface is implemented by a static method of the
+-- class, which cannot make it async.
+interface Saver
+    static save(path: string): boolean
+end
+
+class Disk implements Saver
+    static async save(path: string): boolean
+        return true
+    end
+end
+-- error: 'save' is async in 'Disk' but not in 'Saver': callers of 'Saver' would call it without await
+
+interface Named
+    static create(): string
+end
+
+class Person implements Named
+    create(): string
+        return "p"
+    end
+end
+-- error: Class 'Person' does not implement static method 'create' from interface 'Named'

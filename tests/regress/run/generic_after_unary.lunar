@@ -1,0 +1,29 @@
+-- Type arguments belong to the name before them, as a call does, after
+-- -, #, not and await too: -id<number>(2) negates the call.
+local function id<T>(x: T): T
+    return x
+end
+
+local n: number = -id<number>(2)
+assert(n == -2)
+local len: number = #id<string>("abc")
+assert(len == 3)
+local flag: boolean = not id<boolean>(false)
+assert(flag)
+local squared: number = 3 ^ id<number>(2)
+assert(squared == 9)
+
+async function fetch<T>(x: T): T
+    return coroutine.yield(x)
+end
+async function main(): number
+    local v: number = await fetch<number>(5)
+    return v + 1
+end
+local co = coroutine.wrap(main)
+assert(co() == 5)
+assert(co(7) == 8)
+
+-- Comparisons stay comparisons.
+local a, b = 1, 2
+assert(-a < b and not (a > b))

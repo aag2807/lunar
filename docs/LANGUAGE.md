@@ -166,6 +166,12 @@ local double = (x: number) => x * 2
 print(greet("ada"), repeated("ab"), firstOf<number>({ 7, 8 }), nameOf({ name = "n" }), double(4))
 ```
 
+Type arguments belong to the name before them, as a call does:
+`-firstOf<number>(xs)` negates the call's result, and `await
+fetch<Texture>(path)` awaits it. As in TypeScript, `f(a < b, c > (d))`
+reads as a call of `a<b, c>` with `(d)`; in Lua it is two comparisons, so
+plain Lua written that way is refused: drop the parentheses, `c > d`.
+
 A global function may be called before its definition in the file. One name
 has one implementation; overloads are written as `declare function`
 signatures, for APIs implemented elsewhere.
@@ -229,6 +235,9 @@ first: `function(self, target)`. A field typed as a function
 (`onHit: function(n: number): void`) is a plain field, called with `.`, and so
 is any function in a table literal written without a type:
 `local M = { greet = function(name) ... end }` then `M.greet("bob")`.
+
+A class that implements an interface implements its `static` methods
+(`static load(path: string): string`) with static methods of its own.
 
 Interfaces can `extend` others, may name themselves or interfaces declared
 later, and have index signatures: with `[key: string]: number`, every name
@@ -494,6 +503,8 @@ end)
   getters, setters, metamethods and the iterator of a generic `for` cannot be
   async: nothing awaits them.
 - A value typed `any`, or a bare `function`, may hold either, unchecked.
+- The overloads of a `declare function` are all async or none: whether a
+  call is awaited cannot depend on which overload it picks.
 
 [`examples/features/25_async.lunar`](../examples/features/25_async.lunar)
 runs a small scheduler of its own.

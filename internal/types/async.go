@@ -322,3 +322,15 @@ func (c *Checker) checkFieldValues(node *ast.ClassDeclaration, classType *ClassT
 		c.env = prevEnv
 	}
 }
+
+// addOverload adds a declared signature to a function's overloads. They are
+// all async or none: whether a call has to be awaited cannot depend on
+// which overload its arguments pick, nor on which one a value of the
+// function is taken to be.
+func (c *Checker) addOverload(fn, overload *FunctionType, tok lexer.Token) {
+	if overload.Async != fn.Async {
+		c.addErrorCode("async", fmt.Sprintf("'%s' is async in one overload and not in another: declare every overload async, or none",
+			tok.Literal), tok)
+	}
+	fn.Overloads = append(fn.Overloads, overload)
+}

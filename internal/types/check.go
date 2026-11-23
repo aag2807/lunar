@@ -5030,11 +5030,17 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 func (c *Checker) checkClassImplementsInterface(class *ClassType, iface *InterfaceType, token lexer.Token) {
 	// Check all interface methods are implemented
 	for methodName, ifaceMethod := range iface.Methods {
+		// A static method of the interface is one of the class's statics.
+		kind := "method"
 		classMethod, ok := class.GetMethod(methodName)
+		if iface.StaticMethods[methodName] {
+			kind = "static method"
+			classMethod, ok = class.GetStaticMethod(methodName)
+		}
 		if !ok {
 			c.addError(
-				fmt.Sprintf("Class '%s' does not implement method '%s' from interface '%s'",
-					class.Name, methodName, iface.Name),
+				fmt.Sprintf("Class '%s' does not implement %s '%s' from interface '%s'",
+					class.Name, kind, methodName, iface.Name),
 				token,
 			)
 			continue
@@ -7792,7 +7798,7 @@ func (c *Checker) registerAmbientNamespace(node *ast.NamespaceDeclaration) *Name
 			fn := c.declaredFunctionType(s)
 			fn.ParamNames = parameterNames(s.Parameters)
 			if existing, ok := ns.Members[s.Name.Value].(*FunctionType); ok {
-				existing.Overloads = append(existing.Overloads, fn)
+				c.addOverload(existing, fn, s.Name.Token)
 			} else {
 				ns.Members[s.Name.Value] = fn
 				setMemberSym(&ns.MemberSyms, s.Name.Value, c.defineMember(s.Name.Token, SymFunction, fn, ns.Name))
@@ -8139,7 +8145,7 @@ func (c *Checker) checkDeclareStatement(node *ast.DeclareStatement) {
 		if existingType, ok := c.env.Get(decl.Name.Value); ok {
 			if existingFunc, ok := existingType.(*FunctionType); ok {
 				// Add this as an overload to the existing function
-				existingFunc.Overloads = append(existingFunc.Overloads, funcType)
+				c.addOverload(existingFunc, funcType, decl.Name.Token)
 				// Don't re-set in environment, the existing function reference is updated
 			} else {
 				// Name exists but is not a function - just set the new function type

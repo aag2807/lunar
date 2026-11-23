@@ -105,6 +105,11 @@ type Parser struct {
 	ambient bool
 	// matchWith is set once a match expression reached its `with`.
 	matchWith bool
+	// notMatch holds the offsets of `match` tokens already tried as a
+	// match expression and found to be the name: match(match(x)) is then
+	// tried once per level, not once per path to it, which doubled the
+	// time per level.
+	notMatch map[int]bool
 	// depth is how deeply blocks and expressions are nested here, and
 	// maxDepth the deepest seen; tooDeep is set once that was reported.
 	depth, maxDepth int
@@ -306,6 +311,9 @@ func (p *Parser) parseSuperExpression() ast.Expression {
 // parseMatchOrName parses `match x with ...`, or the name match when what
 // follows is not a match expression (match = 1, s:match(...), match(x)).
 func (p *Parser) parseMatchOrName() ast.Expression {
+	if p.notMatch[p.curToken.Offset] {
+		return p.parseIdentifier()
+	}
 	state := p.SaveState()
 	tok := p.curToken
 	errorsBefore := len(p.errors)
@@ -329,6 +337,10 @@ func (p *Parser) parseMatchOrName() ast.Expression {
 		return m
 	}
 	p.RestoreState(state)
+	if p.notMatch == nil {
+		p.notMatch = make(map[int]bool)
+	}
+	p.notMatch[tok.Offset] = true
 	return p.parseIdentifier()
 }
 
@@ -617,7 +629,20 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		return nil
 	}
 
-	for precedence < p.peekPrecedence() {
+	for {
+		// -g<number>(1) and await g<number>(1): type arguments belong to
+		// the name, as a call does, though '<' binds looser than - or
+		// await. Read as comparisons, (-g < number) > (1) would compare a
+		// boolean, which Lua refuses.
+		if p.peekTokenIs(lexer.LT) && precedence >= p.peekPrecedence() {
+			if generic := p.genericOfName(leftExp); generic != nil {
+				leftExp = generic
+				continue
+			}
+		}
+		if precedence >= p.peekPrecedence() {
+			break
+		}
 		// Inside a match arm, a bare '|' starts the next arm.
 		if p.stopAtPipe && p.peekTokenIs(lexer.PIPE) {
 			return leftExp
@@ -1267,6 +1292,24 @@ func (p *Parser) parseTypeAssertion(left ast.Expression) ast.Expression {
 	assertion.TargetType = p.parseType()
 
 	return assertion
+}
+
+// genericOfName reads type arguments after a name or a field (g<number>,
+// M.g<number>) with '<' next, when a call or a member follows them, or
+// returns nil and reads nothing.
+func (p *Parser) genericOfName(left ast.Expression) ast.Expression {
+	switch left.(type) {
+	case *ast.Identifier, *ast.DotExpression:
+	default:
+		return nil
+	}
+	state := p.SaveState()
+	p.nextToken() // '<'
+	if generic := p.tryParseGenericType(left); generic != nil {
+		return generic
+	}
+	p.RestoreState(state)
+	return nil
 }
 
 // parseGenericOrLessThan disambiguates between generic type instantiation and less-than operator
@@ -3945,40 +3988,45 @@ func (p *Parser) parseInterfaceDeclaration() *ast.InterfaceDeclaration {
 				prop.IsReadonly = true
 				iface.Properties = append(iface.Properties, prop)
 			}
-		} else if p.curTokenIs(lexer.ASYNC) && !p.peekStartsMember() {
-			// async step(): void
-			asyncTok := p.curToken
-			p.nextToken()
-			if p.curTokenIsIdentOrContextual() && (p.peekTokenIs(lexer.LPAREN) || p.peekTokenIs(lexer.LT)) {
-				if method := p.parseInterfaceMethod(); method != nil {
-					method.IsAsync = true
-					iface.Methods = append(iface.Methods, method)
+		} else if (p.curTokenIs(lexer.STATIC) || p.curTokenIs(lexer.ASYNC)) && !p.peekStartsMember() {
+			// static and async, in either order, before a member: static
+			// async load(path: string): string. Followed by '(' or ':',
+			// either is the member's name.
+			isStatic := false
+			var asyncTok *lexer.Token
+			modifier := p.curToken
+			for !p.peekStartsMember() {
+				if p.curTokenIs(lexer.STATIC) && !isStatic {
+					isStatic = true
+				} else if p.curTokenIs(lexer.ASYNC) && asyncTok == nil {
+					tok := p.curToken
+					asyncTok = &tok
+				} else {
+					break
 				}
-			} else {
-				p.addError("only methods can be async", asyncTok)
+				modifier = p.curToken
 				p.nextToken()
 			}
-		} else if p.curTokenIs(lexer.STATIC) {
-			// Handle static keyword
-			p.nextToken() // move past 'static'
-			if !p.curTokenIsIdentOrContextual() {
-				p.addError("expected a member after 'static'", p.curToken)
-			}
-			if p.curTokenIsIdentOrContextual() {
-				if p.peekTokenIs(lexer.COLON) || p.peekTokenIs(lexer.QUESTION) {
-					// Static property
-					prop := p.parsePropertyDeclaration()
-					prop.IsStatic = true
-					iface.Properties = append(iface.Properties, prop)
-				} else if p.peekTokenIs(lexer.LPAREN) {
-					// Static method signature
-					method := p.parseInterfaceMethod()
-					method.IsStatic = true
+			switch {
+			case !p.curTokenIsIdentOrContextual():
+				p.addError(fmt.Sprintf("expected a member after '%s'", modifier.Literal), p.curToken)
+			case p.peekTokenIs(lexer.LPAREN) || p.peekTokenIs(lexer.LT):
+				if method := p.parseInterfaceMethod(); method != nil {
+					method.IsStatic = isStatic
+					method.IsAsync = asyncTok != nil
 					iface.Methods = append(iface.Methods, method)
-				} else {
-					p.addError(fmt.Sprintf("unexpected '%s' in an interface", p.curToken.Literal), p.curToken)
-					p.nextToken()
 				}
+			case asyncTok != nil:
+				p.addError("only methods can be async", *asyncTok)
+				p.nextToken()
+			case p.peekTokenIs(lexer.COLON) || p.peekTokenIs(lexer.QUESTION):
+				if prop := p.parsePropertyDeclaration(); prop != nil {
+					prop.IsStatic = isStatic
+					iface.Properties = append(iface.Properties, prop)
+				}
+			default:
+				p.addError(fmt.Sprintf("unexpected '%s' in an interface", p.curToken.Literal), p.curToken)
+				p.nextToken()
 			}
 		} else if p.curTokenIsIdentOrContextual() {
 			if p.peekTokenIs(lexer.COLON) || p.peekTokenIs(lexer.QUESTION) {

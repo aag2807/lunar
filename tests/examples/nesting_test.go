@@ -78,6 +78,8 @@ func TestNestedShapesCompileQuickly(t *testing.T) {
 		// async( and await( are calls of names in Lua; trying each as an
 		// async arrow and parsing it again doubled the time per level.
 		"async_calls.lua": "local function async(f) return f end\nlocal v = " + strings.Repeat("async(function() return ", 40) + "1" + strings.Repeat(" end)", 40) + "\nprint(type(v))\n",
+		// So did match(, tried as `match x with` first.
+		"match_calls.lua": "local function match(x) return x end\nlocal v = " + strings.Repeat("match(", 40) + "1" + strings.Repeat(")", 40) + "\nprint(v)\n",
 	}
 	for name, src := range cases {
 		file := filepath.Join(dir, name)

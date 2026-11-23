@@ -52,6 +52,9 @@ module.exports = grammar({
 
   word: ($) => $.identifier,
 
+  // `await` followed by a name on the same line; see src/scanner.c.
+  externals: ($) => [$._await],
+
   supertypes: ($) => [$._statement, $._expression, $._type],
 
   conflicts: ($) => [
@@ -300,8 +303,9 @@ module.exports = grammar({
     class_method: ($) =>
       seq(
         repeat($.decorator),
+        // static async and async static, as the compiler takes them.
         repeat($.modifier),
-        optional('async'),
+        optional(seq('async', repeat($.modifier))),
         optional('function'),
         field('name', $._identifier_like),
         $._function_rest,
@@ -374,7 +378,13 @@ module.exports = grammar({
 
     method_signature: ($) =>
       prec.right(
-        seq(repeat($.modifier), optional('async'), field('name', $._identifier_like), $._function_signature, optional(',')),
+        seq(
+          repeat($.modifier),
+          optional(seq('async', repeat($.modifier))),
+          field('name', $._identifier_like),
+          $._function_signature,
+          optional(','),
+        ),
       ),
 
     enum_declaration: ($) =>
@@ -625,7 +635,7 @@ module.exports = grammar({
     as_expression: ($) =>
       prec.left(PREC.AS, seq($._expression, 'as', choice('const', $._type))),
 
-    await_expression: ($) => prec.right(PREC.UNARY, seq('await', $._expression)),
+    await_expression: ($) => prec.right(PREC.UNARY, seq(alias($._await, 'await'), $._expression)),
 
     match_expression: ($) =>
       seq('match', field('subject', $._expression), 'with', repeat1($.match_arm), 'end'),

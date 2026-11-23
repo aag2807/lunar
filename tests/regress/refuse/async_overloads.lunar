@@ -1,0 +1,11 @@
+-- A function's overloads are all async or none: whether a call has to be
+-- awaited cannot depend on which overload its arguments pick.
+declare function load(path: string): string
+declare async function load(path: string, wait: boolean): string
+-- error: 'load' is async in one overload and not in another: declare every overload async, or none
+
+declare namespace Assets
+    async function get(id: number): string
+    function get(id: number, cached: boolean): string
+end
+-- error: 'get' is async in one overload and not in another

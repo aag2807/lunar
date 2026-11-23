@@ -1,0 +1,39 @@
+-- An interface's static methods are implemented by the class's static
+-- methods: async ones, generic ones, with static and async in either order.
+interface Loader
+    static load(path: string): string
+    static async fetch(path: string): string
+    async static open(path: string): string
+    static make<T>(x: T): T
+end
+
+class Files implements Loader
+    static load(path: string): string
+        return "loaded " .. path
+    end
+
+    async static fetch(path: string): string
+        return coroutine.yield(path)
+    end
+
+    -- A plain method may stand for an async one.
+    static open(path: string): string
+        return "opened " .. path
+    end
+
+    static make<T>(x: T): T
+        return x
+    end
+end
+
+assert(Files.load("a") == "loaded a")
+assert(Files.open("o") == "opened o")
+assert(Files.make<number>(3) == 3)
+
+async function main(): string
+    local got = await Files.fetch("b")
+    return got .. "!"
+end
+local co = coroutine.wrap(main)
+assert(co() == "b")
+assert(co("c") == "c!")

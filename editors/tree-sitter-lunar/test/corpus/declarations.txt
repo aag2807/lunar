@@ -347,3 +347,37 @@ print(async(1))
           (identifier)
           (arguments
             (number)))))))
+
+================================================================================
+await as a name
+================================================================================
+
+local x = await(1)
+await (y)
+local a = await
+f(await)
+
+--------------------------------------------------------------------------------
+
+(chunk
+  (variable_declaration
+    (typed_name
+      name: (identifier))
+    (call
+      function: (identifier)
+      arguments: (arguments
+        (number))))
+  (call_statement
+    (call
+      function: (identifier)
+      arguments: (arguments
+        (identifier))))
+  (variable_declaration
+    (typed_name
+      name: (identifier))
+    (identifier))
+  (call_statement
+    (call
+      function: (identifier)
+      arguments: (arguments
+        (identifier)))))

@@ -44,3 +44,5 @@ print(w.async, w.await, w["async"])
 local r = async
 (7)
 print(r)
+local named = async function named_fn() return 9 end
+print(named == async, named_fn())

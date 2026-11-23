@@ -75,6 +75,9 @@ func TestNestedShapesCompileQuickly(t *testing.T) {
 	cases := map[string]string{
 		"functions_in_tables.lua": "local t = " + strings.Repeat("{ function() return ", 60) + "1" + strings.Repeat(" end }", 60) + "\nprint(type(t))\n",
 		"generic_calls.lunar":     "local function id<T>(x: T): T\n    return x\nend\nlocal v: number = " + strings.Repeat("id(", 150) + "1" + strings.Repeat(")", 150) + "\nprint(v)\n",
+		// async( and await( are calls of names in Lua; trying each as an
+		// async arrow and parsing it again doubled the time per level.
+		"async_calls.lua": "local function async(f) return f end\nlocal v = " + strings.Repeat("async(function() return ", 40) + "1" + strings.Repeat(" end)", 40) + "\nprint(type(v))\n",
 	}
 	for name, src := range cases {
 		file := filepath.Join(dir, name)

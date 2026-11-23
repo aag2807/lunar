@@ -1,0 +1,10 @@
+-- A field's initial value is checked against the field's type.
+class Settings
+    volume: number = "loud"
+    name: string = missingName
+    static limit: number = true
+    items: number[] = {}
+end
+-- error: Field 'volume' of 'Settings' must be 'number', got 'string'
+-- error: Undefined variable 'missingName'
+-- error: Field 'limit' of 'Settings' must be 'number', got 'boolean'

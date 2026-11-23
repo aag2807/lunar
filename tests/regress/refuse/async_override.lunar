@@ -20,3 +20,11 @@ class Walker implements Mover
     end
 end
 -- error: 'step' is async in 'Walker' but not in 'Mover': callers of 'Mover' would call it without await
+
+interface Walks
+    walk(): void
+end
+interface Strolls extends Walks
+    async walk(): void
+end
+-- error: 'walk' is async in 'Strolls' but not in 'Walks': callers of 'Walks' would call it without await

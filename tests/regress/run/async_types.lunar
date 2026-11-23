@@ -19,6 +19,11 @@ local async function main(): void
     assert(n == 3 and a == 1 and b == "a" and s == "3" and sum == 4)
     local t: number[] = { await count(), await count() }
     assert(#t == 2)
+    -- Parentheses keep only the first result, as in Lua.
+    local c, d = (await pair())
+    assert(c == 1 and d == nil)
+    assert(select("#", (await pair())) == 1)
+    assert(select("#", await pair()) == 2)
 end
 
 -- A plain function may go where an async one is expected.

@@ -1,0 +1,21 @@
+-- An abstract method, which has no body, may be followed by any member.
+abstract class Job
+    abstract run(): number
+    async go(): number
+        return self:run()
+    end
+    static make(): number
+        return 1
+    end
+end
+
+class Count extends Job
+    run(): number
+        return 5
+    end
+end
+
+local n = coroutine.wrap(async function(): number
+    return await Count():go()
+end)()
+assert(n == 5 and Job.make() == 1)

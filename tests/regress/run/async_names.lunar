@@ -1,0 +1,27 @@
+-- A function named async is called as Lua calls it, whatever its
+-- arguments: an arrow passed to it is an argument, not an async arrow.
+local function async(f: (x: number) => number): number
+    return f(1) + 100
+end
+local r = async((x: number) => x + 1)
+assert(r == 102, r)
+local s = async((x) => x * 3)
+assert(s == 103, s)
+
+-- Defaults are computed inside the function, so an async function's
+-- defaults may await.
+async function num(): number
+    return 7
+end
+local g = async function(x: number = await num()): number
+    return x
+end
+local M = { name = "m" }
+async function M.f(x: number = await num()): number
+    return x + 1
+end
+local both = coroutine.wrap(async function(): (number, number)
+    return await g(), await M.f()
+end)
+local a, b = both()
+assert(a == 7 and b == 8, tostring(a) .. " " .. tostring(b))

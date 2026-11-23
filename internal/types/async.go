@@ -20,6 +20,9 @@ type fnContext struct {
 	inFunction bool
 	async      bool
 	name       string // "" for a function with no name
+	// what, if set, is what is not async, for messages: "the initial
+	// value of 'x'".
+	what string
 }
 
 // calleeKind is what checking a call written after await found it calls.
@@ -44,6 +47,8 @@ func (c *Checker) enterFunction(async bool, name string) func() {
 // where the checker is.
 func (c *Checker) notAsync() string {
 	switch {
+	case c.fn.what != "":
+		return c.fn.what + " is not async"
 	case !c.fn.inFunction:
 		return "the top level of a file is not async"
 	case c.fn.name != "":
@@ -75,7 +80,50 @@ func calleeName(e ast.Expression) string {
 			return id.Value
 		}
 	}
-	return exprText(e)
+	return exprDescription(e)
+}
+
+// exprDescription is an expression as written, near enough for a message:
+// wait, g.walk, g:walk, num() ^ 2.
+func exprDescription(e ast.Expression) string {
+	switch n := e.(type) {
+	case *ast.Identifier:
+		return n.Value
+	case *ast.SuperExpression:
+		return "super"
+	case *ast.DotExpression:
+		sep := "."
+		if n.IsMethodCall {
+			sep = ":"
+		}
+		return exprDescription(n.Left) + sep + exprDescription(n.Right)
+	case *ast.CallExpression:
+		return exprDescription(n.Function) + "()"
+	}
+	if isNilNode(e) {
+		return "?"
+	}
+	text := e.String()
+	if _, infix := e.(*ast.InfixExpression); infix && strings.HasPrefix(text, "(") && strings.HasSuffix(text, ")") {
+		text = text[1 : len(text)-1]
+	}
+	return text
+}
+
+// headCall is the call an expression begins with: num() in num() ^ 2 and
+// in f().x, or nil.
+func headCall(e ast.Expression) *ast.CallExpression {
+	switch n := e.(type) {
+	case *ast.CallExpression:
+		return n
+	case *ast.InfixExpression:
+		return headCall(n.Left)
+	case *ast.DotExpression:
+		return headCall(n.Left)
+	case *ast.IndexExpression:
+		return headCall(n.Left)
+	}
+	return nil
 }
 
 // calleeToken is the token of the name a call calls, where an error about
@@ -94,10 +142,7 @@ func calleeToken(node *ast.CallExpression) lexer.Token {
 
 // calleeText is a callee as written, for the fix a message suggests.
 func calleeText(e ast.Expression) string {
-	if dot, ok := e.(*ast.DotExpression); ok && dot.IsMethodCall {
-		return exprText(dot.Left) + ":" + calleeName(dot)
-	}
-	return exprText(e)
+	return exprDescription(e)
 }
 
 // checkAsyncCall holds a call to an async function to being awaited. A
@@ -129,20 +174,26 @@ func (c *Checker) checkAsyncCall(node *ast.CallExpression, funcType Type) {
 // call to one. Its type is the call's, every result of it.
 func (c *Checker) checkAwaitExpression(node *ast.AwaitExpression) Type {
 	call, isCall := node.Expression.(*ast.CallExpression)
-	if isCall {
-		if c.awaited == nil {
-			c.awaited = make(map[*ast.CallExpression]calleeKind)
-		}
-		if _, seen := c.awaited[call]; !seen {
-			c.awaited[call] = calleeUnchecked
+	// In await num() ^ 2, await applies to all of num() ^ 2, as - would;
+	// its error says so, in place of one about calling num.
+	head := headCall(node.Expression)
+	if c.awaited == nil {
+		c.awaited = make(map[*ast.CallExpression]calleeKind)
+	}
+	if head != nil {
+		if _, seen := c.awaited[head]; !seen {
+			c.awaited[head] = calleeUnchecked
 		}
 	}
 	t := c.checkExpression(node.Expression)
 	switch {
 	case !c.fn.async:
 		c.addErrorCode("async", "'await' is only allowed inside an async function; "+c.notAsync(), node.Token)
+	case !isCall && head != nil && c.awaited[head] == calleeAsync:
+		c.addErrorCode("async", fmt.Sprintf("'await' applies to all of '%s', which is not a call; write '(await %s)' for the call's result",
+			exprDescription(node.Expression), exprDescription(head)), node.Token)
 	case !isCall:
-		c.addErrorCode("async", fmt.Sprintf("'await' needs a call to an async function: '%s' is not a call", exprText(node.Expression)), node.Token)
+		c.addErrorCode("async", fmt.Sprintf("'await' needs a call to an async function: '%s' is not a call", exprDescription(node.Expression)), node.Token)
 	case c.awaited[call] == calleePlain:
 		c.addErrorCode("async", fmt.Sprintf("'await' needs a call to an async function: '%s' does not pause", calleeName(call.Function)), node.Token)
 	}
@@ -180,6 +231,37 @@ func (c *Checker) checkAsyncOverride(name string, method Type, owner string, bas
 	}
 }
 
+// checkAsyncInterfaceExtends refuses an interface that makes a method it
+// inherits async: code written against the parent calls it without await.
+func (c *Checker) checkAsyncInterfaceExtends(iface *InterfaceType, tok lexer.Token) {
+	for name, m := range iface.Methods {
+		if !m.Async {
+			continue
+		}
+		for _, parent := range iface.Extends {
+			if base, ok := interfaceMethod(parent, name); ok {
+				c.checkAsyncOverride(name, m, iface.Name, base, parent.Name, tok)
+			}
+		}
+	}
+}
+
+// interfaceMethod finds a method on an interface or what it extends.
+func interfaceMethod(iface *InterfaceType, name string) (*FunctionType, bool) {
+	if iface == nil {
+		return nil, false
+	}
+	if m, ok := iface.Methods[name]; ok {
+		return m, true
+	}
+	for _, parent := range iface.Extends {
+		if m, ok := interfaceMethod(parent, name); ok {
+			return m, true
+		}
+	}
+	return nil, false
+}
+
 // checkAsyncClassMembers refuses async on what runs without a call that
 // could await it: constructors, accessors and metamethods.
 func (c *Checker) checkAsyncClassMembers(node *ast.ClassDeclaration) {
@@ -201,5 +283,42 @@ func (c *Checker) checkAsyncClassMembers(node *ast.ClassDeclaration) {
 		if m.IsAsync && strings.HasPrefix(m.Name.Value, "__") {
 			c.addErrorCode("async", fmt.Sprintf("a metamethod cannot be async: '%s' runs without a call that could await it", m.Name.Value), m.Name.Token)
 		}
+	}
+}
+
+// checkFieldValues checks the initial values of a class's fields against
+// their types. An instance field's value is set by the constructor, so it
+// is checked as the constructor's code (with self, and not async); a
+// static field's where the class is defined.
+func (c *Checker) checkFieldValues(node *ast.ClassDeclaration, classType *ClassType) {
+	for _, prop := range node.Properties {
+		if prop == nil || prop.Name == nil || isNilNode(prop.Value) {
+			continue
+		}
+		name := prop.Name.Value
+		declared, ok := classType.StaticProperties[name]
+		if !prop.IsStatic {
+			declared, ok = classType.Properties[name]
+		}
+		prevEnv := c.env
+		c.env = NewEnclosedEnvironment(prevEnv)
+		for _, gp := range node.GenericParams {
+			c.env.Set(gp.Value, Any)
+		}
+		leave := func() {}
+		if !prop.IsStatic {
+			c.env.Set("self", classType)
+			prev := c.fn
+			c.fn = fnContext{inFunction: true, what: fmt.Sprintf("the initial value of '%s'", name)}
+			leave = func() { c.fn = prev }
+		}
+		valueType := c.checkExpression(prop.Value)
+		if ok && prop.Type != nil && !c.reportLiteralFields(prop.Value, declared) &&
+			!valueType.IsAssignableTo(declared) && !c.reportAsyncMismatch(valueType, declared, prop.Name.Token) {
+			c.addErrorCode("field-type", fmt.Sprintf("Field '%s' of '%s' must be '%s', got '%s'",
+				name, classType.Name, declared.String(), widenLiteralType(valueType).String()), prop.Name.Token)
+		}
+		leave()
+		c.env = prevEnv
 	}
 }

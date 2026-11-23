@@ -1557,6 +1557,7 @@ func (c *Checker) buildInterface(node *ast.InterfaceDeclaration, name string, sy
 			}
 		}
 	}
+	c.checkAsyncInterfaceExtends(interfaceType, node.Token)
 
 	return interfaceType
 }
@@ -1816,6 +1817,9 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 	case *ast.FunctionType:
 		// A bare `function` type constrains nothing beyond being callable.
 		if node.Parameters == nil && node.ReturnType == nil {
+			if node.IsAsync {
+				c.addErrorCode("async", "'async function' needs its signature, async function(...): T, so its calls can be checked", node.Token)
+			}
 			return Any
 		}
 
@@ -4407,13 +4411,17 @@ func (c *Checker) checkForStatement(node *ast.ForStatement) {
 		for _, e := range node.IteratorRest {
 			c.checkExpression(e)
 		}
-		if asyncCallee(iterType) != nil {
-			c.addErrorCode("async", "an async function cannot be the iterator of a generic 'for': the loop calls it without await", node.Token)
-		}
 		c.env = NewEnclosedEnvironment(prevEnv)
 		// A call yielding (f, s, c) iterates with f.
 		if tuple, ok := iterType.(*TupleType); ok && len(tuple.Elements) > 0 {
 			iterType = tuple.Elements[0]
+			if asyncCallee(iterType) != nil {
+				c.addErrorCode("async", fmt.Sprintf("an async function cannot be the iterator of a generic 'for': the loop calls the first result of '%s' without await",
+					exprDescription(node.Iterator)), node.Token)
+			}
+		} else if asyncCallee(iterType) != nil {
+			c.addErrorCode("async", fmt.Sprintf("an async function cannot be the iterator of a generic 'for': the loop calls '%s' without await",
+				exprDescription(node.Iterator)), node.Token)
 		}
 
 		// Give the loop variables the key and value types of whatever is being
@@ -4760,6 +4768,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 	for _, impl := range node.Implements {
 		c.referenceTypeName(impl)
 	}
+	c.checkFieldValues(node, classType)
 
 	// The parent is needed when the class is set up, so a parent declared
 	// further down the same file is still nil then.
@@ -5763,6 +5772,11 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 	// Create new environment for function scope
 	prevEnv := c.env
 	c.env = NewEnclosedEnvironment(prevEnv)
+	// Defaults are computed inside the function, so its context starts
+	// before its parameters.
+	name := c.fnExprName
+	c.fnExprName = ""
+	leaveFunction := c.enterFunction(node.IsAsync, name)
 
 	// Resolve parameter types and add to environment
 	paramTypes := make([]Type, len(node.Parameters))
@@ -5799,9 +5813,6 @@ func (c *Checker) checkFunctionExpression(node *ast.FunctionExpression) Type {
 	// Set currentFunctionReturnType for return statement checking
 	prevReturnType := c.currentFunctionReturnType
 	c.currentFunctionReturnType = returnType
-	name := c.fnExprName
-	c.fnExprName = ""
-	leaveFunction := c.enterFunction(node.IsAsync, name)
 
 	// Type check the body
 	prevScopeEnd := c.scopeEnd

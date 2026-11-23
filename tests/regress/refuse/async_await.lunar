@@ -25,3 +25,29 @@ async function plainCalls(): void
 end
 -- error: 'await' needs a call to an async function: 'plain' does not pause
 -- error: 'await' needs a call to an async function: 'n' is not a call
+
+-- A default is computed inside its function, so it is that function's
+-- context that counts: a plain comparator's default cannot await.
+declare async function num(): number
+local M = { name = "m" }
+async function sorts(t: number[]): void
+    function M.less(a: number, b: number = await num()): boolean
+        return a < b
+    end
+    table.sort(t, M.less)
+end
+-- error: 'await' is only allowed inside an async function; 'M.less' is not async
+
+-- A field's initial value is set by the constructor, which is not async.
+async function setup(): void
+    class Inner
+        x: number = await num()
+    end
+end
+-- error: 'await' is only allowed inside an async function; the initial value of 'x' is not async
+
+-- await applies to all of what follows it, as - does.
+async function powers(): void
+    local p = await num() ^ 2
+end
+-- error: 'await' applies to all of 'num() ^ 2', which is not a call; write '(await num())' for the call's result

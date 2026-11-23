@@ -333,7 +333,9 @@ func (p *Parser) parseAwaitOrName() ast.Expression {
 // async (x) and async then a new line are what they are in Lua.
 func (p *Parser) parseAsyncOrName() ast.Expression {
 	sameLine := p.peekToken.Line == p.curToken.EndLine
-	if sameLine && p.peekTokenIs(lexer.FUNCTION) {
+	// async function() ... end; `x = async function f() end` is Lua's x =
+	// async, then a declaration, since a named function is no expression.
+	if sameLine && p.peekTokenIs(lexer.FUNCTION) && p.tokenAfterPeekIs(lexer.LPAREN, lexer.LT) {
 		p.nextToken()
 		exp := p.parseFunctionExpression()
 		if fe, ok := exp.(*ast.FunctionExpression); ok && fe != nil {
@@ -341,19 +343,59 @@ func (p *Parser) parseAsyncOrName() ast.Expression {
 		}
 		return exp
 	}
-	if sameLine && p.peekTokenIs(lexer.LPAREN) {
+	if sameLine && p.peekTokenIs(lexer.LPAREN) && p.asyncArrowFollows() {
 		state := p.SaveState()
 		errorsBefore := len(p.errors)
 		p.nextToken()
-		// An arrow function's token is its '('; (function() end) is not one.
+		open := p.curToken
+		// The arrow must start at this '(': in async((x) => x) the arrow
+		// is an argument of a call of async.
 		if fe, ok := p.parseGroupedExpression().(*ast.FunctionExpression); ok && fe != nil &&
-			fe.Token.Type == lexer.LPAREN && len(p.errors) == errorsBefore {
+			fe.Token.Offset == open.Offset && len(p.errors) == errorsBefore {
 			fe.IsAsync = true
 			return fe
 		}
 		p.RestoreState(state)
 	}
 	return p.parseIdentifier()
+}
+
+// tokenAfterPeekIs reports whether the token after the peek token is one
+// of types.
+func (p *Parser) tokenAfterPeekIs(types ...lexer.TokenType) bool {
+	state := p.SaveState()
+	defer p.RestoreState(state)
+	p.nextToken()
+	for _, t := range types {
+		if p.peekTokenIs(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// asyncArrowFollows reports, from async with '(' next, whether what the
+// parentheses close is followed by '=>' or a return type, as an arrow's
+// parameters are. It only counts brackets, so async(...) calls, nested
+// however deep, are not parsed twice.
+func (p *Parser) asyncArrowFollows() bool {
+	state := p.SaveState()
+	defer p.RestoreState(state)
+	p.nextToken() // '('
+	depth := 0
+	for !p.curTokenIs(lexer.EOF) {
+		switch p.curToken.Type {
+		case lexer.LPAREN:
+			depth++
+		case lexer.RPAREN:
+			depth--
+			if depth == 0 {
+				return p.peekTokenIs(lexer.ARROW) || (p.peekTokenIs(lexer.COLON) && !p.isColonMethodCall())
+			}
+		}
+		p.nextToken()
+	}
+	return false
 }
 
 func (p *Parser) parseNumberLiteral() ast.Expression {
@@ -648,9 +690,15 @@ func (p *Parser) parseGroupedInner() ast.Expression {
 	if !p.expectPeek(lexer.RPAREN) {
 		return nil
 	}
-	// (f()) keeps only f's first value, so these parentheses stay.
+	// (f()) keeps only f's first value, so these parentheses stay; so does
+	// (await f()), which is (f()) in the Lua.
 	if call, ok := exp.(*ast.CallExpression); ok {
 		call.Parenthesized = true
+	}
+	if aw, ok := exp.(*ast.AwaitExpression); ok {
+		if call, ok := aw.Expression.(*ast.CallExpression); ok {
+			call.Parenthesized = true
+		}
 	}
 	// (...) is the first vararg value only: the parentheses stay.
 	if v, ok := exp.(*ast.VarargExpression); ok {
@@ -3673,7 +3721,7 @@ func (p *Parser) parseMethodDeclaration(isAbstract bool) *ast.FunctionDeclaratio
 func (p *Parser) abstractMethodHasBody() bool {
 	switch p.peekToken.Type {
 	case lexer.END, lexer.EOF, lexer.CONSTRUCTOR, lexer.PUBLIC, lexer.PRIVATE,
-		lexer.PROTECTED, lexer.STATIC, lexer.ABSTRACT, lexer.READONLY, lexer.GET, lexer.SET:
+		lexer.PROTECTED, lexer.STATIC, lexer.ABSTRACT, lexer.READONLY, lexer.GET, lexer.SET, lexer.ASYNC:
 		return false
 	}
 

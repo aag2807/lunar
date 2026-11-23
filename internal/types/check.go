@@ -3548,6 +3548,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	c.env = prevEnv
 	c.currentFunctionReturnType = prevReturnType
 	leaveFunction()
+	c.checkDecoratorTargets(node.Decorators, funcType, node.Name.Value)
 }
 
 // parameterNames lists a signature's parameter names, for signature help.
@@ -3674,7 +3675,7 @@ func (c *Checker) checkReturnStatement(node *ast.ReturnStatement) {
 		if c.reportLiteralFields(node.ReturnValues[0], c.currentFunctionReturnType) {
 			return
 		}
-		if !returnType.IsAssignableTo(c.currentFunctionReturnType) {
+		if !returnType.IsAssignableTo(c.currentFunctionReturnType) && !c.reportAsyncMismatch(returnType, c.currentFunctionReturnType, node.Token) {
 			c.addError(
 				fmt.Sprintf("Cannot return type '%s' from function with return type '%s'",
 					returnType.String(), c.currentFunctionReturnType.String()),
@@ -4822,7 +4823,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 
 	// Check that method overrides have compatible signatures
 	if classType.Parent != nil {
-		c.checkMethodOverrides(classType, classType.Parent, node.Token)
+		c.checkMethodOverrides(classType, classType.Parent, node)
 	}
 
 	// Check constructor if present
@@ -4943,6 +4944,18 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		c.env = prevEnv
 		c.currentFunctionReturnType = prevReturnType
 		c.currentClass = prevClass
+
+		// Class.m = deco(Class.m): the method as a value takes self first.
+		for _, decorator := range method.Decorators {
+			c.checkDecorator(decorator)
+		}
+		methodType, ok := classType.Methods[method.Name.Value]
+		if method.IsStatic {
+			methodType, ok = classType.StaticMethods[method.Name.Value]
+		}
+		if ok && len(method.Decorators) > 0 {
+			c.checkDecoratorTargets(method.Decorators, methodValue(methodType, classType, method.IsStatic), method.Name.Value)
+		}
 	}
 
 	// Check getters
@@ -5143,17 +5156,29 @@ func (c *Checker) checkAbstractMethodsImplemented(class *ClassType, parent *Clas
 }
 
 // checkMethodOverrides verifies that overridden methods have compatible signatures
-func (c *Checker) checkMethodOverrides(class *ClassType, parent *ClassType, token lexer.Token) {
+func (c *Checker) checkMethodOverrides(class *ClassType, parent *ClassType, node *ast.ClassDeclaration) {
 	if parent == nil {
 		return
 	}
+	// An error about an override is on the method's name.
+	tokens := make(map[string]lexer.Token, len(node.Methods))
+	for _, m := range node.Methods {
+		if m != nil && m.Name != nil {
+			tokens[m.Name.Value] = m.Name.Token
+		}
+	}
 
-	// Check each method in the child class
+	// Each method is checked against the nearest ancestor that has it,
+	// which GetMethod finds; that one was checked against its own parent.
 	for methodName, childMethod := range class.Methods {
 		// Check if parent has a method with the same name
 		parentMethod, hasParentMethod := parent.GetMethod(methodName)
 		if !hasParentMethod {
 			continue // Not an override, skip
+		}
+		token, ok := tokens[methodName]
+		if !ok {
+			token = node.Token
 		}
 		c.checkAsyncOverride(methodName, childMethod, class.Name, parentMethod, parent.Name, token)
 
@@ -5219,11 +5244,6 @@ func (c *Checker) checkMethodOverrides(class *ClassType, parent *ClassType, toke
 				token,
 			)
 		}
-	}
-
-	// Recursively check grandparent
-	if parent.Parent != nil {
-		c.checkMethodOverrides(class, parent.Parent, token)
 	}
 }
 
@@ -5295,14 +5315,19 @@ func (c *Checker) checkFieldFunction(node *ast.FunctionDeclaration) {
 		self := &ast.Parameter{Token: selfTok, Name: &ast.Identifier{Token: selfTok, Value: "self"}}
 		params = append([]*ast.Parameter{self}, params...)
 	}
-	c.fnExprName = exprText(node.Receiver) + "." + node.Name.Value
-	if node.IsMethod {
-		c.fnExprName = exprText(node.Receiver) + ":" + node.Name.Value
+	for _, decorator := range node.Decorators {
+		c.checkDecorator(decorator)
 	}
+	name := exprText(node.Receiver) + "." + node.Name.Value
+	if node.IsMethod {
+		name = exprText(node.Receiver) + ":" + node.Name.Value
+	}
+	c.fnExprName = name
 	fnType := c.checkFunctionExpression(&ast.FunctionExpression{Token: node.Token, GenericParams: node.GenericParams,
 		Parameters: params, ReturnType: node.ReturnType, Body: node.Body, IsAsync: node.IsAsync})
 	if fn, ok := fnType.(*FunctionType); ok {
 		fn.ParamNames = parameterNames(params)
+		c.checkDecoratorTargets(node.Decorators, fn, name)
 	}
 	target := &ast.DotExpression{Token: node.Name.Token, Left: node.Receiver, Right: node.Name}
 	c.checkAssignmentTarget(&ast.AssignmentStatement{Token: node.Name.Token, Targets: []ast.Expression{target}},

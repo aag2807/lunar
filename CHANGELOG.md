@@ -46,6 +46,21 @@
   first; they are refused now.
 - Nested `match(` calls of a Lua function named `match` took twice as long
   per level: 20 levels took over a second, 40 would not finish.
+- Decorators were not checked against what they decorate: `@deco` with
+  `deco(f: () => void)` took an async function, or one needing arguments,
+  and one returning nothing replaced the function with nil. Both ways are
+  checked now, generic decorators (`same<T>(f: T): T`) included.
+  Decorators on `M.f` and on methods were not checked at all, and `@deco
+  function M.f()` decorated a global `f`; it replaces `M.f` now. `@deco
+  local async function` did not parse.
+- An override error was repeated for each ancestor and pointed at the
+  class; it is reported once, on the method.
+- An async member where an interface has a plain one (a class instance, a
+  table literal's field, a table returned) was a `type` or `field-type`
+  error; it is an `async` error, naming the member.
+- `(self: T) => R`, `(type: T) => R`, `(n?: T) => R` and `(...: T) => R`
+  did not parse as function types, and `[T]` gave a cascade of errors; it
+  is one error saying an array is written `T[]`.
 - Tree-sitter read `await(x)` and `await (x)`, calls of a Lua function named
   `await`, as awaits, and `local a = await` as an await of the next line.
   The grammar has a small external scanner (`src/scanner.c`) for it.

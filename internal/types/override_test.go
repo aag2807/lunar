@@ -318,3 +318,33 @@ end
 		}
 	}
 }
+
+// An override is checked against the nearest ancestor that has the method,
+// once, and the error is on the method's name, not on the class.
+func TestOverrideErrorsOnceAtTheMethod(t *testing.T) {
+	errs := checkSource(t, `class Base
+    move(): void
+    end
+    jump(height: number): void
+    end
+end
+class Mid extends Base
+end
+class Leaf extends Mid
+    async move(): void
+    end
+    jump(height: string): void
+    end
+end
+`)
+	if len(errs) != 2 {
+		t.Fatalf("want 2 errors, got %v", messages(errs))
+	}
+	at := map[int]int{}
+	for _, e := range errs {
+		at[e.Line] = e.Column
+	}
+	if at[10] != 11 || at[12] != 5 {
+		t.Errorf("want errors at 10:11 (move) and 12:5 (jump), got %v: %v", at, messages(errs))
+	}
+}

@@ -534,6 +534,10 @@ func (g *Generator) generateFunctionDeclaration(node *ast.FunctionDeclaration) s
 	// Apply decorators in reverse order (first decorator is outermost)
 	if len(node.Decorators) > 0 {
 		funcName := node.Name.Value
+		// @deco function M.f() and M:f(): M.f = deco(M.f).
+		if node.Receiver != nil {
+			funcName = g.generateExpression(node.Receiver) + "." + node.Name.Value
+		}
 		for i := len(node.Decorators) - 1; i >= 0; i-- {
 			decorator := node.Decorators[i]
 			output.WriteString(g.generateIndent())

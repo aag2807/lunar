@@ -1623,6 +1623,20 @@ func (p *Parser) parseType() ast.Expression {
 	case lexer.LBRACE:
 		// Mapped type: { [K in T]: U }
 		return p.parseMappedType()
+	case lexer.LBRACKET:
+		// [T] is no type: say so once, and go on after the closing ']'.
+		open := p.curToken
+		p.addError("'[ ... ]' is not a type: an array is written T[], as number[] or (() => void)[]", open)
+		for depth := 0; !p.curTokenIs(lexer.EOF); p.nextToken() {
+			if p.curTokenIs(lexer.LBRACKET) {
+				depth++
+			} else if p.curTokenIs(lexer.RBRACKET) {
+				if depth--; depth == 0 {
+					break
+				}
+			}
+		}
+		return p.parseTypeSuffix(&ast.Identifier{Token: open, Value: "any"})
 	case lexer.TABLE:
 		// table<K, V>
 		typeExpr = p.parseTableType()
@@ -2401,8 +2415,12 @@ func (p *Parser) parseTupleOrFunctionType() ast.Expression {
 	} else {
 		p.nextToken() // move past '('
 
-		// Check if this is a named parameter (function type) or just types (tuple)
-		isNamedParam := p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.COLON)
+		// Named parameters make a function type, written as a function's
+		// are: (n: T), (self: T), (type: T), (n?: T), (...: T). Types alone
+		// are a tuple, or an arrow's unnamed parameters: (number?) => void.
+		isNamedParam := p.curTokenIs(lexer.ELLIPSIS) ||
+			isWord(p.curToken.Literal) && !luaReserved[p.curToken.Literal] &&
+				(p.peekTokenIs(lexer.COLON) || p.peekTokenIs(lexer.QUESTION) && p.tokenAfterPeekIs(lexer.COLON))
 
 		if isNamedParam {
 			// Function type
@@ -4561,6 +4579,20 @@ func (p *Parser) parseDecoratedStatement() ast.Statement {
 				fn.Decorators = decorators
 			}
 			return fn
+		}
+		// @deco local async function f(), with function on async's line.
+		if p.peekTokenIs(lexer.ASYNC) {
+			state := p.SaveState()
+			p.nextToken() // move onto 'async'
+			if p.peekTokenIs(lexer.FUNCTION) && p.peekToken.Line == p.curToken.EndLine {
+				fn := p.parseAsyncFunctionDeclaration()
+				if fn != nil {
+					fn.IsLocal = true
+					fn.Decorators = decorators
+				}
+				return fn
+			}
+			p.RestoreState(state)
 		}
 		p.addError("decorators apply to functions and classes; a local variable cannot have one", p.curToken)
 		return nil

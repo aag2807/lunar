@@ -1,0 +1,57 @@
+-- A decorator is given its target and returns what replaces it (f =
+-- deco(f)), and the name keeps its type: the target has to fit what the
+-- decorator takes, and what the decorator returns has to fit the target.
+local function plain(f: () => void): () => void
+    return f
+end
+
+@plain
+async function loadAll(): void
+end
+-- error: 'loadAll' is async, and decorator 'plain' takes a plain function: it would call it without await
+
+@plain
+function needs(n: number): void
+end
+-- error: Decorator 'plain' takes '() -> void', which 'needs' of type '(number) -> void' does not fit
+
+local function drop(f: any): void
+end
+@drop
+function gone(): void
+end
+-- error: Decorator 'drop' returns 'void', which cannot replace 'gone' of type '() -> void'
+
+local function pausing(f: any): async function(): void
+    return f
+end
+@pausing
+function quick(): void
+end
+-- error: Decorator 'pausing' returns an async function, which cannot replace 'quick', a plain one: its callers would not await it
+
+-- Undefined decorators on table functions and methods are refused too.
+local M = {}
+@missing
+function M.f(): void
+end
+-- error: Undefined decorator 'missing'
+
+class Box
+    @absent
+    open(): void
+    end
+end
+-- error: Undefined decorator 'absent'
+
+-- A method's target takes self first.
+local function noSelf(f: () => number): () => number
+    return f
+end
+class Crate
+    @noSelf
+    count(): number
+        return 1
+    end
+end
+-- error: Decorator 'noSelf' takes '() -> number', which 'count' of type '(Crate) -> number' does not fit

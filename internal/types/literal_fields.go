@@ -164,6 +164,10 @@ func (c *Checker) checkRecordLiteral(lit *ast.TableLiteral, iface *InterfaceType
 			}
 		}
 		if actual != nil && !actual.IsAssignableTo(expected) {
+			if c.reportAsyncMismatch(actual, expected, exprToken(f.value, f.key.Token)) {
+				reported = true
+				continue
+			}
 			c.addErrorCode("field-type", fmt.Sprintf("Field '%s' of '%s' must be '%s', got '%s'",
 				label, root, expected.String(), widenLiteralType(actual).String()), exprToken(f.value, f.key.Token))
 			reported = true

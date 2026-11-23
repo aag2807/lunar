@@ -19,7 +19,9 @@ Lunar file: the files in [`tests/luacompat/`](../tests/luacompat/) are
 compiled unchanged and must print what they print under Lua.
 
 Code without annotations is checked as Lua: a local declared empty (`local
-x`) takes whatever it is given later; a table made from a literal gains the
+x`) takes whatever it is given later, and one declared with a value keeps
+that value's type (`local x = 1` then `x = "s"` is refused; nil is always
+allowed); a table made from a literal gains the
 fields assigned to it, and a field it lacks reads as `any`; such a table's
 fields can be cleared (`t.cache = nil`), and one first set to nil takes
 whatever it is given later; a parameter without a type may be left out; `a
@@ -513,6 +515,13 @@ runs a small scheduler of its own.
 
 A decorator is a function that receives a function or class and returns its
 replacement. A namespace groups functions under a table.
+
+The decorated name keeps its type, so a typed decorator is checked both
+ways: the function has to fit what the decorator takes, and what the
+decorator returns has to fit the function. A method is given with `self`
+first; `@deco function M.f()` replaces `M.f`; a generic decorator, `function
+same<T>(f: T): T`, keeps any function as it is. One typed `any`, as `logged`
+below, takes and returns anything.
 
 ```lunar
 function logged(fn: any): any

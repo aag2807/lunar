@@ -19,12 +19,16 @@ Last updated for **2.0.0**, plus what `CHANGELOG.md` lists as unreleased.
 | Untyped Lua is checked as Lua (missing arguments are nil, `{}` takes any key, forward-declared locals, shadowed library names, fields cleared with nil or set to nil first, a function replaced by one with fewer parameters or a vararg wrapper) | `tests/luacompat/idioms2.lua`, `idioms3.lua`, `fields.lua` |
 | Functions defined into a table made with `local M = {}` keep their types: their calls are checked, an async one must be awaited, in importing modules too | `tests/regress/run/empty_table_functions.lunar`, `tests/regress/refuse/empty_table_functions.lunar`, `TestImportedTableAsyncFunctionMustBeAwaited` |
 | A function fits where it is passed more arguments than it takes, and where it is passed fewer if the rest may be left out; a vararg one takes any number | `tests/regress/run/function_params.lunar`, `tests/regress/refuse/function_params.lunar` |
-| Typed Lunar: classes (inheritance, abstract, statics, accessors, metamethods), interfaces, enums, generics (constraints, methods, generic classes), `match`, namespaces, modules, utility types, default parameters, narrowing | `TestRegressions` (39 programs run under Lua, 31 that must be refused), `TestExamplesRun` (41 examples), `TestGoldenOutput` |
+| Typed Lunar: classes (inheritance, abstract, statics, accessors, metamethods), interfaces, enums, generics (constraints, methods, generic classes), `match`, namespaces, modules, utility types, default parameters, narrowing | `TestRegressions` (41 programs run under Lua, 32 that must be refused), `TestExamplesRun` (41 examples), `TestGoldenOutput` |
 | Every LANGUAGE.md example compiles (and those that run, run) | `TestDocumentationExamplesCompile` |
 | Code nested more than Lua's 200 levels is refused with Lua's reason; deep code compiles in linear time, nested `async(` and `match(` calls of Lua functions too | `TestNestingLimit`, `TestNestedShapesCompileQuickly` |
 | Type arguments after `-`, `#`, `not`, `^`, `==` and `await` (`await fetch<T>(p)`) | `tests/regress/run/generic_after_unary.lunar` |
 | An interface's `static` methods (`static async` and `async static` too) are implemented by the class's static methods | `tests/regress/run/interface_static.lunar`, `tests/regress/refuse/interface_static.lunar` |
 | `declare` overloads that mix async and plain are refused | `tests/regress/refuse/async_overloads.lunar` |
+| Decorators are checked both ways: the target fits what the decorator takes, what it returns fits the target; on functions, `M.f`, methods (with self) and `local async function`; `@deco function M.f()` replaces `M.f` | `tests/regress/run/decorator_targets.lunar`, `tests/regress/refuse/decorator_targets.lunar` |
+| An override is checked once, against the nearest ancestor with the method, and its error is on the method | `TestOverrideErrorsOnceAtTheMethod` |
+| An async member where an interface has a plain one is an `async` error wherever the value goes (class instance, table field, argument, return) | `TestStructuralAsyncMismatchHasItsCode` |
+| Arrow function types name parameters as functions do: `(self: T) =>`, `(type: T) =>`, `(n?: T) =>`, `(...: T) =>`; `[T]` is one error saying to write `T[]` | `tests/regress/run/arrow_type_params.lunar`, `TestArrowTypeParameterNames`, `TestBracketTypeIsOneError` |
 | Class fields' initial values are checked against their types | `tests/regress/refuse/class_field_values.lunar` |
 | `async`/`await`: an async function is only called with `await`, inside an async function; both are erased to plain coroutines | `examples/features/25_async.lunar` (a scheduler, run under 5.3 and 5.4), `tests/regress/run/async_types.lunar`, `tests/regress/refuse/async_*.lunar` (one per rule), `TestImportedAsyncFunctionMustBeAwaited`, `TestHoverShowsAsync` |
 | No crash on half-written code | `test/integration` (incomplete code), `internal/parser/hang_test.go`, `internal/project/robust_test.go` |
@@ -36,7 +40,8 @@ Last updated for **2.0.0**, plus what `CHANGELOG.md` lists as unreleased.
 |---|---|
 | Targets other than Lua 5.3 and 5.4 (LuaJIT, 5.1, 5.2) | refused |
 | Two implementations of one function (overloads) | refused; overloads belong in `declare` |
-| Plain Lua `f(a < b, c > (d))` reads as a generic call, as in TypeScript | refused with "'a' is not a generic type or function"; write `c > d` |
+| Plain Lua `f(a < b, c > (d))` reads as a generic call, as in TypeScript | refused with "'a' is not a generic type or function"; write `c > d`. Kept on purpose |
+| A local declared with a value keeps its type: `local x = 1` then `x = "s"` is refused, in plain Lua too | as in TypeScript; declare it `local x` or `local x: number \| string`. Kept on purpose |
 | Destructuring a table's fields | only a call's results: `local (a, b) = f()` |
 | Nested template strings, a backtick inside `${...}` | refused |
 | `s.f(...)` on a string where the arguments do not fill `string.f`'s parameters is taken as `s:f(...)` | `s.rep("ab", 2)` means `s:rep("ab", 2)`; write `string.rep("ab", 2)` for the plain call |

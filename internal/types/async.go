@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"lunar/internal/ast"
@@ -204,6 +205,9 @@ func (c *Checker) checkAwaitExpression(node *ast.AwaitExpression) Type {
 // expected, when being async is what keeps it from fitting, and says
 // whether it did.
 func (c *Checker) reportAsyncMismatch(value, target Type, tok lexer.Token) bool {
+	if iface, ok := target.(*InterfaceType); ok {
+		return c.reportAsyncMember(value, iface, tok)
+	}
 	fn, ok := value.(*FunctionType)
 	if !ok || !fn.Async {
 		return false
@@ -216,6 +220,74 @@ func (c *Checker) reportAsyncMismatch(value, target Type, tok lexer.Token) bool 
 	c.addErrorCode("async", "an async function cannot be used where a plain function is expected: "+
 		"whatever calls it would not await it, and it would pause outside a coroutine", tok)
 	return true
+}
+
+// reportAsyncMember reports a value given where an interface is expected
+// whose member is async where the interface's is plain, a method or a
+// function field, and says whether there was one.
+func (c *Checker) reportAsyncMember(value Type, iface *InterfaceType, tok lexer.Token) bool {
+	member := func(name string) Type {
+		switch v := value.(type) {
+		case *ClassType:
+			if m, ok := v.GetMethod(name); ok {
+				return m
+			}
+			if p, ok := v.GetProperty(name); ok {
+				return p
+			}
+		case *InterfaceType:
+			if m, ok := v.Methods[name]; ok {
+				return m
+			}
+			if p, ok := v.Properties[name]; ok {
+				return p
+			}
+		}
+		return nil
+	}
+	// The interface's members, its own over those it inherits.
+	expected := make(map[string]Type)
+	var collect func(i *InterfaceType)
+	collect = func(i *InterfaceType) {
+		if i == nil {
+			return
+		}
+		for name, m := range i.Methods {
+			if _, seen := expected[name]; !seen {
+				expected[name] = m
+			}
+		}
+		for name, p := range i.Properties {
+			if _, seen := expected[name]; !seen {
+				expected[name] = p
+			}
+		}
+		for _, parent := range i.Extends {
+			collect(parent)
+		}
+	}
+	collect(iface)
+	names := make([]string, 0, len(expected))
+	for name := range expected {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		want, ok := expected[name].(*FunctionType)
+		if !ok || want.Async {
+			continue
+		}
+		if got, ok := member(name).(*FunctionType); ok && got.Async {
+			what := "this table"
+			if cl, isClass := value.(*ClassType); isClass {
+				what = "'" + cl.Name + "'"
+			}
+			c.addErrorCode("async", fmt.Sprintf("%s cannot be used as '%s': its '%s' is async, and callers of '%s' would call it without await",
+				what, iface.Name, name, iface.Name), tok)
+			return true
+		}
+	}
+	return false
 }
 
 // checkAsyncOverride refuses an async method in place of a plain one:

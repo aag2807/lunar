@@ -100,6 +100,20 @@ levels deep is refused, as Lua itself refuses to load it. Destructuring a
 table's fields and nested template strings are not supported yet; the full
 list is in [`docs/STATUS.md`](docs/STATUS.md).
 
+### Plain Lua that Lunar reads differently
+
+Lua compiles unchanged, with two known exceptions, both kept on purpose:
+
+- `f(a < b, c > (d))` reads as a call of the generic `a<b, c>` with `(d)`,
+  as TypeScript reads it; in Lua it is two comparisons. Lunar refuses it
+  with "'a' is not a generic type or function". Write `c > d` without the
+  parentheses. With one type between the brackets there is no ambiguity:
+  `a < b > (c)` compares a boolean, which Lua refuses at runtime.
+- A local declared with a value keeps that value's type, as in TypeScript:
+  `local x = 1` then `x = "s"` is refused. A name that holds different kinds
+  of value is declared empty (`local x`) or with its type
+  (`local x: number | string = 1`). Any local may be set to nil.
+
 ## Install
 
 Download the archive for your system from the

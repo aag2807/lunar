@@ -1,0 +1,36 @@
+-- An arrow function type names its parameters as a function does: self,
+-- Lunar's own words, optional ones and varargs.
+interface Point
+    x: number
+end
+
+local len: (self: Point) => number = function(self: Point): number
+    return self.x
+end
+assert(len({ x = 3 }) == 3)
+
+local kind: (type: string, from: number) => string = function(t: string, n: number): string
+    return t .. n
+end
+assert(kind("a", 1) == "a1")
+
+local maybe: (n?: number) => number = function(n?: number): number
+    return n or 0
+end
+assert(maybe() == 0 and maybe(2) == 2)
+
+local count: (...: number) => number = function(...: number): number
+    return select("#", ...)
+end
+assert(count(1, 2, 3) == 3)
+
+-- An array of functions is written (() => void)[].
+local calls = 0
+local bump = function(): void
+    calls = calls + 1
+end
+local hooks: (() => void)[] = { bump, bump }
+for _, hook in ipairs(hooks) do
+    hook()
+end
+assert(calls == 2)

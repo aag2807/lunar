@@ -1,0 +1,61 @@
+-- Typed decorators: an identity decorator keeps the target's type, one on
+-- M.f wraps M.f, an async one wraps an async function, a method's takes
+-- self first, and a local async function can be decorated.
+local function same<T>(f: T): T
+    return f
+end
+
+@same
+function add(a: number, b: number): number
+    return a + b
+end
+assert(add(1, 2) == 3)
+
+local seen = 0
+local function counted(f: (a: number, b: number) => number): (a: number, b: number) => number
+    return function(a: number, b: number): number
+        seen = seen + 1
+        return f(a, b)
+    end
+end
+
+local M = {}
+@counted
+function M.mul(a: number, b: number): number
+    return a * b
+end
+assert(M.mul(2, 3) == 6 and seen == 1)
+
+local function retried(f: async function(): number): async function(): number
+    return async function(): number
+        return (await f()) + 1
+    end
+end
+
+@retried
+async function fetch(): number
+    return coroutine.yield(1)
+end
+local co = coroutine.wrap(fetch)
+assert(co() == 1)
+assert(co(10) == 11)
+
+@retried
+local async function nearby(): number
+    return coroutine.yield(2)
+end
+local co2 = coroutine.wrap(nearby)
+assert(co2() == 2)
+assert(co2(20) == 21)
+
+class Meter
+    total: number = 0
+
+    @same
+    add(n: number): number
+        self.total = self.total + n
+        return self.total
+    end
+end
+local m = Meter()
+assert(m:add(2) == 2 and m:add(3) == 5)

@@ -1,0 +1,37 @@
+-- Functions defined into a table made with {} keep their types, and the
+-- table stays a Lua table: fields cleared, replaced, read before they exist.
+local M = {}
+
+function M.add(a: number, b: number): number
+    return a + b
+end
+function M:double(x: number): number
+    return self.add(x, x)
+end
+
+local n: number = M.add(1, 2)
+local d: number = M:double(4)
+assert(n == 3 and d == 8)
+
+async function M.wait(frames: number): number
+    return coroutine.yield(frames)
+end
+async function M.run(): number
+    local got = await M.wait(2)
+    return got + 1
+end
+local co = coroutine.wrap(M.run)
+assert(co() == 2)
+assert(co(5) == 6)
+
+M.add = nil
+assert(M.add == nil)
+local missing = M.missing
+assert(missing == nil)
+
+local hooks = {}
+hooks.onDeath = nil
+hooks.onDeath = function(who: string): string
+    return who .. " died"
+end
+assert(hooks.onDeath("imp") == "imp died")

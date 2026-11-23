@@ -538,19 +538,62 @@ func (t *FunctionType) IsAssignableTo(other Type) bool {
 		if t.Async && !otherFunc.Async {
 			return false
 		}
-		if len(t.Parameters) != len(otherFunc.Parameters) {
+		if !t.parametersFit(otherFunc) {
 			return false
-		}
-		for i, param := range t.Parameters {
-			// Contravariance: other's parameter must be assignable to this parameter
-			if !otherFunc.Parameters[i].IsAssignableTo(param) {
-				return false
-			}
 		}
 		// Covariance: this return type must be assignable to other's return type
 		return t.ReturnType.IsAssignableTo(otherFunc.ReturnType)
 	}
 	return false
+}
+
+// parametersFit says whether t can be called as other is: with other's
+// arguments. Lua drops the arguments a function does not take, so t may
+// have fewer parameters; it may have more only where those can be left
+// out (optional ones, or any of a plain Lua function's); a vararg (...)
+// takes the arguments past the fixed ones. Parameters are contravariant:
+// what other is passed must fit what t takes.
+func (t *FunctionType) parametersFit(other *FunctionType) bool {
+	own, ownRest := splitRest(t)
+	theirs, theirRest := splitRest(other)
+	for i, param := range own {
+		switch {
+		case i < len(theirs):
+			if !theirs[i].IsAssignableTo(param) {
+				return false
+			}
+		case theirRest != nil:
+			if !theirRest.IsAssignableTo(param) {
+				return false
+			}
+		case !t.Untyped && !(i < len(t.OptionalParams) && t.OptionalParams[i]):
+			return false
+		}
+	}
+	if ownRest != nil {
+		for i := len(own); i < len(theirs); i++ {
+			if !theirs[i].IsAssignableTo(ownRest) {
+				return false
+			}
+		}
+		if theirRest != nil && !theirRest.IsAssignableTo(ownRest) {
+			return false
+		}
+	}
+	return true
+}
+
+// splitRest is a function's fixed parameters and, for a vararg one, the
+// type of each argument its rest parameter takes (nil if it has none).
+func splitRest(f *FunctionType) ([]Type, Type) {
+	if !f.HasRestParameter || len(f.Parameters) == 0 {
+		return f.Parameters, nil
+	}
+	last := f.Parameters[len(f.Parameters)-1]
+	if arr, ok := last.(*ArrayType); ok {
+		return f.Parameters[:len(f.Parameters)-1], arr.ElementType
+	}
+	return f.Parameters[:len(f.Parameters)-1], Any
 }
 
 // UnionType represents a union of multiple types

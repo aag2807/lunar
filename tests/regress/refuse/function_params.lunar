@@ -1,0 +1,17 @@
+-- A function fits where it is passed more arguments than it takes, since
+-- Lua drops the rest, but not where a parameter it needs is never passed,
+-- nor where what it is passed is not what it takes.
+local function each(xs: number[], f: (n: number) => void): void
+    for _, x in ipairs(xs) do
+        f(x)
+    end
+end
+
+each({ 1 }, function(n: number, scale: number): void end)
+-- error: cannot pass type '(number, number) -> void' to parameter of type '(number) -> void'
+
+each({ 1 }, function(s: string): void end)
+-- error: cannot pass type '(string) -> void' to parameter of type '(number) -> void'
+
+local onHit: (damage: number, from: string) => void = function(...: number): void end
+-- error: Cannot assign type '(number[]) -> void' to variable 'onHit' of type '(number, string) -> void'

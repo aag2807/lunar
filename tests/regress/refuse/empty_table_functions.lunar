@@ -1,0 +1,38 @@
+-- Functions defined into a table made with {} are checked where they are
+-- called, as those in a table made with fields are.
+local M = {}
+
+function M.add(a: number, b: number): number
+    return a + b
+end
+local sum: string = M.add(1, 2)
+-- error: Cannot assign type 'number' to variable 'sum' of type 'string'
+M.add("one", 2)
+-- error: Argument 1: cannot pass type '"one"' to parameter of type 'number'
+
+function M:scale(k: number): number
+    return k
+end
+local scaled: boolean = M:scale(2)
+-- error: Cannot assign type 'number' to variable 'scaled' of type 'boolean'
+
+async function M.wait(seconds: number): void
+end
+function M.update(): void
+    M.wait(1)
+end
+-- error: 'wait' can pause, so it can only be called with 'await' inside an async function; 'M.update' is not async
+
+local sorted = { 3, 1, 2 }
+async function M.less(a: number, b: number): boolean
+    return a < b
+end
+table.sort(sorted, M.less)
+-- error: an async function cannot be used where a plain function is expected
+
+-- Replaced by a function that does not fit, as in a table made with fields;
+-- cleared with nil, it may be (see run/empty_table_functions.lunar).
+M.add = function(s: string): string
+    return s
+end
+-- error: Cannot assign type '(string) -> string' to type '(number, number) -> number'

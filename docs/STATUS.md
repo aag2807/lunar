@@ -12,12 +12,14 @@ Last updated for **2.0.0**, plus what `CHANGELOG.md` lists as unreleased.
 
 | What | Proved by |
 |---|---|
-| Plain Lua 5.3/5.4 compiles unchanged: the output prints what the original prints | `TestPlainLuaCompilesUnchanged`: 16 Lua files in `tests/luacompat`, each compiled and run both ways under 5.3 and 5.4 |
+| Plain Lua 5.3/5.4 compiles unchanged: the output prints what the original prints | `TestPlainLuaCompilesUnchanged`: 17 Lua files in `tests/luacompat`, each compiled and run both ways under 5.3 and 5.4 |
 | The same for real game code | `TestGameScriptsBehaveTheSame`: 14 engine-style scripts in `tests/luacompat/game` |
 | Lua's lexing: every escape, byte strings, long brackets of any level, numerals, CR/CRLF, BOM, `#!` | `tests/luacompat/lexing.lua`, `internal/lexer` tests |
 | Lua's syntax: precedence, `f{}`/`f""` calls, goto/labels, `<const>`/`<close>`, generic `for` with any iterator, `(...)`, `local x` before a label | `tests/luacompat/{precedence,syntax,calls,idioms*}.lua` |
-| Untyped Lua is checked as Lua (missing arguments are nil, `{}` takes any key, forward-declared locals, shadowed library names) | `tests/luacompat/idioms2.lua`, `idioms3.lua` |
-| Typed Lunar: classes (inheritance, abstract, statics, accessors, metamethods), interfaces, enums, generics (constraints, methods, generic classes), `match`, namespaces, modules, utility types, default parameters, narrowing | `TestRegressions` (32 programs run under Lua, 20 that must be refused), `TestExamplesRun` (41 examples), `TestGoldenOutput` |
+| Untyped Lua is checked as Lua (missing arguments are nil, `{}` takes any key, forward-declared locals, shadowed library names, fields cleared with nil or set to nil first, a function replaced by one with fewer parameters or a vararg wrapper) | `tests/luacompat/idioms2.lua`, `idioms3.lua`, `fields.lua` |
+| Functions defined into a table made with `local M = {}` keep their types: their calls are checked, an async one must be awaited, in importing modules too | `tests/regress/run/empty_table_functions.lunar`, `tests/regress/refuse/empty_table_functions.lunar`, `TestImportedTableAsyncFunctionMustBeAwaited` |
+| A function fits where it is passed more arguments than it takes, and where it is passed fewer if the rest may be left out; a vararg one takes any number | `tests/regress/run/function_params.lunar`, `tests/regress/refuse/function_params.lunar` |
+| Typed Lunar: classes (inheritance, abstract, statics, accessors, metamethods), interfaces, enums, generics (constraints, methods, generic classes), `match`, namespaces, modules, utility types, default parameters, narrowing | `TestRegressions` (37 programs run under Lua, 29 that must be refused), `TestExamplesRun` (41 examples), `TestGoldenOutput` |
 | Every LANGUAGE.md example compiles (and those that run, run) | `TestDocumentationExamplesCompile` |
 | Code nested more than Lua's 200 levels is refused with Lua's reason; deep code compiles in linear time | `TestNestingLimit`, `TestNestedShapesCompileQuickly` |
 | Class fields' initial values are checked against their types | `tests/regress/refuse/class_field_values.lunar` |
@@ -33,7 +35,6 @@ Last updated for **2.0.0**, plus what `CHANGELOG.md` lists as unreleased.
 | Two implementations of one function (overloads) | refused; overloads belong in `declare` |
 | Destructuring a table's fields | only a call's results: `local (a, b) = f()` |
 | Nested template strings, a backtick inside `${...}` | refused |
-| Functions defined into a table made with `local M = {}` (`function M.f(a: number)`) are not checked where they are called, async or not | the table's fields are not typed; use `export function` in a module, or give `M` a type |
 | `s.f(...)` on a string where the arguments do not fill `string.f`'s parameters is taken as `s:f(...)` | `s.rep("ab", 2)` means `s:rep("ab", 2)`; write `string.rep("ab", 2)` for the plain call |
 | Runtime error lines are those of the generated Lua | source maps (`--source-map`) map them back |
 

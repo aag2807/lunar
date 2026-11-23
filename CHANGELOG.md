@@ -25,6 +25,17 @@
   now answered with an error.
 - `local m: { x: number } = ...` crashed the compiler; it now says that a
   shape is named with an interface.
+- Functions defined into a table made with `local M = {}` (`function
+  M.add(a: number)`) were not checked where they were called, and an
+  `async function M.wait()` could be called without `await`. They keep
+  their types now, in modules that import the table too. Scripts that
+  called one with the wrong arguments get errors they did not get before.
+- Plain Lua that was refused: clearing a field of a table made from a
+  literal (`t.n = nil`), a field set to nil before it gets a value
+  (`t.c = nil` then `t.c = 5`), and replacing a function with one that takes
+  fewer parameters (`M.log = function() end`) or a vararg wrapper
+  (`function(...)`). A function now fits where it is passed more arguments
+  than it takes, as in Lua; it used to need exactly as many parameters.
 
 ## 2.0.0 (2026-11-22)
 

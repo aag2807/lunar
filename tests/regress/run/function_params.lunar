@@ -1,0 +1,32 @@
+-- A function with fewer parameters fits where more arguments are passed,
+-- one whose extra parameters are optional fits too, and a vararg one takes
+-- every argument: Lua drops what a function does not take.
+local function each(xs: number[], f: (n: number, i: number) => void): void
+    for i, x in ipairs(xs) do
+        f(x, i)
+    end
+end
+
+local total = 0
+each({ 1, 2, 3 }, function(n: number): void
+    total = total + n
+end)
+assert(total == 6)
+
+local seen = 0
+each({ 5 }, function(n: number, i: number, label?: string): void
+    seen = n + i
+    assert(label == nil)
+end)
+assert(seen == 6)
+
+local count = 0
+each({ 1, 2 }, function(...: number): void
+    count = count + select("#", ...)
+end)
+assert(count == 4)
+
+local log: (level: string, msg: string) => string = function(): string
+    return "quiet"
+end
+assert(log("info", "up") == "quiet")

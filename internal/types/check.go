@@ -4665,19 +4665,33 @@ func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target as
 	}
 
 	// Assigning a field an unannotated table literal lacks adds it, as in
-	// Lua: local t = { a = 1 }; t.b = 2.
+	// Lua: local t = { a = 1 }; t.b = 2. A field first given nil (t.c =
+	// nil, to say it exists) takes whatever it is given later, as `local x`
+	// does.
+	addedType := func() Type {
+		if valueType == nil {
+			return Any
+		}
+		if _, isNil := valueType.(*NilType); isNil {
+			return Any
+		}
+		return widenLiteralType(valueType)
+	}
+	// A field of a table made without annotations can be cleared, as a
+	// local declared without a type can: t.cache = nil.
+	unannotatedField := false
 	if dot, ok := target.(*ast.DotExpression); ok && !dot.IsOptional {
 		if field, ok := dot.Right.(*ast.Identifier); ok {
 			leftType := c.checkExpression(dot.Left)
 			// `local M = {}` then function M.add: the field is defined there.
-			if arr, ok := leftType.(*ArrayType); ok && arr.EmptyLiteral && arr.MemberSyms[field.Value] == nil {
-				t := Type(Any)
-				if valueType != nil {
-					t = widenLiteralType(valueType)
+			if arr, ok := leftType.(*ArrayType); ok && arr.EmptyLiteral {
+				unannotatedField = true
+				if arr.MemberSyms[field.Value] == nil {
+					setMemberSym(&arr.MemberSyms, field.Value, c.defineMember(field.Token, SymProperty, addedType(), exprText(dot.Left)))
 				}
-				setMemberSym(&arr.MemberSyms, field.Value, c.defineMember(field.Token, SymProperty, t, exprText(dot.Left)))
 			}
 			if rec, ok := leftType.(*InterfaceType); ok && rec.Open {
+				unannotatedField = true
 				current, hasProp := rec.Properties[field.Value]
 				_, hasMethod := rec.Methods[field.Value]
 				// A field given a literal (n = 1) takes other values of its
@@ -4688,10 +4702,7 @@ func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target as
 					rec.Properties[field.Value] = wide
 				}
 				if !hasProp && !hasMethod {
-					added := Type(Any)
-					if valueType != nil {
-						added = widenLiteralType(valueType)
-					}
+					added := addedType()
 					rec.Properties[field.Value] = added
 					// Defined here: M.add later goes to `function M.add`.
 					setMemberSym(&rec.MemberSyms, field.Value, c.defineMember(field.Token, SymProperty, added, exprText(dot.Left)))
@@ -4722,7 +4733,7 @@ func (c *Checker) checkAssignmentTarget(node *ast.AssignmentStatement, target as
 
 	// A local declared without a type can be given up, as Lua code does
 	// to release what it held: cache = nil.
-	if ident, ok := target.(*ast.Identifier); ok && c.env.IsInferred(ident.Value) {
+	if ident, ok := target.(*ast.Identifier); ok && c.env.IsInferred(ident.Value) || unannotatedField {
 		if _, isNil := valueType.(*NilType); isNil {
 			return
 		}
@@ -7043,6 +7054,17 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 		}
 		return wrapIfOptional(Any)
 
+	case *ArrayType:
+		// `local M = {}` then `function M.add(a: number)`: M.add has the
+		// type its definition gave it, so its calls are checked. Its other
+		// fields stay Lua's, any type at any time (M.n = 1, then M.n = "a").
+		if sym := typ.MemberSyms[propertyName]; typ.EmptyLiteral && sym != nil {
+			if fn, ok := sym.Type.(*FunctionType); ok {
+				return resolved(ast.DispatchPlain, fn)
+			}
+		}
+		return wrapIfOptional(Any)
+
 	default:
 		// For other types, allow any property access (could be table access)
 		return wrapIfOptional(Any)
@@ -7860,6 +7882,10 @@ func (c *Checker) checkExportStatement(node *ast.ExportStatement) {
 			var varType Type
 			if i < len(stmt.Types) && stmt.Types[i] != nil {
 				varType = c.resolveTypeExpression(stmt.Types[i])
+			} else if t, ok := c.env.DeclaredType(name.Value); ok {
+				// The type the declaration gave the name, itself: a table
+				// made with {} gains the functions defined into it later.
+				varType = t
 			} else if i < len(stmt.Values) && stmt.Values[i] != nil {
 				varType = c.checkExpression(stmt.Values[i])
 			} else {

@@ -20,14 +20,17 @@ compiled unchanged and must print what they print under Lua.
 
 Code without annotations is checked as Lua: a local declared empty (`local
 x`) takes whatever it is given later; a table made from a literal gains the
-fields assigned to it, and a field it lacks reads as `any`; a parameter
-without a type may be left out; `a or b` and `a and b` have the type of the
-operand they return (`(c.attempt or 0) + 1` is a number), and `a and a.x`
-knows `a` is not nil on the right; values are adjusted to names as in Lua
-(`local ok = pcall(f)`, `local a, b = 1`); `function M.add(a, b)` and
-`function Point:len()` define functions into tables. Once you annotate
-something, it is checked strictly: an interface you write down has exactly
-its fields, and a typed parameter must be passed.
+fields assigned to it, and a field it lacks reads as `any`; such a table's
+fields can be cleared (`t.cache = nil`), and one first set to nil takes
+whatever it is given later; a parameter without a type may be left out; `a
+or b` and `a and b` have the type of the operand they return
+(`(c.attempt or 0) + 1` is a number), and `a and a.x` knows `a` is not nil on
+the right; values are adjusted to names as in Lua (`local ok = pcall(f)`,
+`local a, b = 1`); `function M.add(a, b)` and `function Point:len()` define
+functions into tables, which keep their types, so calls to them are checked,
+in a table made with `local M = {}` too. Once you annotate something, it is
+checked strictly: an interface you write down has exactly its fields, and a
+typed parameter must be passed.
 
 Only Lua's own reserved words are reserved. The words Lunar adds (`class`,
 `match`, `from`, `import`, `get`, `set`, `number`, ...) are names wherever a
@@ -166,6 +169,26 @@ print(greet("ada"), repeated("ab"), firstOf<number>({ 7, 8 }), nameOf({ name = "
 A global function may be called before its definition in the file. One name
 has one implementation; overloads are written as `declare function`
 signatures, for APIs implemented elsewhere.
+
+A function fits where it will be passed more arguments than it takes, since
+Lua drops the rest: a callback may ignore what it is given, and `M.log =
+function() end` silences `M.log`. It fits where it will be passed fewer only
+if the parameters it misses may be left out (optional, or untyped), and a
+vararg function takes any number.
+
+```lunar
+local function each(xs: number[], f: (n: number, i: number) => void): void
+    for i, x in ipairs(xs) do
+        f(x, i)
+    end
+end
+
+local total = 0
+each({ 1, 2 }, function(n: number): void
+    total = total + n
+end)
+print(total)
+```
 
 ## Interfaces and table literals
 
@@ -470,10 +493,7 @@ end)
 - An async method cannot override or implement a plain one. Constructors,
   getters, setters, metamethods and the iterator of a generic `for` cannot be
   async: nothing awaits them.
-- A value typed `any`, or a bare `function`, may hold either, unchecked. So
-  may a table made with `local M = {}`, whose fields are not typed: write
-  `export async function f()` in a module, or give `M` a type, for
-  `async function M.f()` to be checked.
+- A value typed `any`, or a bare `function`, may hold either, unchecked.
 
 [`examples/features/25_async.lunar`](../examples/features/25_async.lunar)
 runs a small scheduler of its own.

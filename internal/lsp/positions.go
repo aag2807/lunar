@@ -45,7 +45,9 @@ func uriToPathOn(goos, uri string) string {
 		host = unescaped
 	}
 	if goos != "windows" {
-		return filepath.Clean(filepath.FromSlash(p))
+		// path, not filepath: the result is a Unix path whichever system
+		// this runs on (filepath would use '\' on Windows).
+		return path.Clean(p)
 	}
 	if host != "" && host != "localhost" {
 		return `\\` + host + strings.ReplaceAll(path.Clean(p), "/", `\`)

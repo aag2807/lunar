@@ -6,6 +6,9 @@ completion, signature help and symbols.
 
 ## Build and install
 
+The [2.0.0 release](https://github.com/aag2807/lunar/releases/tag/v2.0.0)
+has the packaged extension, `lunar-2.0.0.vsix`. To build it yourself:
+
 ```sh
 cd editors/vscode
 npm ci
@@ -19,8 +22,8 @@ Then in VS Code: *Extensions* → `…` → *Install from VSIX…*.
 Open the folder through the WSL extension (`code .` from a WSL shell). The
 extension declares `"extensionKind": ["workspace"]`, so it installs and runs
 inside WSL and starts the Linux `lunar`; install the VSIX from that WSL
-window. `lunar` must be on the WSL `PATH` (`make install PREFIX=$HOME/.local`),
-or set `lunar.serverPath`.
+window. `lunar` must be on the WSL `PATH` (the Linux release archive, or
+`make install PREFIX=$HOME/.local`), or set `lunar.serverPath`.
 
 ## Settings
 

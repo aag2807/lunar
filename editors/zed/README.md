@@ -5,8 +5,8 @@ in `editors/tree-sitter-lunar`, and the Lunar language server (`lunar lsp`).
 
 ## Install as a dev extension
 
-1. Put `lunar` on your `PATH` (`make install PREFIX=$HOME/.local` in the
-   repository). On Windows with the project in WSL, open the folder in Zed's
+1. Put `lunar` on your `PATH`: from a release archive, or
+   `make install PREFIX=$HOME/.local` in the repository. On Windows with the project in WSL, open the folder in Zed's
    WSL mode so the server runs inside WSL.
 2. Install Rust through rustup and add the WebAssembly target:
    `rustup target add wasm32-wasip2`. Zed builds the extension with the Rust

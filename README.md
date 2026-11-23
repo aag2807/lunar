@@ -2,6 +2,11 @@
 
 **A statically-typed superset of Lua that compiles to plain Lua 5.3 / 5.4.**
 
+Every Lua 5.3/5.4 program is a Lunar program. Latest release:
+[**2.0.0**](https://github.com/aag2807/lunar/releases/tag/v2.0.0), with
+binaries for Linux, macOS and Windows. What works and what does not, with the
+test behind each claim: [`docs/STATUS.md`](docs/STATUS.md).
+
 ```lunar
 class Cart
     private items: number[]
@@ -31,9 +36,11 @@ assert(cart.total() == 30)
 
 ## What works today
 
-Every line below is backed by a program in [`examples/features/`](examples/features/)
-that CI compiles and **runs** under Lua 5.3 and 5.4, asserting its own results
-(`tests/examples`). If a feature is not on this list, treat it as unsupported.
+Every line below is backed by a test that CI compiles and **runs** under Lua
+5.3 and 5.4: mostly programs in [`examples/features/`](examples/features/)
+that assert their own results (`tests/examples`); [`docs/STATUS.md`](docs/STATUS.md)
+names the test for each. If a feature is not on this list, treat it as
+unsupported.
 
 - Lua itself: locals, `local function`, `if`/`while`/numeric and generic `for`,
   `repeat … until`, varargs, closures, `pcall`/`error`, method calls with `:`
@@ -42,6 +49,11 @@ that CI compiles and **runs** under Lua 5.3 and 5.4, asserting its own results
   operator precedence, `f{...}`/`f"..."` calls, `goto` and labels,
   `<const>`/`<close>`, `;` in tables, and Lunar's own words (`from`, `match`,
   `class`, ...) as names
+- The whole standard library of each target: every library member, global
+  and file method, checked against the `lua5.3` and `lua5.4` interpreters
+  themselves (`bit32` for 5.3, `warn` for 5.4), and every function used in
+  the forms the Lua manual gives. Functions that return nil only on failure
+  (`io.open`, `os.getenv`) are typed by their success result, as in Teal
 - Type annotations on variables, parameters and returns; optional parameters
   (`b: number?` or `b?: number`); multiple returns (`(number, string)`)
 - Classes: fields, `private`/`protected`, methods, `static` methods and fields,
@@ -80,18 +92,31 @@ that CI compiles and **runs** under Lua 5.3 and 5.4, asserting its own results
 
 Function overloading is for `declare function` only, and `async`/`await` are
 refused with an error: Lua's coroutines do that job. Targets other than Lua
-5.3 and 5.4 (LuaJIT, 5.1) are not supported.
+5.3 and 5.4 (LuaJIT, 5.1, 5.2) are not supported. Code nested more than 200
+levels deep is refused, as Lua itself refuses to load it. Destructuring a
+table's fields and nested template strings are not supported yet; the full
+list is in [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Install
 
-Requires Go 1.23 or newer.
+Download the archive for your system from the
+[2.0.0 release](https://github.com/aag2807/lunar/releases/tag/v2.0.0)
+(Linux, macOS and Windows, each for x86-64 and ARM64), unpack it, and put
+`lunar` (`lunar.exe` on Windows) on your `PATH`. `SHA256SUMS` lists the
+archives' checksums.
+
+```sh
+lunar --version   # lunar 2.0.0 (6dafea1b632d)
+```
+
+The binary is self-contained: the standard library declarations are built in.
+
+Or build from source, with Go 1.23 or newer:
 
 ```sh
 make build                       # builds dist/lunar (and dist/lunar-lsp, an alias for `lunar lsp`)
 make install PREFIX=$HOME/.local # copies them to $HOME/.local/bin
 ```
-
-The binary is self-contained: the standard library declarations are built in.
 
 ## Use
 
@@ -190,9 +215,9 @@ workspace symbols.
 
 | Editor | | |
 |---|---|---|
-| Neovim 0.11+ | [`editors/nvim`](editors/nvim) | `vim.lsp`, tree-sitter highlighting, folding and indentation |
-| Zed | [`editors/zed`](editors/zed) | the language server and tree-sitter highlighting |
-| VS Code | [`editors/vscode`](editors/vscode) | the language server and TextMate highlighting; runs in WSL |
+| Neovim 0.11+ | [`editors/nvim`](editors/nvim) | `vim.lsp`, tree-sitter highlighting, folding and indentation; CI tests it headless on 0.12 |
+| VS Code | [`editors/vscode`](editors/vscode) | the language server and TextMate highlighting; runs in WSL. Install `lunar-2.0.0.vsix` from the release (not on the Marketplace yet) |
+| Zed | [`editors/zed`](editors/zed) | the language server and tree-sitter highlighting, as a dev extension; it builds in CI but has not been tried inside Zed yet |
 
 The tree-sitter grammar is [`editors/tree-sitter-lunar`](editors/tree-sitter-lunar).
 

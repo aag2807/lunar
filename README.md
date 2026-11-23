@@ -2,8 +2,9 @@
 
 **A statically-typed superset of Lua that compiles to plain Lua 5.3 / 5.4.**
 
-Every Lua 5.3/5.4 program is a Lunar program. Latest release:
-[**2.0.0**](https://github.com/aag2807/lunar/releases/tag/v2.0.0), with
+Every Lua 5.3/5.4 program is a Lunar program, with two exceptions kept on
+purpose ([below](#plain-lua-that-lunar-reads-differently)). Latest release:
+[**2.1.0**](https://github.com/aag2807/lunar/releases/tag/v2.1.0), with
 binaries for Linux, macOS and Windows. What works and what does not, with the
 test behind each claim: [`docs/STATUS.md`](docs/STATUS.md).
 
@@ -117,13 +118,13 @@ Lua compiles unchanged, with two known exceptions, both kept on purpose:
 ## Install
 
 Download the archive for your system from the
-[2.0.0 release](https://github.com/aag2807/lunar/releases/tag/v2.0.0)
+[2.1.0 release](https://github.com/aag2807/lunar/releases/tag/v2.1.0)
 (Linux, macOS and Windows, each for x86-64 and ARM64), unpack it, and put
 `lunar` (`lunar.exe` on Windows) on your `PATH`. `SHA256SUMS` lists the
 archives' checksums.
 
 ```sh
-lunar --version   # lunar 2.0.0 (6dafea1b632d)
+lunar --version   # lunar 2.1.0, then the revision it was built from
 ```
 
 The binary is self-contained: the standard library declarations are built in.
@@ -233,7 +234,7 @@ workspace symbols.
 | Editor | | |
 |---|---|---|
 | Neovim 0.11+ | [`editors/nvim`](editors/nvim) | `vim.lsp`, tree-sitter highlighting, folding and indentation; CI tests it headless on 0.12 |
-| VS Code | [`editors/vscode`](editors/vscode) | the language server and TextMate highlighting; runs in WSL. Install `lunar-2.0.0.vsix` from the release (not on the Marketplace yet) |
+| VS Code | [`editors/vscode`](editors/vscode) | the language server and TextMate highlighting; runs in WSL. Install `lunar-2.1.0.vsix` from the release (not on the Marketplace yet) |
 | Zed | [`editors/zed`](editors/zed) | the language server and tree-sitter highlighting, as a dev extension; it builds in CI but has not been tried inside Zed yet |
 
 The tree-sitter grammar is [`editors/tree-sitter-lunar`](editors/tree-sitter-lunar).

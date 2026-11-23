@@ -4,7 +4,7 @@ What works, what does not, and how each is known. A line under **Works**
 names the test that proves it; CI runs every one on Linux (Lua 5.3 and 5.4)
 and Windows. Update this file in the same commit as the change it describes.
 
-Last updated for **2.0.0**, plus what `CHANGELOG.md` lists as unreleased.
+Last updated for **2.1.0**, plus what `CHANGELOG.md` lists as unreleased.
 
 ## Compiler
 

@@ -460,3 +460,6 @@ local s: string = raw as string
   error; Lua keeps only the last.
 - **`async`/`await`**: refused; use `coroutine.create` and `coroutine.resume`.
 - **Targets other than Lua 5.3 and 5.4.**
+- **Code nested more than 200 levels deep** (blocks, or expressions inside
+  expressions): Lua refuses to load it ("C stack overflow"), so Lunar
+  refuses it too, saying so.

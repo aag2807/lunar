@@ -2067,8 +2067,27 @@ func (g *Generator) generateFunctionExpression(node *ast.FunctionExpression) str
 
 // generateIndent generates the current indentation
 func (g *Generator) generateIndent() string {
-	return strings.Repeat("    ", g.indent)
+	// Past maxIndent levels lines stop moving right: Lua does not care, no
+	// real code nests that deep, and a line whose size grows with depth
+	// made each level's copy of the block inside it larger, which was
+	// cubic in depth (2,000 nested blocks took 5 s).
+	n := g.indent
+	if n > maxIndent {
+		n = maxIndent
+	}
+	return indents[n]
 }
+
+const maxIndent = 32
+
+// indents are the indentation strings, by level.
+var indents = func() [maxIndent + 1]string {
+	var out [maxIndent + 1]string
+	for i := range out {
+		out[i] = strings.Repeat("    ", i)
+	}
+	return out
+}()
 
 // generateExportStatement generates code for an export statement
 func (g *Generator) generateExportStatement(node *ast.ExportStatement) string {

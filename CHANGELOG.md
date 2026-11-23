@@ -114,6 +114,12 @@ their changelog described features that did not work.
   array, an assertion cannot turn one kind of value into another (`5 as
   string`), and decorators apply to `local function` too. `_ENV` is
   declared, and `ipairs`/`pairs` values are never nil.
+- Code nested more than 200 levels deep, which Lua refuses to load ("C
+  stack overflow"), is refused with that reason instead of being compiled
+  slowly into Lua that does not load (2,000 nested blocks took 5 s,
+  10,000 nested functions over two minutes). Functions inside tables and
+  generic calls inside generic calls were exponential in depth (65 levels
+  of `{ function() ... end }` never finished); they are linear.
 - Standard library functions that return nil only to report failure
   (`io.open`, `os.getenv`, `math.type`, ...) are declared by their success
   type, as in Teal, so plain Lua using their results compiles.

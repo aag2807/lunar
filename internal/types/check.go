@@ -662,17 +662,25 @@ func (c *Checker) nestedGotos(v reflect.Value) []*ast.GotoStatement {
 // reached both through its pairs and its entries, which made the walk
 // exponential in nesting depth.
 func (c *Checker) nestedGotosOnce(v reflect.Value, seen map[uintptr]bool) []*ast.GotoStatement {
-	switch v.Kind() {
-	case reflect.Interface, reflect.Ptr:
+	// Through an interface to the pointer inside, which is what is
+	// remembered: a node reached as an interface (a table literal's value,
+	// held in both its values and its entries) was walked once per path,
+	// so nested functions in tables doubled the work at every level.
+	if v.Kind() == reflect.Interface {
 		if v.IsNil() {
 			return nil
 		}
-		if v.Kind() == reflect.Ptr {
-			if seen[v.Pointer()] {
-				return nil
-			}
-			seen[v.Pointer()] = true
+		return c.nestedGotosOnce(v.Elem(), seen)
+	}
+	switch v.Kind() {
+	case reflect.Ptr:
+		if v.IsNil() {
+			return nil
 		}
+		if seen[v.Pointer()] {
+			return nil
+		}
+		seen[v.Pointer()] = true
 		switch n := v.Interface().(type) {
 		case *ast.BlockStatement:
 			return c.gotosIn(n.Statements)
@@ -6309,7 +6317,7 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 
 		// Check argument types
 		for i, arg := range node.Arguments {
-			argType := c.checkExpression(arg)
+			argType := c.typeOf(arg) // checked once: a nested generic call was checked 2^depth times
 			if c.reportLiteralFields(arg, fnType.Parameters[i]) {
 				continue
 			}
@@ -6509,7 +6517,7 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 	// Check argument types (basic check, skip detailed checks with spread)
 	if !hasSpreadArgs {
 		for i, arg := range node.Arguments {
-			argType := c.checkExpression(arg)
+			argType := c.typeOf(arg) // checked once: a nested generic call was checked 2^depth times
 
 			// Determine which parameter type to check against
 			var paramType Type

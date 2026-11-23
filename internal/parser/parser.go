@@ -105,6 +105,11 @@ type Parser struct {
 	ambient bool
 	// matchWith is set once a match expression reached its `with`.
 	matchWith bool
+	// depth is how deeply blocks and expressions are nested here, and
+	// maxDepth the deepest seen; tooDeep is set once that was reported.
+	depth, maxDepth int
+	tooDeep         bool
+	statementStart  bool
 }
 
 // addError adds a parse error with location information
@@ -509,6 +514,14 @@ func (p *Parser) registerInfix(tokenType lexer.TokenType, fn infixParseFn) {
 }
 
 func (p *Parser) parseExpression(precedence int) ast.Expression {
+	// Lua reads the expression a statement starts with (f(...), t.x = ...)
+	// without counting a level; every other one counts.
+	if p.statementStart {
+		p.statementStart = false
+	} else {
+		p.enterLevel()
+		defer p.leaveLevel()
+	}
 	prefix := p.prefixParseFns[p.curToken.Type]
 	if prefix == nil {
 		p.noPrefixParseFnError(p.curToken.Type)
@@ -917,6 +930,29 @@ func (p *Parser) constDestructures() bool {
 		}
 	}
 }
+
+// maxNesting is the deepest nesting of statements and expressions
+// accepted. Lua refuses to load code nested more than 200 levels ("C stack
+// overflow"), counting a level for each statement and sub-expression, as
+// this parser counts (tests/examples/nesting_test.go holds the two to each
+// other); past it the Lua would not load, and checking and generating it
+// cost time that grows faster than the code.
+const maxNesting = 200
+
+// enterLevel counts one more level of nesting, reporting once when it is
+// past what Lua loads.
+func (p *Parser) enterLevel() {
+	p.depth++
+	if p.depth > p.maxDepth {
+		p.maxDepth = p.depth
+	}
+	if p.depth > maxNesting && !p.tooDeep {
+		p.tooDeep = true
+		p.addError(fmt.Sprintf("code nested more than %d levels deep: Lua refuses to load it (\"C stack overflow\"); split it into functions", maxNesting), p.curToken)
+	}
+}
+
+func (p *Parser) leaveLevel() { p.depth-- }
 
 // peekStartsAnnotation says whether a ':' in peek position starts a type
 // annotation: `local x` then a `::label::` on the next line is a label.
@@ -2727,6 +2763,7 @@ func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 func (p *Parser) parseExpressionStatement() ast.Statement {
 	// Try to parse as expression first
 	start := p.curToken
+	p.statementStart = true
 	expr := p.parseExpression(LOWEST)
 
 	// Lua allows several assignment targets: a, b = b, a
@@ -2816,6 +2853,8 @@ func isNilNode(n any) bool {
 // parseStatement parses one statement, or returns a true nil when there is
 // none (an empty statement, or one that failed to parse and was reported).
 func (p *Parser) parseStatement() ast.Statement {
+	p.enterLevel()
+	defer p.leaveLevel()
 	stmt := p.parseStatementNode()
 	if isNilNode(stmt) {
 		return nil

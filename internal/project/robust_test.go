@@ -100,6 +100,10 @@ func TestUnfinishedStatementsNeitherPanicNorHang(t *testing.T) {
 		"--[[ comment", "local t = {", "local t = { a = 1,", "x.", "x:", "x.y(", "local f = function(",
 		"local f = (x) =>", "local a: number[", "local v = a ?? ", "local v = a?.", "local n = 0x",
 		"local n = 1e", "get", "set", "local x = 1 +", "goto", "::label",
+		"async", "async function", "async function f(", "local async", "local async function",
+		"await", "await f(", "local x = async (", "local x = async (x", "declare async",
+		"local m: { x: number } = { x = 1 }", "local t: [() => void] = { a }",
+		"local f: (self: any) => void", "x: number = 1",
 	}
 	program := "local a = 1\nlocal b = 2\nprint(a + b)\n"
 	dir := t.TempDir()

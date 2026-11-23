@@ -112,6 +112,20 @@ type Parser struct {
 	statementStart  bool
 }
 
+// nodeText is a node as written, for a message. A node recovery left
+// half-built (a nil part) prints as "this" instead of crashing the parser.
+func nodeText(n ast.Node) (text string) {
+	defer func() {
+		if recover() != nil {
+			text = "this"
+		}
+	}()
+	if isNilNode(n) {
+		return "this"
+	}
+	return n.String()
+}
+
 // addError adds a parse error with location information
 func (p *Parser) addError(message string, token lexer.Token) {
 	endLine, endColumn := token.EndLine, token.EndColumn
@@ -1615,6 +1629,22 @@ func (p *Parser) parseMappedType() ast.Expression {
 		mappedType.IsReadonly = true
 	}
 
+	// { x: number } is a shape, which Lunar names with an interface: say
+	// so once, and go on after the closing '}'.
+	if !p.peekTokenIs(lexer.LBRACKET) && !mappedType.IsReadonly {
+		open := p.curToken
+		p.addError("'{ ... }' is not a type: name the shape with an interface (interface Point x: number end) and use its name", open)
+		for depth := 0; !p.curTokenIs(lexer.EOF); p.nextToken() {
+			if p.curTokenIs(lexer.LBRACE) {
+				depth++
+			} else if p.curTokenIs(lexer.RBRACE) {
+				if depth--; depth == 0 {
+					break
+				}
+			}
+		}
+		return &ast.Identifier{Token: open, Value: "any"}
+	}
 	if !p.expectPeek(lexer.LBRACKET) {
 		return nil
 	}
@@ -2881,7 +2911,7 @@ func (p *Parser) parseExpressionStatement() ast.Statement {
 					p.addError("cannot assign through '?['; assign to the element of a value known to be there", t.Token)
 				}
 			default:
-				p.addError(fmt.Sprintf("cannot assign to '%s': only a name, a field or an index can be assigned", target.String()), assignToken)
+				p.addError(fmt.Sprintf("cannot assign to '%s': only a name, a field or an index can be assigned", nodeText(target)), assignToken)
 			}
 		}
 		p.nextToken() // consume '='

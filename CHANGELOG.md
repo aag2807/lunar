@@ -16,6 +16,16 @@
   say `async`. `docs/ENGINE_INTEGRATION.md` describes what the engine does to
   resume scripts.
 
+### Fixed
+
+- Class fields' initial values are checked against their types; they were
+  not checked at all (`x: number = "s"` and undefined names compiled).
+- The language server crashed when completion was asked for inside a word
+  (`pr|int`), and any request it failed on took it down; such a request is
+  now answered with an error.
+- `local m: { x: number } = ...` crashed the compiler; it now says that a
+  shape is named with an interface.
+
 ## 2.0.0 (2026-11-22)
 
 Lunar is now one compiler that does one thing, tested by running the Lua it

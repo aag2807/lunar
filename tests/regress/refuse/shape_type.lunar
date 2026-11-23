@@ -1,0 +1,4 @@
+-- invalid syntax: a type written as a table shape, which Lunar names with an interface
+-- error: '{ ... }' is not a type: name the shape with an interface
+local m: { x: number } = { x = 1 }
+local n: number = m

@@ -33,9 +33,9 @@ Only Lua's own reserved words are reserved. The words Lunar adds (`class`,
 `match`, `from`, `import`, `get`, `set`, `number`, ...) are names wherever a
 declaration of Lunar's cannot begin: `local from = 1`, `t.class`,
 `s:match("%d")`, `function f(public)`. `async(x)`, `await(x)` and `local
-async` are Lua's too; only `await f()` and `local async function f()`, all
-on one line, are Lunar's (in plain Lua they would be two statements side by
-side).
+async` are Lua's too. `await` followed by a name on the same line (`await
+f()`) and `local async function f()` on one line are Lunar's: in plain Lua
+they would be two statements side by side.
 
 ```lunar
 local function sum(...: number): number
@@ -470,7 +470,10 @@ end)
 - An async method cannot override or implement a plain one. Constructors,
   getters, setters, metamethods and the iterator of a generic `for` cannot be
   async: nothing awaits them.
-- A value typed `any`, or a bare `function`, may hold either, unchecked.
+- A value typed `any`, or a bare `function`, may hold either, unchecked. So
+  may a table made with `local M = {}`, whose fields are not typed: write
+  `export async function f()` in a module, or give `M` a type, for
+  `async function M.f()` to be checked.
 
 [`examples/features/25_async.lunar`](../examples/features/25_async.lunar)
 runs a small scheduler of its own.

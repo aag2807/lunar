@@ -20,6 +20,7 @@ Last updated for **2.0.0**, plus what `CHANGELOG.md` lists as unreleased.
 | Typed Lunar: classes (inheritance, abstract, statics, accessors, metamethods), interfaces, enums, generics (constraints, methods, generic classes), `match`, namespaces, modules, utility types, default parameters, narrowing | `TestRegressions` (32 programs run under Lua, 20 that must be refused), `TestExamplesRun` (41 examples), `TestGoldenOutput` |
 | Every LANGUAGE.md example compiles (and those that run, run) | `TestDocumentationExamplesCompile` |
 | Code nested more than Lua's 200 levels is refused with Lua's reason; deep code compiles in linear time | `TestNestingLimit`, `TestNestedShapesCompileQuickly` |
+| Class fields' initial values are checked against their types | `tests/regress/refuse/class_field_values.lunar` |
 | `async`/`await`: an async function is only called with `await`, inside an async function; both are erased to plain coroutines | `examples/features/25_async.lunar` (a scheduler, run under 5.3 and 5.4), `tests/regress/run/async_types.lunar`, `tests/regress/refuse/async_*.lunar` (one per rule), `TestImportedAsyncFunctionMustBeAwaited`, `TestHoverShowsAsync` |
 | No crash on half-written code | `test/integration` (incomplete code), `internal/parser/hang_test.go`, `internal/project/robust_test.go` |
 | Fuzzing: 1,500 generated programs, against this release, printed the same compiled and not | the differential fuzzer (run by hand, not in CI) |
@@ -32,6 +33,7 @@ Last updated for **2.0.0**, plus what `CHANGELOG.md` lists as unreleased.
 | Two implementations of one function (overloads) | refused; overloads belong in `declare` |
 | Destructuring a table's fields | only a call's results: `local (a, b) = f()` |
 | Nested template strings, a backtick inside `${...}` | refused |
+| Functions defined into a table made with `local M = {}` (`function M.f(a: number)`) are not checked where they are called, async or not | the table's fields are not typed; use `export function` in a module, or give `M` a type |
 | `s.f(...)` on a string where the arguments do not fill `string.f`'s parameters is taken as `s:f(...)` | `s.rep("ab", 2)` means `s:rep("ab", 2)`; write `string.rep("ab", 2)` for the plain call |
 | Runtime error lines are those of the generated Lua | source maps (`--source-map`) map them back |
 
@@ -78,7 +80,8 @@ Last updated for **2.0.0**, plus what `CHANGELOG.md` lists as unreleased.
 
 | What | Proved by |
 |---|---|
-| Language server: diagnostics, definition, references, rename (refusing conflicts), hover, completion while typing, signature help, document and workspace symbols, file watching, untitled buffers, a workspace without a config | `internal/lsp` (39 tests, with the race detector) |
+| Language server: diagnostics, definition, references, rename (refusing conflicts), hover, completion while typing, signature help, document and workspace symbols, file watching, untitled buffers, a workspace without a config | `internal/lsp` (tests run with the race detector) |
+| A request the server fails on is answered with an error, and the server goes on | `TestPanickingRequestIsAnError` |
 | Neovim 0.12: filetype, tree-sitter highlighting, the server attaching, definition, diagnostics | `editors/nvim/test/run.sh` (CI) |
 | Tree-sitter grammar: every `.lunar` file and the Lua corpus parse cleanly | `editors/tree-sitter-lunar/check.sh` (CI) |
 | VS Code extension and Zed extension build and package | CI |

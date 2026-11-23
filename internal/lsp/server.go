@@ -31,6 +31,9 @@ type Server struct {
 	writer  io.Writer
 	writeMu sync.Mutex
 	logger  *log.Logger
+	// testPanic makes requests of this method panic, for the test that a
+	// panicking request does not take the server down.
+	testPanic string
 
 	// mu guards everything below; the message loop and the debounce timer
 	// both take it.
@@ -185,7 +188,7 @@ type request struct {
 	Params json.RawMessage `json:"params"`
 }
 
-func (s *Server) handleMessage(content json.RawMessage) error {
+func (s *Server) handleMessage(content json.RawMessage) (err error) {
 	var req request
 	if err := json.Unmarshal(content, &req); err != nil {
 		return err
@@ -193,6 +196,20 @@ func (s *Server) handleMessage(content json.RawMessage) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// A bug in answering one request must not take the editor's server
+	// down: the request gets an error, and the server goes on.
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Printf("internal error in %s: %v\n%s", req.Method, r, debug.Stack())
+			if req.ID != nil {
+				err = s.sendError(req.ID, InternalError, fmt.Sprintf("Lunar: internal error in %s: %v", req.Method, r))
+			}
+		}
+	}()
+	if s.testPanic != "" && req.Method == s.testPanic {
+		panic("test panic")
+	}
 
 	// The client's answer to a request of the server's own
 	// (client/registerCapability): nothing to do.
@@ -284,7 +301,6 @@ func (s *Server) handleMessage(content json.RawMessage) error {
 	s.flush()
 
 	var result interface{}
-	var err error
 	switch req.Method {
 	case "textDocument/definition":
 		result, err = withPosition(req.Params, s.definition)

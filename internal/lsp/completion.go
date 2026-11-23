@@ -263,6 +263,10 @@ func inCommentOrString(text string, offset int) bool {
 	for i := 0; i < 1_000_000; i++ {
 		tok := l.NextToken()
 		if tok.Type == lexer.EOF || tok.Offset >= offset {
+			// offset inside the last token (pr|int): a word, not a comment.
+			if prevEnd > offset {
+				return false
+			}
 			// Only whitespace and comments lie between the last token and
 			// offset: offset is in a comment if one is open there.
 			gap := text[prevEnd:offset]

@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.0
+## 2.0.0 (2026-11-22)
 
 Lunar is now one compiler that does one thing, tested by running the Lua it
 produces under Lua 5.3 and 5.4 in CI. Earlier versions are in the git history;

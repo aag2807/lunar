@@ -202,6 +202,8 @@ The tree-sitter grammar is [`editors/tree-sitter-lunar`](editors/tree-sitter-lun
 - [`docs/ENGINE_INTEGRATION.md`](docs/ENGINE_INTEGRATION.md): running Lunar from a
   game engine or build tool: configuration, `lunar build`, JSON output, exit
   codes, `require` names, data files, declaring the engine's API
+- [`docs/STATUS.md`](docs/STATUS.md): what works (with the test that proves
+  it) and what does not yet
 - [`CHANGELOG.md`](CHANGELOG.md)
 
 ## Development

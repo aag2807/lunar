@@ -2,7 +2,7 @@
   "name": "lunar",
   "displayName": "Lunar",
   "description": "Lunar, a statically-typed superset of Lua: highlighting and the Lunar language server",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "publisher": "lunar",
   "engines": {
     "vscode": "^1.82.0"

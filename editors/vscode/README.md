@@ -6,13 +6,13 @@ completion, signature help and symbols.
 
 ## Build and install
 
-The [2.1.0 release](https://github.com/aag2807/lunar/releases/tag/v2.1.0)
-has the packaged extension, `lunar-2.1.0.vsix`. To build it yourself:
+The [2.1.2 release](https://github.com/aag2807/lunar/releases/tag/v2.1.2)
+has the packaged extension, `lunar-2.1.2.vsix`. To build it yourself:
 
 ```sh
 cd editors/vscode
 npm ci
-npm run package        # bundles with esbuild and writes lunar-2.1.1.vsix
+npm run package        # bundles with esbuild and writes lunar-2.1.2.vsix
 ```
 
 Then in VS Code: *Extensions* → `…` → *Install from VSIX…*.

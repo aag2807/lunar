@@ -133,8 +133,8 @@ Without `--json`, errors go to stderr with a line of context around each.
 
 ### Version
 
-`lunar --version` prints one line, `lunar 2.1.1` followed by the git revision
-it was built from when known: `lunar 2.1.1 (1a2b3c4d5e6f)`. An editor can
+`lunar --version` prints one line, `lunar 2.1.2` followed by the git revision
+it was built from when known: `lunar 2.1.2 (1a2b3c4d5e6f)`. An editor can
 compare the version with the one it expects.
 
 ## Loading the Lua

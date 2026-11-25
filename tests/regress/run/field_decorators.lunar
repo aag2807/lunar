@@ -1,0 +1,124 @@
+-- Field decorators run once, when the class is defined, for each decorated
+-- field in declaration order: deco(Class, "name", info), or
+-- deco(args)(Class, "name", info). info says what types no longer can at
+-- run time: the declared type as written, and the default if it is a literal.
+interface FieldInfo
+    type?: string
+    default?: any
+    has_default: boolean
+end
+
+interface Call
+    owner: any
+    name: string
+    info: FieldInfo
+    options: any
+end
+
+local calls: Call[] = {}
+
+local function export(owner: any, name: string, info: FieldInfo): void
+    table.insert(calls, { owner = owner, name = name, info = info, options = nil })
+end
+
+local function exportWith(options: any): (owner: any, name: string, info: FieldInfo) => void
+    return function(owner: any, name: string, info: FieldInfo): void
+        table.insert(calls, { owner = owner, name = name, info = info, options = options })
+    end
+end
+
+local function tagged(owner: any, name: string, info: table<string, any>): void
+    table.insert(calls, { owner = owner, name = name .. "!", info = { has_default = false }, options = nil })
+end
+
+local function roll(): number
+    return 5
+end
+
+class Guard
+    @export
+    speed: number = 2.0
+
+    @exportWith({ choices = { "sentry", "brute", "warden" } })
+    kind: "sentry" | "brute" | "warden" = "brute"
+
+    plain: number = 1
+
+    @export
+    @tagged
+    health: number = roll()
+
+    @exportWith({ min = -10 })
+    offset: number = -1
+
+    @export
+    lives = 3
+
+    @export
+    static count: number = 0
+
+    @export
+    target: string?
+end
+
+assert(#calls == 8, "calls: " .. #calls)
+
+assert(calls[1].owner == Guard and calls[1].name == "speed")
+assert(calls[1].info.type == "number" and calls[1].info.has_default)
+assert(calls[1].info.default == 2.0 and math.type(calls[1].info.default) == "float")
+assert(calls[1].options == nil)
+
+assert(calls[2].name == "kind" and calls[2].info.type == '"sentry" | "brute" | "warden"')
+assert(calls[2].info.default == "brute" and calls[2].info.has_default)
+assert(calls[2].options.choices[3] == "warden")
+
+-- Bottom-up, as on methods: tagged, the nearer one, first.
+assert(calls[3].name == "health!" and calls[4].name == "health")
+assert(calls[4].info.type == "number" and calls[4].info.has_default == false and calls[4].info.default == nil)
+
+assert(calls[5].name == "offset" and calls[5].info.default == -1 and calls[5].options.min == -10)
+assert(calls[6].name == "lives" and calls[6].info.type == nil and calls[6].info.default == 3)
+assert(calls[7].name == "count" and calls[7].owner == Guard and calls[7].info.default == 0)
+assert(calls[8].name == "target" and calls[8].info.type == "string?" and calls[8].info.has_default == false)
+
+-- Once per class, not per instance; the fields keep their values.
+local g = Guard()
+local h = Guard()
+assert(#calls == 8)
+assert(g.speed == 2.0 and g.kind == "brute" and g.health == 5 and g.offset == -1 and h.plain == 1 and h.lives == 3)
+assert(Guard.count == 0)
+
+-- One name both ways, as an engine declares it: @export and
+-- @export(options) pick the overload their use matches.
+interface ExportOptions
+    min?: number
+    max?: number
+    choices?: string[]
+    group?: string
+end
+declare function exported(owner: any, name: string, info: FieldInfo): void
+declare function exported(options: ExportOptions): (owner: any, name: string, info: FieldInfo) => void
+
+local shown: string[] = {}
+exported = function(...: any): any
+    local first, name = ...
+    if type(name) == "string" then
+        table.insert(shown, name)
+        return nil
+    end
+    return function(owner: any, field: string, info: FieldInfo): void
+        table.insert(shown, field .. ":" .. tostring(first.group))
+    end
+end
+
+class Warden
+    @exported
+    speed: number = 2.0
+
+    @exported({ choices = { "sentry", "brute", "warden" } })
+    kind: string = "brute"
+
+    @exported({ min = 0, max = 50, group = "Combat" })
+    health: number = 5
+end
+assert(#shown == 3 and shown[1] == "speed" and shown[2] == "kind:nil" and shown[3] == "health:Combat")

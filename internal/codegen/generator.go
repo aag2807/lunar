@@ -1239,6 +1239,8 @@ func (g *Generator) generateClassDeclaration(node *ast.ClassDeclaration) string 
 		output.WriteString("\n")
 	}
 
+	output.WriteString(g.fieldDecorators(className, node.Properties))
+
 	// Apply decorators in reverse order (first decorator is outermost)
 	if len(node.Decorators) > 0 {
 		for i := len(node.Decorators) - 1; i >= 0; i-- {
@@ -2507,4 +2509,66 @@ func patternMatchesNil(pattern ast.Pattern) bool {
 
 	_, isNil := literal.Value.(*ast.NilLiteral)
 	return isNil
+}
+
+// fieldDecorators calls the decorators of a class's fields, once, as the
+// class is defined: for each decorated field in declaration order, the
+// last decorator first, deco(Class, "name", info) or
+// deco(args)(Class, "name", info). Each call gets its own info table.
+func (g *Generator) fieldDecorators(className string, props []*ast.PropertyDeclaration) string {
+	var out strings.Builder
+	for _, prop := range props {
+		if prop == nil || prop.Name == nil || len(prop.Decorators) == 0 {
+			continue
+		}
+		for i := len(prop.Decorators) - 1; i >= 0; i-- {
+			d := prop.Decorators[i]
+			call := d.Name.Value
+			if len(d.Arguments) > 0 {
+				args := make([]string, len(d.Arguments))
+				for j, arg := range d.Arguments {
+					args[j] = g.generateExpression(arg)
+				}
+				call += "(" + strings.Join(args, ", ") + ")"
+			}
+			out.WriteString(g.generateIndent())
+			fmt.Fprintf(&out, "%s(%s, \"%s\", %s)\n", call, className, g.escapeLuaString(prop.Name.Value), g.fieldInfo(prop))
+		}
+	}
+	if out.Len() > 0 {
+		out.WriteString("\n")
+	}
+	return out.String()
+}
+
+// fieldInfo is the table a field decorator is given, for what types no
+// longer say at run time: { type = "number", default = 2.0, has_default =
+// true }. type is the declared type as Lunar writes it, left out when there
+// is none; default is the initial value when it is a literal.
+func (g *Generator) fieldInfo(prop *ast.PropertyDeclaration) string {
+	var parts []string
+	if prop.Type != nil {
+		parts = append(parts, fmt.Sprintf("type = \"%s\"", g.escapeLuaString(prop.Type.String())))
+	}
+	if literalValue(prop.Value) {
+		parts = append(parts, "default = "+g.generateExpression(prop.Value), "has_default = true")
+	} else {
+		parts = append(parts, "has_default = false")
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
+}
+
+// literalValue says whether e is a literal: a number (negative ones too),
+// a string, a boolean or nil.
+func literalValue(e ast.Expression) bool {
+	switch n := e.(type) {
+	case *ast.NumberLiteral, *ast.StringLiteral, *ast.BooleanLiteral, *ast.NilLiteral:
+		return n != nil
+	case *ast.PrefixExpression:
+		if n != nil && n.Operator == "-" {
+			_, isNumber := n.Right.(*ast.NumberLiteral)
+			return isNumber
+		}
+	}
+	return false
 }

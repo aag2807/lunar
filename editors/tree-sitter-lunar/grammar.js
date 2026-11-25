@@ -290,6 +290,8 @@ module.exports = grammar({
     class_property: ($) =>
       prec.right(
         seq(
+          // @export before a field: called once, with (Class, name, info).
+          repeat($.decorator),
           repeat($.modifier),
           field('name', $._identifier_like),
           optional('?'),

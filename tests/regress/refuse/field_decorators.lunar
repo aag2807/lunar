@@ -1,0 +1,44 @@
+-- A field decorator takes (class, name, info) and a function decorator the
+-- function it replaces: each on the other's target is refused, naming both.
+local function export(owner: any, name: string, info: table<string, any>): void
+end
+
+local function logged(f: any): any
+    return f
+end
+
+@export
+function work(): void
+end
+-- error: Decorator 'export' decorates fields: it takes (class, name, info). 'work' is a function, which a decorator is given to replace
+
+class Mover
+    @export
+    run(): void
+    end
+end
+-- error: Decorator 'export' decorates fields: it takes (class, name, info). 'run' is a method, which a decorator is given to replace
+
+class Guard
+    @logged
+    speed: number = 2
+end
+-- error: Decorator 'logged' decorates functions: it takes the function it replaces. 'speed' is a field, whose decorators take (class, name, info)
+
+local function numbered(owner: any, name: number, info: table<string, any>): void
+end
+class Crate
+    @numbered
+    size: number = 1
+end
+-- error: Decorator 'numbered' on field 'size' must accept (class: any, name: string, info: table)
+
+-- A field decorator is called when the class is defined, where nothing
+-- awaits it.
+async function pausing(owner: any, name: string, info: any): void
+end
+class Slot
+    @pausing
+    item: string = "a"
+end
+-- error: Decorator 'pausing' on field 'item' is async: it is called when the class is defined, where nothing awaits it

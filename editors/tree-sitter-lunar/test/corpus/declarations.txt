@@ -381,3 +381,44 @@ f(await)
       function: (identifier)
       arguments: (arguments
         (identifier)))))
+
+================================================================================
+Decorated class fields
+================================================================================
+
+class Guard
+    @export
+    speed: number = 2.0
+
+    @export({ group = "Combat" })
+    @tagged
+    static health: number = 5
+end
+
+--------------------------------------------------------------------------------
+
+(chunk
+  (class_declaration
+    (identifier)
+    (class_property
+      (decorator
+        (identifier))
+      (identifier)
+      (type_identifier
+        (identifier))
+      (number))
+    (class_property
+      (decorator
+        (identifier)
+        (arguments
+          (table_constructor
+            (field
+              (identifier)
+              (string)))))
+      (decorator
+        (identifier))
+      (modifier)
+      (identifier)
+      (type_identifier
+        (identifier))
+      (number))))

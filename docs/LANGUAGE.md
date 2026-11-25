@@ -545,6 +545,61 @@ end
 print(work(1), Geometry.area(3, 4))
 ```
 
+### Decorators on class fields
+
+A class field may carry decorators too, so a program hosting the scripts (a
+game editor) can learn which fields a script wants shown, and how. A field
+decorator is called once, when the class is defined, not for each instance,
+and does not replace the field: `@export` calls `export(Guard, "speed",
+info)`, and `@export(options)` calls `export(options)(Guard, "speed", info)`.
+The decorated fields are taken in the order they are declared, and several
+decorators on one field from the bottom up, as on methods.
+
+`info` says what types no longer can at run time: `type`, the declared type
+as written (left out when the field has none); `default`, the initial value
+when it is a literal (a number, string, boolean or nil); and `has_default`,
+false when the initial value is anything else, or there is none. Each call
+gets its own table.
+
+A field decorator takes `(class: any, name: string, info)`, `info` typed as
+an interface like `FieldInfo` below, `table<string, any>` or `any`; what it
+returns is ignored, and it cannot be async. A decorator that takes a function
+on a field, or one that takes `(class, name, info)` on a function or method,
+is an error that names both. A declared decorator with overloads, as an
+engine might declare one name for both forms, is matched by its use:
+`@export` takes the `(class, name, info)` overload, `@export(options)` the
+one its arguments fit.
+
+```lunar
+interface FieldInfo
+    type?: string
+    default?: any
+    has_default: boolean
+end
+
+local shown: string[] = {}
+
+local function export(owner: any, name: string, info: FieldInfo): void
+    table.insert(shown, name .. ": " .. (info.type or "?"))
+end
+
+local function exportIn(group: string): (owner: any, name: string, info: FieldInfo) => void
+    return function(owner: any, name: string, info: FieldInfo): void
+        table.insert(shown, group .. "." .. name .. " = " .. tostring(info.default))
+    end
+end
+
+class Guard
+    @export
+    speed: number = 2.0
+
+    @exportIn("Combat")
+    health: number = 5
+end
+
+print(table.concat(shown, ", "))
+```
+
 ## Utility types
 
 `Pick<T, K>`, `Omit<T, K>`, `Partial<T>`, `Required<T>`, `Readonly<T>`,

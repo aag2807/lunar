@@ -1,0 +1,73 @@
+-- Field decorators: a game editor learns which fields a script wants shown,
+-- and how. A field decorator runs once, when the class is defined, with the
+-- class, the field's name and an info table: { type, default, has_default }.
+
+interface FieldInfo
+    type?: string
+    default?: any
+    has_default: boolean
+end
+
+interface ExportOptions
+    min?: number
+    max?: number
+    choices?: string[]
+    group?: string
+end
+
+interface Shown
+    name: string
+    type: string
+    default: any
+    group: string
+end
+
+-- What the editor would read: every exported field, in order.
+local inspector: Shown[] = {}
+
+local function show(name: string, info: FieldInfo, options: ExportOptions): void
+    table.insert(inspector, {
+        name = name,
+        type = info.type or "any",
+        default = info.default,
+        group = options.group or "General",
+    })
+end
+
+-- @export
+local function export(owner: any, name: string, info: FieldInfo): void
+    show(name, info, {})
+end
+
+-- @exportWith({ ... })
+local function exportWith(options: ExportOptions): (owner: any, name: string, info: FieldInfo) => void
+    return function(owner: any, name: string, info: FieldInfo): void
+        show(name, info, options)
+    end
+end
+
+class Guard
+    @export
+    speed: number = 2.0
+
+    @exportWith({ choices = { "sentry", "brute", "warden" } })
+    kind: string = "brute"
+
+    @exportWith({ min = 0, max = 50, group = "Combat" })
+    health: number = 5
+
+    -- Not exported: the editor does not see it.
+    alertness: number = 0
+end
+
+for _, field in ipairs(inspector) do
+    print(field.group, field.name, field.type, field.default)
+end
+
+-- Decorators ran when Guard was defined; making guards runs none.
+local a, b = Guard(), Guard()
+assert(#inspector == 3)
+assert(inspector[1].name == "speed" and inspector[1].type == "number" and inspector[1].default == 2.0)
+assert(inspector[2].name == "kind" and inspector[2].default == "brute")
+assert(inspector[3].name == "health" and inspector[3].group == "Combat")
+assert(a.health == 5 and b.kind == "brute")

@@ -1,0 +1,7 @@
+-- invalid syntax: a decorator on a local variable
+-- error: decorators apply to functions, classes, methods and class fields; a local variable cannot have one
+local function export(owner: any, name: string, info: any): void
+end
+
+@export
+local speed = 2

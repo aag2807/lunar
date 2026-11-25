@@ -1150,6 +1150,9 @@ type PropertyDeclaration struct {
 	Name       *Identifier
 	Type       Expression
 	Value      Expression // initial/default value
+	// Decorators are called once when the class is defined, the last
+	// first: deco(Class, "name", info).
+	Decorators []*Decorator
 }
 
 func (pd *PropertyDeclaration) statementNode()       {}

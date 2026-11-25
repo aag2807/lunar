@@ -964,6 +964,10 @@
       "required": false,
       "types": [
         {
+          "type": "decorator",
+          "named": true
+        },
+        {
           "type": "modifier",
           "named": true
         }

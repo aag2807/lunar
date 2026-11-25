@@ -10,10 +10,15 @@ import (
 // it. The Lua is `f = deco(f)`, the last decorator first, and the name keeps
 // the target's type: so the target has to fit what each decorator takes,
 // and what the decorator returns, which replaces it, has to fit the target.
-func (c *Checker) checkDecoratorTargets(decorators []*ast.Decorator, target *FunctionType, name string) {
+func (c *Checker) checkDecoratorTargets(decorators []*ast.Decorator, target *FunctionType, name, what string) {
 	for _, d := range decorators {
 		fn := c.decoratorFunction(d, target)
 		if fn == nil {
+			continue
+		}
+		if decoratesFields(fn) {
+			c.addError(fmt.Sprintf("Decorator '%s' decorates fields: it takes (class, name, info). '%s' is a %s, which a decorator is given to replace",
+				d.Name.Value, name, what), d.Token)
 			continue
 		}
 		params, rest := splitRest(fn)
@@ -62,8 +67,18 @@ func (c *Checker) decoratorFunction(d *ast.Decorator, target Type) *FunctionType
 		return nil
 	}
 	if len(d.Arguments) > 0 {
-		if fn, ok = fn.ReturnType.(*FunctionType); !ok {
+		if fn, ok = c.decoratorOverload(fn, d).ReturnType.(*FunctionType); !ok {
 			return nil
+		}
+	} else if len(fn.Overloads) > 0 {
+		// A bare @deco declared with several overloads: the one for this
+		// target, a field's (class, name, info) or a function.
+		forField := target == nil
+		for _, sig := range append([]*FunctionType{fn}, fn.Overloads...) {
+			if decoratesFields(sig) == forField {
+				fn = sig
+				break
+			}
 		}
 	}
 	if len(fn.GenericParams) > 0 && len(fn.Parameters) > 0 {
@@ -80,6 +95,85 @@ func (c *Checker) decoratorFunction(d *ast.Decorator, target Type) *FunctionType
 		fn = c.substituteFunctionType(fn, substitutions)
 	}
 	return fn
+}
+
+// decoratorOverload is the signature of a declared decorator that
+// @deco(args)'s arguments match, or its first when none does (whose errors
+// checkDecorator then reports).
+func (c *Checker) decoratorOverload(fn *FunctionType, d *ast.Decorator) *FunctionType {
+	if len(fn.Overloads) == 0 {
+		return fn
+	}
+	args := make([]Type, len(d.Arguments))
+	for i, arg := range d.Arguments {
+		args[i] = c.typeOf(arg)
+	}
+	for _, sig := range append([]*FunctionType{fn}, fn.Overloads...) {
+		if c.overloadMatches(sig, args) {
+			return sig
+		}
+	}
+	return fn
+}
+
+// checkFieldDecorators checks the decorators of a class's fields. Each is
+// called once, as the class is defined, with deco(Class, "name", info),
+// and what it returns is ignored: it has to take those three.
+func (c *Checker) checkFieldDecorators(node *ast.ClassDeclaration, classType *ClassType) {
+	call := &FunctionType{Parameters: []Type{classType, String, fieldInfoType()}, ReturnType: Void}
+	for _, prop := range node.Properties {
+		if prop == nil || prop.Name == nil {
+			continue
+		}
+		for _, d := range prop.Decorators {
+			c.checkDecorator(d)
+			fn := c.decoratorFunction(d, nil)
+			if fn == nil {
+				continue
+			}
+			deco, field := d.Name.Value, prop.Name.Value
+			switch {
+			case !decoratesFields(fn) && decoratesFunctions(fn):
+				c.addError(fmt.Sprintf("Decorator '%s' decorates functions: it takes the function it replaces. '%s' is a field, whose decorators take (class, name, info)",
+					deco, field), d.Token)
+			case fn.Async:
+				c.addErrorCode("async", fmt.Sprintf("Decorator '%s' on field '%s' is async: it is called when the class is defined, where nothing awaits it",
+					deco, field), d.Token)
+			case !fn.parametersFit(call):
+				c.addError(fmt.Sprintf("Decorator '%s' on field '%s' must accept (class: any, name: string, info: table), but takes '%s'",
+					deco, field, fn.String()), d.Token)
+			}
+		}
+	}
+}
+
+// fieldInfoType is the type of the info a field decorator is given:
+// { type?: string, default?: any, has_default: boolean }.
+func fieldInfoType() *InterfaceType {
+	return &InterfaceType{
+		Name:          "field info",
+		Properties:    map[string]Type{"type": &OptionalType{BaseType: String}, "default": Any, "has_default": Boolean},
+		OptionalProps: map[string]bool{"type": true, "default": true},
+		Methods:       map[string]*FunctionType{},
+		StaticProps:   map[string]bool{},
+	}
+}
+
+// decoratesFields says whether a decorator takes what a field's is given,
+// (class, name, info): a second parameter that has to be passed.
+func decoratesFields(fn *FunctionType) bool {
+	params, _ := splitRest(fn)
+	if len(params) < 2 {
+		return false
+	}
+	return fn.Untyped || len(fn.OptionalParams) < 2 || !fn.OptionalParams[1]
+}
+
+// decoratesFunctions says whether a decorator takes what a function's or
+// a method's is given: the function, first.
+func decoratesFunctions(fn *FunctionType) bool {
+	params, _ := splitRest(fn)
+	return len(params) >= 1
 }
 
 // methodValue is a method as the value a decorator is given: a function

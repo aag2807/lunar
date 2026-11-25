@@ -1713,6 +1713,13 @@
             "type": "REPEAT",
             "content": {
               "type": "SYMBOL",
+              "name": "decorator"
+            }
+          },
+          {
+            "type": "REPEAT",
+            "content": {
+              "type": "SYMBOL",
               "name": "modifier"
             }
           },

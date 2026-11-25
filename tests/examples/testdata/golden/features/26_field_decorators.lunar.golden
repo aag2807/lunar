@@ -1,0 +1,53 @@
+local Guard
+
+local inspector = {}
+
+local function show(name, info, options)
+    table.insert(inspector, {name = name, type = info.type or "any", default = info.default, group = options.group or "General"})
+end
+
+local function export(owner, name, info)
+    show(name, info, {})
+end
+
+local function exportWith(options)
+    return function(owner, name, info)
+        show(name, info, options)
+    end
+end
+
+Guard = {}
+Guard.__index = Guard
+
+function Guard.__init(self)
+    self.speed = 2.0
+    self.kind = "brute"
+    self.health = 5
+    self.alertness = 0
+end
+function Guard.new(...)
+    local self = setmetatable({}, Guard)
+    Guard.__init(self, ...)
+    return self
+end
+
+export(Guard, "speed", { type = "number", default = 2.0, has_default = true })
+exportWith({choices = {"sentry", "brute", "warden"}})(Guard, "kind", { type = "string", default = "brute", has_default = true })
+exportWith({min = 0, max = 50, group = "Combat"})(Guard, "health", { type = "number", default = 5, has_default = true })
+
+
+for _, field in ipairs(inspector) do
+    print(field.group, field.name, field.type, field.default)
+end
+
+local a, b = Guard.new(), Guard.new()
+
+assert(# inspector == 3)
+
+assert(inspector[1].name == "speed" and inspector[1].type == "number" and inspector[1].default == 2.0)
+
+assert(inspector[2].name == "kind" and inspector[2].default == "brute")
+
+assert(inspector[3].name == "health" and inspector[3].group == "Combat")
+
+assert(a.health == 5 and b.kind == "brute")

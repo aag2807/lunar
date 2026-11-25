@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Decorators on class fields, so a host program (a game editor) can learn
+  which fields a script wants shown and how. A field decorator is called
+  once, when the class is defined: `@export` is `export(Guard, "speed",
+  info)` and `@export(options)` is `export(options)(Guard, "speed", info)`,
+  where `info` is `{ type = "number", default = 2.0, has_default = true }`:
+  the declared type as written, and the initial value when it is a literal.
+  A field decorator takes `(class, name, info)`; one that takes a function
+  on a field, or the reverse, is an error naming both. A declared decorator
+  with overloads is matched by its use, so one name can serve both forms.
+- Decorator names may be Lunar's own words: `@export`.
+
+### Fixed
+
+- An interface field written `name?: any` was required in a table literal:
+  `any?` is `any`, so the `?` was lost.
+
 ## 2.1.0 (2026-11-23)
 
 ### Added

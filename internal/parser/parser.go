@@ -3577,7 +3577,7 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 			continue
 		}
 
-		// Decorators on a method: @logged before it.
+		// Decorators on a method or a field: @logged before it.
 		var memberDecorators []*ast.Decorator
 		for p.curTokenIs(lexer.AT) {
 			if d := p.parseDecorator(); d != nil {
@@ -3585,7 +3585,7 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 			}
 			p.nextToken()
 		}
-		methodsBefore := len(class.Methods)
+		methodsBefore, propertiesBefore := len(class.Methods), len(class.Properties)
 		gettersBefore, settersBefore, constructorBefore := len(class.Getters), len(class.Setters), class.Constructor
 
 		// Track modifiers for current member
@@ -3724,10 +3724,13 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 			}
 		}
 		if len(memberDecorators) > 0 {
-			if len(class.Methods) > methodsBefore {
+			switch {
+			case len(class.Methods) > methodsBefore:
 				class.Methods[len(class.Methods)-1].Decorators = memberDecorators
-			} else {
-				p.addError("decorators apply to functions, classes and methods", memberDecorators[0].Token)
+			case len(class.Properties) > propertiesBefore:
+				class.Properties[len(class.Properties)-1].Decorators = memberDecorators
+			default:
+				p.addError("decorators apply to functions, classes, methods and class fields", memberDecorators[0].Token)
 			}
 		}
 	}
@@ -4514,10 +4517,12 @@ func (p *Parser) parseDecorator() *ast.Decorator {
 		Token: p.curToken, // '@' token
 	}
 
-	// Expect identifier after @
-	if !p.expectPeek(lexer.IDENT) {
+	// A name after @, Lunar's own words included: @export.
+	if !isWord(p.peekToken.Literal) || luaReserved[p.peekToken.Literal] {
+		p.addError(fmt.Sprintf("expected a decorator name after '@', got '%s'", p.peekToken.Literal), p.peekToken)
 		return nil
 	}
+	p.nextToken()
 
 	decorator.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
@@ -4594,7 +4599,7 @@ func (p *Parser) parseDecoratedStatement() ast.Statement {
 			}
 			p.RestoreState(state)
 		}
-		p.addError("decorators apply to functions and classes; a local variable cannot have one", p.curToken)
+		p.addError("decorators apply to functions, classes, methods and class fields; a local variable cannot have one", p.curToken)
 		return nil
 	default:
 		p.addError(fmt.Sprintf("decorators can only be applied to classes and functions, got %s", p.curToken.Type), p.curToken)

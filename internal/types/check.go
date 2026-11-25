@@ -1621,7 +1621,8 @@ func (c *Checker) addInterfaceProperty(iface *InterfaceType, prop *ast.PropertyD
 		}
 		iface.StaticProps[name] = true
 	}
-	if _, admitsNil := removeNil(propType); admitsNil {
+	// any? is any, no union with nil: the ? written on the field counts too.
+	if _, admitsNil := removeNil(propType); admitsNil || prop.IsOptional {
 		if iface.OptionalProps == nil {
 			iface.OptionalProps = make(map[string]bool)
 		}
@@ -3548,7 +3549,7 @@ func (c *Checker) checkFunctionDeclaration(node *ast.FunctionDeclaration) {
 	c.env = prevEnv
 	c.currentFunctionReturnType = prevReturnType
 	leaveFunction()
-	c.checkDecoratorTargets(node.Decorators, funcType, node.Name.Value)
+	c.checkDecoratorTargets(node.Decorators, funcType, node.Name.Value, "function")
 }
 
 // parameterNames lists a signature's parameter names, for signature help.
@@ -4781,6 +4782,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 		c.referenceTypeName(impl)
 	}
 	c.checkFieldValues(node, classType)
+	c.checkFieldDecorators(node, classType)
 
 	// The parent is needed when the class is set up, so a parent declared
 	// further down the same file is still nil then.
@@ -4954,7 +4956,7 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 			methodType, ok = classType.StaticMethods[method.Name.Value]
 		}
 		if ok && len(method.Decorators) > 0 {
-			c.checkDecoratorTargets(method.Decorators, methodValue(methodType, classType, method.IsStatic), method.Name.Value)
+			c.checkDecoratorTargets(method.Decorators, methodValue(methodType, classType, method.IsStatic), method.Name.Value, "method")
 		}
 	}
 
@@ -5327,7 +5329,7 @@ func (c *Checker) checkFieldFunction(node *ast.FunctionDeclaration) {
 		Parameters: params, ReturnType: node.ReturnType, Body: node.Body, IsAsync: node.IsAsync})
 	if fn, ok := fnType.(*FunctionType); ok {
 		fn.ParamNames = parameterNames(params)
-		c.checkDecoratorTargets(node.Decorators, fn, name)
+		c.checkDecoratorTargets(node.Decorators, fn, name, "function")
 	}
 	target := &ast.DotExpression{Token: node.Name.Token, Left: node.Receiver, Right: node.Name}
 	c.checkAssignmentTarget(&ast.AssignmentStatement{Token: node.Name.Token, Targets: []ast.Expression{target}},
@@ -8394,6 +8396,11 @@ func (c *Checker) checkDecorator(decorator *ast.Decorator) {
 		)
 		return
 	}
+	// @deco(args) with a declared deco of several overloads: the one the
+	// arguments match.
+	if len(decorator.Arguments) > 0 {
+		funcType = c.decoratorOverload(funcType, decorator)
+	}
 
 	// For decorators, the semantics are:
 	// - @decorator - simple decorator, the target is passed as first arg implicitly
@@ -8441,7 +8448,7 @@ func (c *Checker) checkDecorator(decorator *ast.Decorator) {
 
 	// Check argument types
 	for i, arg := range decorator.Arguments {
-		argType := c.checkExpression(arg)
+		argType := c.typeOf(arg)
 		if i < len(funcType.Parameters) {
 			paramType := funcType.Parameters[i]
 			// Unwrap optional type for comparison

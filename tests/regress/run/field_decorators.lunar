@@ -122,3 +122,58 @@ class Warden
     health: number = 5
 end
 assert(#shown == 3 and shown[1] == "speed" and shown[2] == "kind:nil" and shown[3] == "health:Combat")
+
+-- info also says: a default made only of literals, tables of them too;
+-- choices, for a union of strings (through an alias as well); where the
+-- field is, line and file; and the comment directly above it, doc.
+local infos: table<string, any> = {}
+local function keep(owner: any, name: string, info: any): void
+    infos[name] = info
+end
+
+type Mood = "calm" | "angry"
+
+class Spawner
+    -- Where it spawns,
+    -- relative to the spawner.
+    @keep
+    offset: number[] = { 0, 1, 0 }
+
+    @keep
+    names: string[] = { "imp", "orc" }
+
+    @keep
+    spec: table<string, any> = { size = 2, tags = { "a", "b" }, boss = false, ["max hp"] = -3 }
+
+    @keep
+    -- Between the decorator and the field.
+    kind: "sentry" | "brute" | "warden" = "brute"
+
+    @keep
+    mood: Mood? = nil
+
+    @keep
+    made: number[] = { roll() }
+
+    count: number = 0 -- trailing, not a doc
+    @keep
+    plain: number = 1
+end
+
+local offset = infos.offset
+assert(offset.has_default and #offset.default == 3 and offset.default[2] == 1)
+assert(offset.doc == "Where it spawns,\nrelative to the spawner.", offset.doc)
+assert(offset.line == 140 and offset.file == "field_decorators.lunar", tostring(offset.line) .. " " .. tostring(offset.file))
+assert(offset.choices == nil)
+assert(infos.names.default[2] == "orc")
+local spec = infos.spec.default
+assert(spec.size == 2 and spec.tags[2] == "b" and spec.boss == false and spec["max hp"] == -3)
+local kind = infos.kind
+assert(kind.choices[1] == "sentry" and kind.choices[3] == "warden" and #kind.choices == 3)
+assert(kind.doc == "Between the decorator and the field.", kind.doc)
+assert(infos.mood.choices[2] == "angry" and #infos.mood.choices == 2 and infos.mood.has_default)
+assert(infos.made.has_default == false and infos.made.default == nil)
+assert(infos.plain.doc == nil and infos.plain.line == 160)
+-- Each call gets its own default: changing one leaves the field's alone.
+offset.default[1] = 99
+assert(Spawner().offset[1] == 0)

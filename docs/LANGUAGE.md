@@ -555,11 +555,22 @@ info)`, and `@export(options)` calls `export(options)(Guard, "speed", info)`.
 The decorated fields are taken in the order they are declared, and several
 decorators on one field from the bottom up, as on methods.
 
-`info` says what types no longer can at run time: `type`, the declared type
-as written (left out when the field has none); `default`, the initial value
-when it is a literal (a number, string, boolean or nil); and `has_default`,
-false when the initial value is anything else, or there is none. Each call
-gets its own table.
+`info` says what types no longer can at run time:
+
+- `type`, the declared type as written (left out when the field has none);
+- `default`, the initial value when it is a literal: a number, string,
+  boolean or nil, or a table of them (`{ 0, 1, 0 }`, `{ size = 2 }`);
+  `has_default` is false when the initial value is anything else, or there
+  is none;
+- `choices`, the strings a union of string literals allows, in the order
+  written (`"sentry" | "brute" | "warden"`, or an alias of one), for a
+  drop-down;
+- `line` and `file`, where the field is (`file` relative to `rootDir`, as
+  `enemies/guard.lunar`), for messages about it;
+- `doc`, the `--` comment lines directly above the field or its
+  decorators, for a tooltip.
+
+Each call gets its own table, and its own copy of a table default.
 
 A field decorator takes `(class: any, name: string, info)`, `info` typed as
 an interface like `FieldInfo` below, `table<string, any>` or `any`; what it

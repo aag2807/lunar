@@ -125,6 +125,15 @@ func (c *Checker) checkFieldDecorators(node *ast.ClassDeclaration, classType *Cl
 		if prop == nil || prop.Name == nil {
 			continue
 		}
+		if len(prop.Decorators) > 0 {
+			declared, ok := classType.Properties[prop.Name.Value]
+			if prop.IsStatic {
+				declared, ok = classType.StaticProperties[prop.Name.Value]
+			}
+			if ok && prop.Type != nil {
+				prop.Choices = stringChoices(declared)
+			}
+		}
 		for _, d := range prop.Decorators {
 			c.checkDecorator(d)
 			fn := c.decoratorFunction(d, nil)
@@ -147,13 +156,41 @@ func (c *Checker) checkFieldDecorators(node *ast.ClassDeclaration, classType *Cl
 	}
 }
 
+// stringChoices is what a union of string literals allows, in the order
+// written ("a" | "b", an alias of one, either with ?), or nil.
+func stringChoices(t Type) []string {
+	if base, ok := removeNil(t); ok {
+		t = base
+	}
+	if opt, ok := t.(*OptionalType); ok {
+		t = opt.BaseType
+	}
+	union, ok := t.(*UnionType)
+	if !ok {
+		return nil
+	}
+	var choices []string
+	for _, m := range union.Types {
+		switch lit := m.(type) {
+		case *StringLiteralType:
+			choices = append(choices, lit.Value)
+		case *NilType:
+		default:
+			return nil
+		}
+	}
+	return choices
+}
+
 // fieldInfoType is the type of the info a field decorator is given:
 // { type?: string, default?: any, has_default: boolean }.
 func fieldInfoType() *InterfaceType {
 	return &InterfaceType{
-		Name:          "field info",
-		Properties:    map[string]Type{"type": &OptionalType{BaseType: String}, "default": Any, "has_default": Boolean},
-		OptionalProps: map[string]bool{"type": true, "default": true},
+		Name: "field info",
+		Properties: map[string]Type{"type": &OptionalType{BaseType: String}, "default": Any, "has_default": Boolean,
+			"choices": &OptionalType{BaseType: &ArrayType{ElementType: String}}, "line": Number,
+			"file": &OptionalType{BaseType: String}, "doc": &OptionalType{BaseType: String}},
+		OptionalProps: map[string]bool{"type": true, "default": true, "choices": true, "file": true, "doc": true},
 		Methods:       map[string]*FunctionType{},
 		StaticProps:   map[string]bool{},
 	}

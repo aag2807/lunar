@@ -3578,6 +3578,7 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 		}
 
 		// Decorators on a method or a field: @logged before it.
+		memberStart := p.curToken
 		var memberDecorators []*ast.Decorator
 		for p.curTokenIs(lexer.AT) {
 			if d := p.parseDecorator(); d != nil {
@@ -3728,7 +3729,13 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 			case len(class.Methods) > methodsBefore:
 				class.Methods[len(class.Methods)-1].Decorators = memberDecorators
 			case len(class.Properties) > propertiesBefore:
-				class.Properties[len(class.Properties)-1].Decorators = memberDecorators
+				prop := class.Properties[len(class.Properties)-1]
+				prop.Decorators = memberDecorators
+				// The comment above the decorators, or else between them
+				// and the field.
+				if prop.Doc = p.commentAbove(memberStart); prop.Doc == "" && prop.Name != nil {
+					prop.Doc = p.commentAbove(prop.Token)
+				}
 			default:
 				p.addError("decorators apply to functions, classes, methods and class fields", memberDecorators[0].Token)
 			}
@@ -4988,4 +4995,32 @@ func isCallable(e ast.Expression) bool {
 		_ = n
 		return false
 	}
+}
+
+// commentAbove is the comment on the lines directly above tok, whole lines
+// of `-- text` with no blank line between, as "text" lines joined by
+// newlines; "" when there is none.
+func (p *Parser) commentAbove(tok lexer.Token) string {
+	src := p.l.Source()
+	if tok.Offset <= 0 || tok.Offset > len(src) {
+		return ""
+	}
+	// Back to the start of tok's line; what is before it there is not a
+	// comment above.
+	end := strings.LastIndexByte(src[:tok.Offset], '\n')
+	if end < 0 || strings.TrimSpace(src[end+1:tok.Offset]) != "" {
+		return ""
+	}
+	var lines []string
+	for end > 0 {
+		start := strings.LastIndexByte(src[:end], '\n') + 1
+		line := strings.TrimSpace(strings.TrimSuffix(src[start:end], "\r"))
+		if !strings.HasPrefix(line, "--") || strings.HasPrefix(line, "--[") {
+			break
+		}
+		text := strings.TrimLeft(line, "-") // --- text, as LuaLS writes docs
+		lines = append([]string{strings.TrimPrefix(text, " ")}, lines...)
+		end = start - 1
+	}
+	return strings.Join(lines, "\n")
 }

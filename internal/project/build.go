@@ -78,10 +78,17 @@ func (p *Project) generate(m *Module, rel string) (code, mapJSON string, err err
 			err = fmt.Errorf("internal compiler error generating Lua: %v", r)
 		}
 	}()
+	// A field decorator's info names the script as the host knows it,
+	// relative to rootDir: enemies/guard.lunar.
 	if !p.SourceMap {
-		return codegen.GenerateWithTarget(m.Statements, p.Target), "", nil
+		g := codegen.NewWithTarget(p.Target)
+		g.ModuleName = p.rel(m.Path)
+		return g.Generate(m.Statements), "", nil
 	}
-	lua, sm := codegen.GenerateWithSourceMapAndTarget(m.Statements, m.Path, rel, p.Target)
+	g := codegen.NewWithSourceMapAndTarget(m.Path, rel, p.Target)
+	g.ModuleName = p.rel(m.Path)
+	lua := g.Generate(m.Statements)
+	sm := g.GetSourceMap()
 	if mapJSON, err = sm.ToJSON(); err != nil {
 		return "", "", err
 	}

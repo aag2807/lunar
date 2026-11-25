@@ -1153,6 +1153,11 @@ type PropertyDeclaration struct {
 	// Decorators are called once when the class is defined, the last
 	// first: deco(Class, "name", info).
 	Decorators []*Decorator
+	// Doc is the comment directly above a decorated field, its lines
+	// without the --; Choices the strings a union of string literals
+	// allows, which the checker sets. Both go into the decorators' info.
+	Doc     string
+	Choices []string
 }
 
 func (pd *PropertyDeclaration) statementNode()       {}

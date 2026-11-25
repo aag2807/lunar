@@ -26,6 +26,9 @@ func NewFile(path, input string) *Lexer {
 	return l
 }
 
+// Source is the text being lexed.
+func (l *Lexer) Source() string { return l.input }
+
 func New(input string) *Lexer {
 	l := &Lexer{input: input, line: 1, column: 0}
 	l.readChar()

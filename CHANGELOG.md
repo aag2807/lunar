@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- A field decorator's `info` says more, for an engine's inspector:
+  `default` for a table made only of literals (`{ 0, 1, 0 }`), `choices`
+  for a union of string literals (`"sentry" | "brute" | "warden"`, aliases
+  too), `line` and `file` (relative to `rootDir`), and `doc`, the comment
+  directly above the field.
+
 ## 2.1.1 (2026-11-25)
 
 ### Added

@@ -5,6 +5,7 @@ import (
 	"lunar/internal/ast"
 	"lunar/internal/lexer"
 	"lunar/internal/sourcemap"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
@@ -19,7 +20,11 @@ type Generator struct {
 	currentLine      int
 	currentColumn    int
 	sourceFile       string
-	classParents     map[string]string // Track parent class names for super
+	// ModuleName is the script's path as the host knows it (relative to
+	// rootDir, with /), the file a field decorator's info names; without
+	// it, the source's base name.
+	ModuleName   string
+	classParents map[string]string // Track parent class names for super
 	// varargs says, for each function being generated, whether it takes
 	// '...'; empty means the main chunk.
 	varargs []bool
@@ -2543,8 +2548,10 @@ func (g *Generator) fieldDecorators(className string, props []*ast.PropertyDecla
 
 // fieldInfo is the table a field decorator is given, for what types no
 // longer say at run time: { type = "number", default = 2.0, has_default =
-// true }. type is the declared type as Lunar writes it, left out when there
-// is none; default is the initial value when it is a literal.
+// true, line = 7, file = "guard.lunar" }. type is the declared type as Lunar
+// writes it, left out when there is none; default is the initial value when
+// it is a literal, or a table of them; choices are the strings a union of
+// string literals allows; doc is the comment directly above the field.
 func (g *Generator) fieldInfo(prop *ast.PropertyDeclaration) string {
 	var parts []string
 	if prop.Type != nil {
@@ -2555,11 +2562,29 @@ func (g *Generator) fieldInfo(prop *ast.PropertyDeclaration) string {
 	} else {
 		parts = append(parts, "has_default = false")
 	}
+	if len(prop.Choices) > 0 {
+		quoted := make([]string, len(prop.Choices))
+		for i, c := range prop.Choices {
+			quoted[i] = "\"" + g.escapeLuaString(c) + "\""
+		}
+		parts = append(parts, "choices = { "+strings.Join(quoted, ", ")+" }")
+	}
+	parts = append(parts, fmt.Sprintf("line = %d", prop.Token.Line))
+	file := g.ModuleName
+	if file == "" && prop.Token.File != "" {
+		file = filepath.Base(prop.Token.File)
+	}
+	if file != "" {
+		parts = append(parts, fmt.Sprintf("file = \"%s\"", g.escapeLuaString(file)))
+	}
+	if prop.Doc != "" {
+		parts = append(parts, fmt.Sprintf("doc = \"%s\"", g.escapeLuaString(prop.Doc)))
+	}
 	return "{ " + strings.Join(parts, ", ") + " }"
 }
 
 // literalValue says whether e is a literal: a number (negative ones too),
-// a string, a boolean or nil.
+// a string, a boolean, nil, or a table whose keys and values are literals.
 func literalValue(e ast.Expression) bool {
 	switch n := e.(type) {
 	case *ast.NumberLiteral, *ast.StringLiteral, *ast.BooleanLiteral, *ast.NilLiteral:
@@ -2569,6 +2594,19 @@ func literalValue(e ast.Expression) bool {
 			_, isNumber := n.Right.(*ast.NumberLiteral)
 			return isNumber
 		}
+	case *ast.TableLiteral:
+		if n == nil {
+			return false
+		}
+		for _, entry := range n.Entries {
+			if _, named := entry.Key.(*ast.Identifier); entry.Key != nil && !named && !literalValue(entry.Key) {
+				return false
+			}
+			if !literalValue(entry.Value) {
+				return false
+			}
+		}
+		return true
 	}
 	return false
 }

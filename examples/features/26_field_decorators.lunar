@@ -1,11 +1,16 @@
 -- Field decorators: a game editor learns which fields a script wants shown,
 -- and how. A field decorator runs once, when the class is defined, with the
--- class, the field's name and an info table: { type, default, has_default }.
+-- class, the field's name and an info table: { type, default, has_default,
+-- choices, line, file, doc }.
 
 interface FieldInfo
     type?: string
     default?: any
     has_default: boolean
+    choices?: string[]
+    line: number
+    file?: string
+    doc?: string
 end
 
 interface ExportOptions
@@ -20,6 +25,8 @@ interface Shown
     type: string
     default: any
     group: string
+    choices?: string[]
+    tooltip?: string
 end
 
 -- What the editor would read: every exported field, in order.
@@ -31,6 +38,8 @@ local function show(name: string, info: FieldInfo, options: ExportOptions): void
         type = info.type or "any",
         default = info.default,
         group = options.group or "General",
+        choices = info.choices,
+        tooltip = info.doc,
     })
 end
 
@@ -50,8 +59,9 @@ class Guard
     @export
     speed: number = 2.0
 
-    @exportWith({ choices = { "sentry", "brute", "warden" } })
-    kind: string = "brute"
+    -- How it fights; the inspector shows a drop-down of the three.
+    @export
+    kind: "sentry" | "brute" | "warden" = "brute"
 
     @exportWith({ min = 0, max = 50, group = "Combat" })
     health: number = 5
@@ -68,6 +78,7 @@ end
 local a, b = Guard(), Guard()
 assert(#inspector == 3)
 assert(inspector[1].name == "speed" and inspector[1].type == "number" and inspector[1].default == 2.0)
-assert(inspector[2].name == "kind" and inspector[2].default == "brute")
+assert(inspector[2].name == "kind" and inspector[2].default == "brute" and #inspector[2].choices == 3)
+assert(inspector[2].tooltip == "How it fights; the inspector shows a drop-down of the three.")
 assert(inspector[3].name == "health" and inspector[3].group == "Combat")
 assert(a.health == 5 and b.kind == "brute")

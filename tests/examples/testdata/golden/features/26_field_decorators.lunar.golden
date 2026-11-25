@@ -3,7 +3,7 @@ local Guard
 local inspector = {}
 
 local function show(name, info, options)
-    table.insert(inspector, {name = name, type = info.type or "any", default = info.default, group = options.group or "General"})
+    table.insert(inspector, {name = name, type = info.type or "any", default = info.default, group = options.group or "General", choices = info.choices, tooltip = info.doc})
 end
 
 local function export(owner, name, info)
@@ -31,9 +31,9 @@ function Guard.new(...)
     return self
 end
 
-export(Guard, "speed", { type = "number", default = 2.0, has_default = true })
-exportWith({choices = {"sentry", "brute", "warden"}})(Guard, "kind", { type = "string", default = "brute", has_default = true })
-exportWith({min = 0, max = 50, group = "Combat"})(Guard, "health", { type = "number", default = 5, has_default = true })
+export(Guard, "speed", { type = "number", default = 2.0, has_default = true, line = 60, file = "26_field_decorators.lunar" })
+export(Guard, "kind", { type = "\"sentry\" | \"brute\" | \"warden\"", default = "brute", has_default = true, choices = { "sentry", "brute", "warden" }, line = 64, file = "26_field_decorators.lunar", doc = "How it fights; the inspector shows a drop-down of the three." })
+exportWith({min = 0, max = 50, group = "Combat"})(Guard, "health", { type = "number", default = 5, has_default = true, line = 67, file = "26_field_decorators.lunar" })
 
 
 for _, field in ipairs(inspector) do
@@ -46,7 +46,9 @@ assert(# inspector == 3)
 
 assert(inspector[1].name == "speed" and inspector[1].type == "number" and inspector[1].default == 2.0)
 
-assert(inspector[2].name == "kind" and inspector[2].default == "brute")
+assert(inspector[2].name == "kind" and inspector[2].default == "brute" and # inspector[2].choices == 3)
+
+assert(inspector[2].tooltip == "How it fights; the inspector shows a drop-down of the three.")
 
 assert(inspector[3].name == "health" and inspector[3].group == "Combat")
 

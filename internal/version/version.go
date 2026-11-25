@@ -7,10 +7,10 @@ import "runtime/debug"
 // Version is the release version. Release builds may override it with
 //
 //	go build -ldflags "-X lunar/internal/version.Version=2.0.1" ./cmd/lunar
-var Version = "2.1.0"
+var Version = "2.1.1"
 
 // String returns "lunar <version>", followed by the git revision the binary
-// was built from when the toolchain recorded one: "lunar 2.1.0 (1a2b3c4d5e6f)".
+// was built from when the toolchain recorded one: "lunar 2.1.1 (1a2b3c4d5e6f)".
 func String() string {
 	if rev := revision(); rev != "" {
 		return "lunar " + Version + " (" + rev + ")"

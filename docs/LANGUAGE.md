@@ -444,6 +444,23 @@ declare interface Clock
 end
 ```
 
+A declared function may take type parameters, so an API that hands back
+what it is asked for keeps the type: `children<Enemy>(root, "enemy")` is an
+`Enemy[]`, and `first(enemies)` infers its `T` from the argument.
+
+```lunar
+interface Node
+    name: string
+end
+
+declare function children<T>(parent: Node, kind: string): T[]
+declare function first<T extends Node>(items: T[]): T?
+```
+
+Explicit type arguments on a method call, `container:children<Enemy>()`,
+are not parsed yet; a declared function or a namespace's function takes
+them.
+
 ## Async functions
 
 An async function may pause the coroutine it runs in and carry on later:
@@ -516,6 +533,8 @@ runs a small scheduler of its own.
 A decorator is a function that receives a function or class and returns its
 replacement. A namespace groups functions under a table.
 
+A decorator may come before `export`: `@singleton export class WorldState`
+decorates the class, and the module exports what the decorator returns.
 The decorated name keeps its type, so a typed decorator is checked both
 ways: the function has to fit what the decorator takes, and what the
 decorator returns has to fit the function. A method is given with `self`

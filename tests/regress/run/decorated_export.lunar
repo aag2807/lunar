@@ -1,0 +1,32 @@
+-- A decorator on an exported class or function: the name holds what the
+-- decorator returns, and that is what the module exports.
+local function singleton(c: any): any
+    return c.new()
+end
+
+@singleton
+export class WorldState
+    tick: number = 0
+
+    advance(): void
+        self.tick = self.tick + 1
+    end
+end
+
+local calls = 0
+local function counted(f: any): any
+    return function(...: any): any
+        calls = calls + 1
+        return f(...)
+    end
+end
+
+@counted
+export function double(n: number): number
+    return n * 2
+end
+
+local world: any = WorldState
+world:advance()
+assert(world.tick == 1 and getmetatable(world) == getmetatable(WorldState))
+assert(double(4) == 8 and calls == 1)

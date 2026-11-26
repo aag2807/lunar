@@ -1240,6 +1240,10 @@
           "named": true
         },
         {
+          "type": "export_statement",
+          "named": true
+        },
+        {
           "type": "function_declaration",
           "named": true
         },

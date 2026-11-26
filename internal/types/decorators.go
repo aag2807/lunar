@@ -131,7 +131,7 @@ func (c *Checker) checkFieldDecorators(node *ast.ClassDeclaration, classType *Cl
 				declared, ok = classType.StaticProperties[prop.Name.Value]
 			}
 			if ok && prop.Type != nil {
-				prop.Choices = stringChoices(declared)
+				prop.Choices = StringChoices(declared)
 			}
 		}
 		for _, d := range prop.Decorators {
@@ -156,9 +156,9 @@ func (c *Checker) checkFieldDecorators(node *ast.ClassDeclaration, classType *Cl
 	}
 }
 
-// stringChoices is what a union of string literals allows, in the order
+// StringChoices is what a union of string literals allows, in the order
 // written ("a" | "b", an alias of one, either with ?), or nil.
-func stringChoices(t Type) []string {
+func StringChoices(t Type) []string {
 	if base, ok := removeNil(t); ok {
 		t = base
 	}

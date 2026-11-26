@@ -1,0 +1,15 @@
+-- A declared generic function's results have the type it is given.
+interface Node
+    name: string
+end
+
+interface Enemy extends Node
+    hp: number
+end
+
+declare function children<T>(parent: Node, kind: string): T[]
+
+local root: Node = { name = "root" }
+local enemies = children<Enemy>(root, "enemy")
+local label: string = enemies[1].hp
+-- error: Cannot assign type 'number' to variable 'label' of type 'string'

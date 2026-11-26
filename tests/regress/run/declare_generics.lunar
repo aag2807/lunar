@@ -1,0 +1,36 @@
+-- A declared function may take type parameters, as an engine's API does:
+-- children<Enemy>(root, "enemy") is an Enemy[].
+interface Node
+    name: string
+end
+
+interface Enemy extends Node
+    hp: number
+end
+
+declare function children<T>(parent: Node, kind: string): T[]
+declare function first<T extends Node>(items: T[]): T?
+declare function pick<K, V>(map: table<K, V>, key: K): V
+
+children = function(...: any): any
+    return { { name = "imp", hp = 3 }, { name = "orc", hp = 9 } }
+end
+first = function(items: any): any
+    return items[1]
+end
+pick = function(map: any, key: any): any
+    return map[key]
+end
+
+local root: Node = { name = "root" }
+local enemies = children<Enemy>(root, "enemy")
+local hp: number = enemies[2].hp
+assert(hp == 9)
+
+-- T inferred from the argument: an Enemy.
+local lead = first(enemies)
+assert(lead ~= nil and lead.hp == 3)
+
+local stock: table<string, number> = { imps = 4 }
+local count: number = pick(stock, "imps")
+assert(count == 4)

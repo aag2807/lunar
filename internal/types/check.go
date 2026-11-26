@@ -8088,6 +8088,18 @@ func (c *Checker) StringMethodUses() []lexer.Token {
 
 // declaredFunctionType builds the type of an ambient function signature.
 func (c *Checker) declaredFunctionType(decl *ast.FunctionDeclaration) *FunctionType {
+	// declare function children<T>(...): T[] — its type parameters are in
+	// scope for its signature, as a function's are.
+	var generics []string
+	if len(decl.GenericParams) > 0 {
+		prevEnv := c.env
+		c.env = NewEnclosedEnvironment(prevEnv)
+		defer func() { c.env = prevEnv }()
+		for _, gp := range decl.GenericParams {
+			c.env.Set(gp.Value, c.typeParam(gp))
+			generics = append(generics, gp.Value)
+		}
+	}
 	params := make([]Type, len(decl.Parameters))
 	optionalParams := make([]bool, len(decl.Parameters))
 	hasRestParam := false
@@ -8122,7 +8134,7 @@ func (c *Checker) declaredFunctionType(decl *ast.FunctionDeclaration) *FunctionT
 		Parameters:       params,
 		OptionalParams:   optionalParams,
 		ReturnType:       returnType,
-		GenericParams:    []string{}, // Ambient function declarations are not generic
+		GenericParams:    generics,
 		HasRestParameter: hasRestParam,
 		Async:            decl.IsAsync,
 	}

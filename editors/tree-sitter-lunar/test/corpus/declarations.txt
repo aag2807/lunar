@@ -422,3 +422,21 @@ end
       (type_identifier
         (identifier))
       (number))))
+
+================================================================================
+Decorated export
+================================================================================
+
+@singleton
+export class WorldState
+end
+
+--------------------------------------------------------------------------------
+
+(chunk
+  (decorated_declaration
+    (decorator
+      (identifier))
+    (export_statement
+      (class_declaration
+        (identifier)))))

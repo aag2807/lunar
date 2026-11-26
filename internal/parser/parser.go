@@ -4581,6 +4581,22 @@ func (p *Parser) parseDecoratedStatement() ast.Statement {
 			fn.Decorators = decorators
 		}
 		return fn
+	case lexer.EXPORT:
+		// @singleton export class WorldState: the name is decorated, and
+		// the module exports what the decorator returns.
+		exp := p.parseExportStatement()
+		if exp == nil {
+			return nil
+		}
+		switch inner := exp.Statement.(type) {
+		case *ast.ClassDeclaration:
+			inner.Decorators = decorators
+		case *ast.FunctionDeclaration:
+			inner.Decorators = decorators
+		default:
+			p.addError("decorators apply to functions, classes, methods and class fields; an exported variable cannot have one", decorators[0].Token)
+		}
+		return exp
 	case lexer.LOCAL:
 		// @deco local function f(): f = deco(f) assigns the local.
 		if p.peekTokenIs(lexer.FUNCTION) {

@@ -1521,6 +1521,10 @@
             {
               "type": "SYMBOL",
               "name": "variable_declaration"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "export_statement"
             }
           ]
         }

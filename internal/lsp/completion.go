@@ -386,6 +386,17 @@ func (s *Server) completion(uri string, pos Position) (interface{}, error) {
 	lowered := strings.ToLower(prefix)
 	items := []CompletionItem{}
 	if inCommentOrString(text, offset) {
+		// setKind("br|"): the strings a union of string literals allows.
+		if quote, ok := stringAt(text, offset); ok {
+			for _, choice := range s.stringChoicesAt(path, text, quote) {
+				items = append(items, CompletionItem{Label: choice, Kind: EnumMemberKind, Detail: "\"" + choice + "\""})
+			}
+		}
+		return CompletionList{Items: items}, nil
+	}
+	// Just after a closing quote no name can follow: "hi"| offers nothing,
+	// now that quotes trigger completion.
+	if offset > 0 && offset <= len(text) && (text[offset-1] == '"' || text[offset-1] == '\'') {
 		return CompletionList{Items: items}, nil
 	}
 	ix := s.completionIndex(path, offset)
@@ -480,6 +491,73 @@ func (s *Server) signatureHelp(uri string, pos Position) (interface{}, error) {
 	path := uriToPath(uri)
 	text := s.file(path).Text
 	offset := s.offsetAt(path, pos)
+	fn, name, active := s.callAt(path, text, offset)
+	if fn == nil {
+		return nil, nil
+	}
+	params := paramLabels(fn)
+	info := SignatureInformation{Label: asyncPrefix(fn) + signature(name, fn)}
+	for _, p := range params {
+		info.Parameters = append(info.Parameters, ParameterInformation{Label: p})
+	}
+	if active >= len(params) && len(params) > 0 {
+		active = len(params) - 1
+	}
+	return SignatureHelp{Signatures: []SignatureInformation{info}, ActiveParameter: active}, nil
+}
+
+// stringChoicesAt is what the parameter a string at quote is passed to
+// allows, when it is a union of string literals (or one of them).
+func (s *Server) stringChoicesAt(path, text string, quote int) []string {
+	fn, _, active := s.callAt(path, text, quote)
+	if fn == nil {
+		return nil
+	}
+	params := fn.Parameters
+	var param types.Type
+	switch {
+	case active < len(params) && !(fn.HasRestParameter && active >= len(params)-1):
+		param = params[active]
+	case fn.HasRestParameter && len(params) > 0:
+		if arr, ok := params[len(params)-1].(*types.ArrayType); ok {
+			param = arr.ElementType
+		}
+	}
+	if param == nil {
+		return nil
+	}
+	if lit, ok := param.(*types.StringLiteralType); ok {
+		return []string{lit.Value}
+	}
+	return types.StringChoices(param)
+}
+
+// stringAt is the offset of the opening quote of the quoted string offset
+// is inside ("..." or '...', closed or still being typed).
+func stringAt(text string, offset int) (int, bool) {
+	if offset > len(text) {
+		offset = len(text)
+	}
+	l := lexer.New(text)
+	for i := 0; i < 1_000_000; i++ {
+		tok := l.NextToken()
+		if tok.Type == lexer.EOF || tok.Offset >= offset {
+			return 0, false
+		}
+		unterminated := tok.Type == lexer.ILLEGAL && strings.HasPrefix(tok.Literal, "unterminated string")
+		if (tok.Type == lexer.STRING || unterminated) && tok.Offset < offset && (offset < tok.End || unterminated && offset <= tok.End) {
+			if q := text[tok.Offset]; q == '"' || q == '\'' {
+				return tok.Offset, true
+			}
+			return 0, false
+		}
+	}
+	return 0, false
+}
+
+// callAt finds the call whose parentheses offset is inside: the function
+// called, its name as written, and which argument offset is in.
+func (s *Server) callAt(path, text string, offset int) (*types.FunctionType, string, int) {
 	if offset > len(text) {
 		offset = len(text)
 	}
@@ -512,7 +590,7 @@ scan:
 		}
 	}
 	if open < 0 {
-		return nil, nil
+		return nil, "", 0
 	}
 
 	// firstOf<number>(: the type arguments come between the name and '('.
@@ -579,19 +657,9 @@ scan:
 		}
 	}
 	if fn == nil {
-		return nil, nil
+		return nil, "", 0
 	}
-
-	name := strings.Join(chain, ".")
-	params := paramLabels(fn)
-	info := SignatureInformation{Label: asyncPrefix(fn) + signature(name, fn)}
-	for _, p := range params {
-		info.Parameters = append(info.Parameters, ParameterInformation{Label: p})
-	}
-	if active >= len(params) && len(params) > 0 {
-		active = len(params) - 1
-	}
-	return SignatureHelp{Signatures: []SignatureInformation{info}, ActiveParameter: active}, nil
+	return fn, strings.Join(chain, "."), active
 }
 
 // maskStringsAndComments is text with the inside of every string and

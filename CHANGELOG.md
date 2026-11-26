@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `declare function` takes type parameters: `declare function
+  children<T>(parent: Node, kind: string): T[]`, explicit
+  (`children<Enemy>(...)`) or inferred, with constraints; so do the
+  functions of a `declare namespace`. They were "Unknown type 'T'".
+- A decorator may come before `export`: `@singleton export class
+  WorldState`, and the module exports what the decorator returns. It was
+  "decorators can only be applied to classes and functions, got export".
+- Completion inside quotes: for an argument whose parameter is a union of
+  string literals (`kind: "sentry" | "brute"`, or an alias of one), the
+  language server offers those strings. `"` and `'` trigger completion.
+
 ## 2.1.2 (2026-11-25)
 
 ### Added

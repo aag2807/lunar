@@ -381,7 +381,7 @@ func (s *Server) handleInitialize(content json.RawMessage) error {
 		Capabilities: ServerCapabilities{
 			TextDocumentSync:        &TextDocumentSyncOptions{OpenClose: true, Change: SyncFull, Save: &SaveOptions{IncludeText: false}},
 			HoverProvider:           true,
-			CompletionProvider:      &CompletionOptions{TriggerCharacters: []string{".", ":"}},
+			CompletionProvider:      &CompletionOptions{TriggerCharacters: []string{".", ":", "\"", "'"}},
 			SignatureHelpProvider:   &SignatureHelpOptions{TriggerCharacters: []string{"(", ","}},
 			DefinitionProvider:      true,
 			ReferencesProvider:      true,

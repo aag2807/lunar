@@ -228,8 +228,9 @@ end
 declarations as `lunar build`, so the editor and the build agree:
 diagnostics for every file as you type, go to definition (into the standard
 library too), references and rename across files, hover with types,
-completion of members and names in scope, signature help, and document and
-workspace symbols.
+completion of members and names in scope (and, inside quotes, of the strings
+a parameter typed as a union of string literals allows), signature help, and
+document and workspace symbols.
 
 | Editor | | |
 |---|---|---|

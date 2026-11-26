@@ -1,7 +1,9 @@
 -- A decorator on an exported class or function: the name holds what the
 -- decorator returns, and that is what the module exports.
-local function singleton(c: any): any
-    return c.new()
+-- InstanceOf<T>: the decorator returns an instance of the class it is
+-- given, so WorldState holds one, checked as an instance.
+local function singleton<T>(cls: T): InstanceOf<T>
+    return (cls as any).new()
 end
 
 @singleton
@@ -26,7 +28,7 @@ export function double(n: number): number
     return n * 2
 end
 
-local world: any = WorldState
-world:advance()
-assert(world.tick == 1 and getmetatable(world) == getmetatable(WorldState))
+WorldState:advance()
+local tick: number = WorldState.tick
+assert(tick == 1 and getmetatable(WorldState).advance ~= nil)
 assert(double(4) == 8 and calls == 1)

@@ -564,6 +564,30 @@ end
 print(work(1), Geometry.area(3, 4))
 ```
 
+A class decorator that returns an instance of the class, a singleton, says
+so with `InstanceOf<T>`. The class's name then holds that instance: its
+methods and fields are checked as an instance's, in modules that import it
+too, and constructing it again is an error.
+
+```lunar
+local function singleton<T>(cls: T): InstanceOf<T>
+    return (cls as any).new()
+end
+
+@singleton
+class World
+    tick: number = 0
+
+    advance(): void
+        self.tick = self.tick + 1
+    end
+end
+
+World:advance()
+local tick: number = World.tick
+print(tick)
+```
+
 ### Decorators on class fields
 
 A class field may carry decorators too, so a program hosting the scripts (a
@@ -633,7 +657,7 @@ print(table.concat(shown, ", "))
 ## Utility types
 
 `Pick<T, K>`, `Omit<T, K>`, `Partial<T>`, `Required<T>`, `Readonly<T>`,
-`Record<K, V>`, `keyof T`, `typeof value`, conditional types
+`Record<K, V>`, `InstanceOf<T>` (an instance of the class `T`), `keyof T`, `typeof value`, conditional types
 (`T extends U ? X : Y`), mapped types (`{ [K in T]: U }`) and `as` assertions,
 including `as const`.
 

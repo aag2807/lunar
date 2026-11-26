@@ -1,0 +1,21 @@
+-- A class decorator that returns InstanceOf<T> leaves an instance in the
+-- class's name: it is checked as an instance, and cannot be built again.
+local function singleton<T>(cls: T): InstanceOf<T>
+    return (cls as any).new()
+end
+
+@singleton
+class World
+    tick: number = 0
+
+    advance(): void
+    end
+end
+
+World:advance()
+local label: string = World.tick
+-- error: Cannot assign type 'number' to variable 'label' of type 'string'
+World:jump()
+-- error: has no member 'jump'
+local again = World()
+-- error: 'World' holds an instance, made by its decorator 'singleton' (InstanceOf<T>): it cannot be constructed again

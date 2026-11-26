@@ -11,6 +11,11 @@
 - A decorator may come before `export`: `@singleton export class
   WorldState`, and the module exports what the decorator returns. It was
   "decorators can only be applied to classes and functions, got export".
+- `InstanceOf<T>`, an instance of the class `T`, for a class decorator that
+  returns one: `function singleton<T>(cls: T): InstanceOf<T>`. With
+  `@singleton class World`, `World` holds the instance: `World:advance()`
+  and `World.tick` are checked as an instance's, in importing modules too,
+  and `World()` is an error.
 - Completion inside quotes: for an argument whose parameter is a union of
   string literals (`kind: "sentry" | "brute"`, or an alias of one), the
   language server offers those strings. `"` and `'` trigger completion.

@@ -229,3 +229,33 @@ func methodValue(method *FunctionType, self Type, static bool) *FunctionType {
 	}
 	return &value
 }
+
+// instanceOf is InstanceOf<t>: the class itself once t is one (its type
+// is its instances'), or the marker while t is a type parameter or any.
+func instanceOf(t Type) Type {
+	if cl, ok := t.(*ClassType); ok {
+		return cl
+	}
+	return &InstanceOfType{Of: t}
+}
+
+// returnsInstance says whether a class decorator is declared to return
+// InstanceOf<T>, an instance of the class it is given: the class's name
+// then holds that instance.
+func (c *Checker) returnsInstance(d *ast.Decorator) bool {
+	t, ok := c.env.Get(d.Name.Value)
+	if !ok {
+		return false
+	}
+	fn, ok := t.(*FunctionType)
+	if !ok {
+		return false
+	}
+	if len(d.Arguments) > 0 {
+		if fn, ok = c.decoratorOverload(fn, d).ReturnType.(*FunctionType); !ok {
+			return false
+		}
+	}
+	_, isInstance := fn.ReturnType.(*InstanceOfType)
+	return isInstance
+}

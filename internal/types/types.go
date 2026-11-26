@@ -365,6 +365,26 @@ func (t *BooleanLiteralType) IsAssignableTo(other Type) bool {
 }
 
 // AnyType represents the any type (accepts all types)
+// InstanceOfType is InstanceOf<T> while T is not yet a class (a type
+// parameter, or any): an instance of the class T will be. Once T is a
+// class, InstanceOf<T> is that class, the type of its instances.
+type InstanceOfType struct {
+	Of Type
+}
+
+func (t *InstanceOfType) String() string { return "InstanceOf<" + t.Of.String() + ">" }
+func (t *InstanceOfType) Equals(other Type) bool {
+	o, ok := other.(*InstanceOfType)
+	return ok && t.Of.Equals(o.Of)
+}
+func (t *InstanceOfType) IsAssignableTo(other Type) bool {
+	switch other.(type) {
+	case *AnyType, *UnknownType:
+		return true
+	}
+	return t.Equals(other)
+}
+
 type AnyType struct{}
 
 func (t *AnyType) String() string { return "any" }
@@ -884,15 +904,19 @@ type ClassType struct {
 	MethodVisibility   map[string]string        // Method visibility (public, private, protected)
 	Constructor        *FunctionType            // Constructor signature
 	Implements         []*InterfaceType
-	IsAbstract         bool                     // Whether class is abstract
-	Ambient            bool                     // Declared with `declare class`: foreign Lua
-	MemberSyms         map[string]*Symbol       // Where each member is defined, for editors
-	GenericParams      []string                 // Generic type parameter names (e.g., ["T", "U"])
-	IndexSignature     *IndexSignature          // [key: KeyType]: ValueType
-	Getters            map[string]*FunctionType // Property getters
-	Setters            map[string]*FunctionType // Property setters
-	GetterVisibility   map[string]string        // Getter visibility
-	SetterVisibility   map[string]string        // Setter visibility
+	IsAbstract         bool // Whether class is abstract
+	// InstanceDecorator names a class decorator that returns
+	// InstanceOf<T> (a singleton): the class's name then holds an instance,
+	// checked as one, and cannot construct.
+	InstanceDecorator string
+	Ambient           bool                     // Declared with `declare class`: foreign Lua
+	MemberSyms        map[string]*Symbol       // Where each member is defined, for editors
+	GenericParams     []string                 // Generic type parameter names (e.g., ["T", "U"])
+	IndexSignature    *IndexSignature          // [key: KeyType]: ValueType
+	Getters           map[string]*FunctionType // Property getters
+	Setters           map[string]*FunctionType // Property setters
+	GetterVisibility  map[string]string        // Getter visibility
+	SetterVisibility  map[string]string        // Setter visibility
 	// GenericOrigin and TypeArgs are set on an instantiation, Box<number>:
 	// the generic class it came from, and its arguments, so a Box<T>
 	// inside Box becomes Box<number> when T does.

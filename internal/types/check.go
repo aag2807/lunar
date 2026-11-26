@@ -1952,6 +1952,15 @@ func (c *Checker) resolveTypeExpression(expr ast.Expression) Type {
 				}
 				return c.partialType(typeArgs[0])
 
+			case "InstanceOf":
+				// InstanceOf<T>: an instance of the class T, what a
+				// singleton decorator returns.
+				if len(typeArgs) != 1 {
+					c.addError("InstanceOf<T> expects 1 type argument", baseIdent.Token)
+					return Any
+				}
+				return instanceOf(typeArgs[0])
+
 			case "Required":
 				if len(typeArgs) != 1 {
 					c.addError("Required<T> expects 1 type argument", baseIdent.Token)
@@ -2936,6 +2945,9 @@ func (c *Checker) substituteType(typ Type, substitutions map[string]Type) Type {
 			return subst
 		}
 		return t
+
+	case *InstanceOfType:
+		return instanceOf(c.substituteType(t.Of, substitutions))
 
 	case *ArrayType:
 		return &ArrayType{ElementType: c.substituteType(t.ElementType, substitutions)}
@@ -4795,6 +4807,9 @@ func (c *Checker) checkClassDeclaration(node *ast.ClassDeclaration) {
 	// Check decorators
 	for _, decorator := range node.Decorators {
 		c.checkDecorator(decorator)
+		if c.returnsInstance(decorator) {
+			classType.InstanceDecorator = decorator.Name.Value
+		}
 	}
 
 	// Check abstract methods: they should not have a body in abstract classes
@@ -6363,6 +6378,11 @@ func (c *Checker) checkCallWithType(node *ast.CallExpression, funcType Type) Typ
 		// exactly what an abstract base class exists for, so it is not an
 		// instantiation of one.
 		_, viaSuper := node.Function.(*ast.SuperExpression)
+		if classType.InstanceDecorator != "" && !viaSuper {
+			c.addError(fmt.Sprintf("'%s' holds an instance, made by its decorator '%s' (InstanceOf<T>): it cannot be constructed again",
+				classType.Name, classType.InstanceDecorator), node.Token)
+			return classType
+		}
 
 		// Enemy(3) constructs through Enemy.new; recording it here means
 		// codegen gets it right for classes from other modules too.
@@ -6899,6 +6919,10 @@ func (c *Checker) checkDotExpression(node *ast.DotExpression) Type {
 			if right, ok := left.Right.(*ast.Identifier); ok {
 				viaClassName = right.Value == typ.Name
 			}
+		}
+		// @singleton class World: World holds an instance.
+		if typ.InstanceDecorator != "" {
+			viaClassName = false
 		}
 
 		// ClassName.new(...) is the constructor every Lunar class gets.

@@ -15,5 +15,5 @@ languages = ["Lunar"]
 # repository = "file:///path/to/your/checkout" instead.
 [grammars.lunar]
 repository = "https://github.com/aag2807/lunar"
-rev = "42bc6bf996f04bfe22dd79ecc4153dbde5e3fa6d"
+rev = "24acbf0655cdb4d15fd03d8b3c4ae350c3422e55"
 path = "editors/tree-sitter-lunar"

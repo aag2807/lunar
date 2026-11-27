@@ -34,3 +34,9 @@ assert(lead ~= nil and lead.hp == 3)
 local stock: table<string, number> = { imps = 4 }
 local count: number = pick(stock, "imps")
 assert(count == 4)
+
+-- K and V inferred from a table literal: a record's names and values, an
+-- array's indexes and elements.
+local imps: number = pick({ imps = 4, orcs = 2 }, "imps")
+local second: string = pick({ "a", "b" }, 2)
+assert(imps == 4 and second == "b")

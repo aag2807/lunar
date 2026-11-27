@@ -1158,6 +1158,9 @@ type PropertyDeclaration struct {
 	// allows, which the checker sets. Both go into the decorators' info.
 	Doc     string
 	Choices []string
+	// ConstantDefault is set by the checker for an initial value that is
+	// not a literal but is constant, an enum member.
+	ConstantDefault bool
 }
 
 func (pd *PropertyDeclaration) statementNode()       {}

@@ -991,6 +991,13 @@ func (p *Parser) isColonMethodCall() bool {
 	}
 
 	p.nextToken() // curToken = method name
+	// obj:m<T>(...): type arguments, then the call. After obj:m Lua needs
+	// arguments, so this '<' is never a comparison.
+	if p.peekTokenIs(lexer.LT) {
+		name := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		p.nextToken() // '<'
+		return p.tryParseGenericType(name) != nil && p.peekTokenIs(lexer.LPAREN)
+	}
 	// obj:m(...), obj:m{...} and obj:m"..."
 	return p.peekTokenIs(lexer.LPAREN) || p.peekTokenIs(lexer.LBRACE) || p.peekTokenIs(lexer.STRING)
 }

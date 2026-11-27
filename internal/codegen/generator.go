@@ -2557,7 +2557,7 @@ func (g *Generator) fieldInfo(prop *ast.PropertyDeclaration) string {
 	if prop.Type != nil {
 		parts = append(parts, fmt.Sprintf("type = \"%s\"", g.escapeLuaString(prop.Type.String())))
 	}
-	if literalValue(prop.Value) {
+	if literalValue(prop.Value) || prop.ConstantDefault {
 		parts = append(parts, "default = "+g.generateExpression(prop.Value), "has_default = true")
 	} else {
 		parts = append(parts, "has_default = false")

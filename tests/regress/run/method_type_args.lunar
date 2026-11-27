@@ -1,0 +1,42 @@
+-- Explicit type arguments on a method call: container:children<Enemy>().
+-- After obj:name Lua needs the arguments, so '<' there is never a
+-- comparison.
+interface Node
+    name: string
+end
+
+interface Enemy extends Node
+    hp: number
+end
+
+declare class Container
+    children<T>(kind: string): T[]
+end
+
+class Box
+    pass<U>(x: U): U
+        return x
+    end
+end
+
+local b = Box()
+local n: number = b:pass<number>(1)
+assert(n == 1)
+
+local function makeContainer(): Container
+    local c: any = {}
+    function c:children(kind: string): any
+        return { { name = "imp", hp = 3 } }
+    end
+    return c
+end
+local c = makeContainer()
+local enemies = c:children<Enemy>("enemy")
+local hp: number = enemies[1].hp
+assert(hp == 3)
+
+local t = { v = 1 }
+function t:get(): number
+    return self.v
+end
+assert(t:get() < 2 and t:get() > 0)

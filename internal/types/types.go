@@ -444,8 +444,13 @@ func (t *ArrayType) IsAssignableTo(other Type) bool {
 	}
 	// Special case: any[] is assignable to table<K, V> for flexibility
 	// This allows empty {} literals typed as any[] to be assigned to table types
-	if _, ok := other.(*TableType); ok {
+	if tbl, ok := other.(*TableType); ok {
 		if _, isAny := t.ElementType.(*AnyType); isAny {
+			return true
+		}
+		// An array is a table from numbers: T[] fits table<number, V>
+		// when T fits V.
+		if Number.IsAssignableTo(tbl.KeyType) && t.ElementType.IsAssignableTo(tbl.ValueType) {
 			return true
 		}
 	}
@@ -1526,6 +1531,10 @@ type EnumType struct {
 	// Strings is set when the members' values are strings; otherwise they
 	// are numbers. A member is its value, so it fits that base type.
 	Strings bool
+	// Order is the members in the order declared; StringValues each one's
+	// value when it is a string literal.
+	Order        []string
+	StringValues map[string]string
 }
 
 func (t *EnumType) String() string {

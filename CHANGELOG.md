@@ -16,6 +16,16 @@
   `@singleton class World`, `World` holds the instance: `World:advance()`
   and `World.tick` are checked as an instance's, in importing modules too,
   and `World()` is an error.
+- Explicit type arguments on method calls: `c:children<Enemy>("enemy")`.
+  They did not parse.
+- A `match` on an enum, or on a union of string literals, must cover every
+  value or have a catch-all; one left out is an error naming it. Before, it
+  compiled and gave nil for that value. Scripts with such a match get an
+  error they did not get before.
+- A field decorator's `info` gives a string enum's values as `choices`, and
+  an enum member as the initial value as `default`.
+- A generic `table<K, V>` parameter infers `K` and `V` from a table literal
+  (`pick({ imps = 4 }, "imps")`), and an array fits `table<number, V>`.
 - Completion inside quotes: for an argument whose parameter is a union of
   string literals (`kind: "sentry" | "brute"`, or an alias of one), the
   language server offers those strings. `"` and `'` trigger completion.

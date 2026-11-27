@@ -1,0 +1,10 @@
+-- A method's explicit type arguments type its result.
+class Box
+    pass<U>(x: U): U
+        return x
+    end
+end
+
+local b = Box()
+local s: string = b:pass<number>(1)
+-- error: Cannot assign type 'number' to variable 's' of type 'string'

@@ -440,3 +440,24 @@ end
     (export_statement
       (class_declaration
         (identifier)))))
+
+================================================================================
+Method call with type arguments
+================================================================================
+
+local es = c:children<Enemy>("enemy")
+
+--------------------------------------------------------------------------------
+
+(chunk
+  (variable_declaration
+    (typed_name
+      (identifier))
+    (method_call
+      (identifier)
+      (identifier)
+      (type_arguments
+        (type_identifier
+          (identifier)))
+      (arguments
+        (string)))))

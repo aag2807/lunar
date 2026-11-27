@@ -1,0 +1,40 @@
+-- Matches that cover every value of an enum or a string union, or end in
+-- a catch-all, compile.
+enum Kind
+    Sentry = "sentry"
+    Brute = "brute"
+end
+
+enum Layer
+    Ground
+    Air
+end
+
+local function speed(k: Kind): number
+    return match k with
+        | Kind.Sentry -> 1
+        | Kind.Brute -> 2
+    end
+end
+
+local function height(l: Layer): number
+    return match l with
+        | Layer.Ground -> 0
+        | _ -> 10
+    end
+end
+
+local function mood(m: "calm" | "angry"): number
+    return match m with
+        | "calm" | "angry" -> 1
+    end
+end
+
+local function named(k: Kind): string
+    return match k with
+        | Kind.Sentry -> "s"
+        | other -> tostring(other)
+    end
+end
+
+assert(speed(Kind.Brute) == 2 and height(Layer.Air) == 10 and mood("calm") == 1 and named(Kind.Brute) == "brute")

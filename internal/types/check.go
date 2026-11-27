@@ -10,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -1590,6 +1591,13 @@ func (c *Checker) registerEnum(node *ast.EnumDeclaration) {
 		// All enum members have the enum type itself, not the value type
 		// This ensures type safety: Color.Red has type Color, not number
 		enumType.Members[member.Name.Value] = enumType
+		enumType.Order = append(enumType.Order, member.Name.Value)
+		if lit, ok := member.Value.(*ast.StringLiteral); ok {
+			if enumType.StringValues == nil {
+				enumType.StringValues = make(map[string]string)
+			}
+			enumType.StringValues[member.Name.Value] = lit.Value
+		}
 		setMemberSym(&enumType.MemberSyms, member.Name.Value, c.defineMember(member.Name.Token, SymEnumMember, enumType, enumType.Name))
 	}
 }
@@ -5446,9 +5454,20 @@ func inferTypeArgs(param, arg Type, names []string, args []Type, inferred []bool
 			inferTypeArgs(p.ElementType, a.ElementType, names, args, inferred)
 		}
 	case *TableType:
-		if a, ok := arg.(*TableType); ok {
+		switch a := arg.(type) {
+		case *TableType:
 			inferTypeArgs(p.KeyType, a.KeyType, names, args, inferred)
 			inferTypeArgs(p.ValueType, a.ValueType, names, args, inferred)
+		case *ArrayType:
+			// { "a", "b" }: number keys, its elements.
+			inferTypeArgs(p.KeyType, Number, names, args, inferred)
+			inferTypeArgs(p.ValueType, a.ElementType, names, args, inferred)
+		case *InterfaceType:
+			// { imps = 4 }, a table literal: string keys, its fields' values.
+			if a.Open && len(a.Methods) == 0 && len(a.Properties) > 0 {
+				inferTypeArgs(p.KeyType, String, names, args, inferred)
+				inferTypeArgs(p.ValueType, recordValueType(a), names, args, inferred)
+			}
 		}
 	case *OptionalType:
 		inferTypeArgs(p.BaseType, WithoutNil(arg), names, args, inferred)
@@ -6117,10 +6136,75 @@ func (c *Checker) checkMatchExpression(node *ast.MatchExpression) Type {
 		}
 		c.env = prev
 	}
+	c.checkMatchCovers(node, valueType)
 	if len(results) == 0 {
 		return Any
 	}
 	return combineReturnTypes(results)
+}
+
+// checkMatchCovers refuses a match on an enum, or on a union of string
+// literals, that leaves a value with no arm (it would give nil) and has no
+// catch-all. An arm with a guard may not match, so it covers nothing.
+func (c *Checker) checkMatchCovers(node *ast.MatchExpression, t Type) {
+	var values []string // as written in a pattern: Kind.Warden, "bored"
+	switch typ := t.(type) {
+	case *EnumType:
+		for _, name := range typ.Order {
+			values = append(values, typ.Name+"."+name)
+		}
+	case *UnionType:
+		for _, m := range typ.Types {
+			lit, ok := m.(*StringLiteralType)
+			if !ok {
+				return
+			}
+			values = append(values, strconv.Quote(lit.Value))
+		}
+	default:
+		return
+	}
+	covered := map[string]bool{}
+	var cover func(p ast.Pattern) bool // true: a catch-all
+	cover = func(p ast.Pattern) bool {
+		switch pt := p.(type) {
+		case *ast.WildcardPattern, *ast.BindingPattern:
+			return true
+		case *ast.TypePattern:
+			return pt.TypeName == "string" || pt.TypeName == t.String()
+		case *ast.OrPattern:
+			for _, alt := range pt.Alternatives {
+				if cover(alt) {
+					return true
+				}
+			}
+		case *ast.ValuePattern:
+			covered[pt.Value.String()] = true
+		case *ast.LiteralPattern:
+			if lit, ok := pt.Value.(*ast.StringLiteral); ok {
+				covered[strconv.Quote(lit.Value)] = true
+			}
+		}
+		return false
+	}
+	for _, mc := range node.Cases {
+		if mc.Guard != nil {
+			continue
+		}
+		if cover(mc.Pattern) {
+			return
+		}
+	}
+	var missing []string
+	for _, v := range values {
+		if !covered[v] {
+			missing = append(missing, v)
+		}
+	}
+	if len(missing) > 0 {
+		c.addError(fmt.Sprintf("match on '%s' does not cover %s: add an arm for it, or | _ ->",
+			t.String(), strings.Join(missing, ", ")), node.Token)
+	}
 }
 
 // checkPattern binds what a pattern binds, and refuses a literal pattern
@@ -8499,4 +8583,31 @@ func (c *Checker) checkDecorator(decorator *ast.Decorator) {
 			}
 		}
 	}
+}
+
+// recordValueType is the type every field of a table literal fits: theirs
+// when they agree, widened ({ a = 1, b = 2 } is number), or their union.
+func recordValueType(rec *InterfaceType) Type {
+	names := make([]string, 0, len(rec.Properties))
+	for name := range rec.Properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var types []Type
+	for _, name := range names {
+		t := widenLiteralType(rec.Properties[name])
+		seen := false
+		for _, have := range types {
+			if have.Equals(t) {
+				seen = true
+			}
+		}
+		if !seen {
+			types = append(types, t)
+		}
+	}
+	if len(types) == 1 {
+		return types[0]
+	}
+	return &UnionType{Types: types}
 }

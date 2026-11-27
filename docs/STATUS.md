@@ -19,7 +19,7 @@ Last updated for **2.1.2**, plus what `CHANGELOG.md` lists as unreleased.
 | Untyped Lua is checked as Lua (missing arguments are nil, `{}` takes any key, forward-declared locals, shadowed library names, fields cleared with nil or set to nil first, a function replaced by one with fewer parameters or a vararg wrapper) | `tests/luacompat/idioms2.lua`, `idioms3.lua`, `fields.lua` |
 | Functions defined into a table made with `local M = {}` keep their types: their calls are checked, an async one must be awaited, in importing modules too | `tests/regress/run/empty_table_functions.lunar`, `tests/regress/refuse/empty_table_functions.lunar`, `TestImportedTableAsyncFunctionMustBeAwaited` |
 | A function fits where it is passed more arguments than it takes, and where it is passed fewer if the rest may be left out; a vararg one takes any number | `tests/regress/run/function_params.lunar`, `tests/regress/refuse/function_params.lunar` |
-| Typed Lunar: classes (inheritance, abstract, statics, accessors, metamethods), interfaces, enums, generics (constraints, methods, generic classes), `match`, namespaces, modules, utility types, default parameters, narrowing | `TestRegressions` (44 programs run under Lua, 36 that must be refused), `TestExamplesRun` (26 example programs), `TestGoldenOutput` |
+| Typed Lunar: classes (inheritance, abstract, statics, accessors, metamethods), interfaces, enums, generics (constraints, methods, generic classes), `match`, namespaces, modules, utility types, default parameters, narrowing | `TestRegressions` (46 programs run under Lua, 38 that must be refused), `TestExamplesRun` (26 example programs), `TestGoldenOutput` |
 | Every LANGUAGE.md example compiles (and those that run, run) | `TestDocumentationExamplesCompile` |
 | Code nested more than Lua's 200 levels is refused with Lua's reason; deep code compiles in linear time, nested `async(` and `match(` calls of Lua functions too | `TestNestingLimit`, `TestNestedShapesCompileQuickly` |
 | Type arguments after `-`, `#`, `not`, `^`, `==` and `await` (`await fetch<T>(p)`) | `tests/regress/run/generic_after_unary.lunar` |
@@ -27,6 +27,9 @@ Last updated for **2.1.2**, plus what `CHANGELOG.md` lists as unreleased.
 | `declare` overloads that mix async and plain are refused | `tests/regress/refuse/async_overloads.lunar` |
 | Decorators are checked both ways: the target fits what the decorator takes, what it returns fits the target; on functions, `M.f`, methods (with self) and `local async function`; `@deco function M.f()` replaces `M.f` | `tests/regress/run/decorator_targets.lunar`, `tests/regress/refuse/decorator_targets.lunar` |
 | Class fields take decorators: each is called once as the class is defined, `deco(Class, "name", info)` with the declared type, a literal default (tables of literals too), a string union's choices, the line and file, and the comment above; field and function decorators are refused on each other's targets, naming both; a declared decorator's overloads are matched by its use | `tests/regress/run/field_decorators.lunar`, `tests/regress/refuse/field_decorators.lunar`, `examples/features/26_field_decorators.lunar`, `TestFieldInfoNamesTheScriptUnderRootDir` |
+| Explicit type arguments on method calls, `c:children<Enemy>("enemy")` | `tests/regress/run/method_type_args.lunar`, `tests/regress/refuse/method_type_args.lunar` |
+| A generic `table<K, V>` parameter infers from a table literal (`pick({ a = 1 }, "a")`), and an array fits `table<number, V>` | `tests/regress/run/declare_generics.lunar` |
+| A `match` on an enum or a string-literal union covers every value or has a catch-all | `tests/regress/refuse/match_exhaustive.lunar`, `tests/regress/run/match_exhaustive.lunar` |
 | `declare function f<T>(...)` and `declare namespace` functions take type parameters, explicit or inferred | `tests/regress/run/declare_generics.lunar`, `tests/regress/refuse/declare_generics.lunar` |
 | A decorator before `export` (`@singleton export class WorldState`): the module exports what the decorator returns; one returning `InstanceOf<T>` leaves an instance in the class's name, checked as one in importing modules too | `tests/regress/run/decorated_export.lunar`, `tests/regress/refuse/singleton_instance.lunar`, `TestDecoratedExportIsWhatTheModuleExports` |
 | An override is checked once, against the nearest ancestor with the method, and its error is on the method | `TestOverrideErrorsOnceAtTheMethod` |
@@ -43,8 +46,6 @@ Last updated for **2.1.2**, plus what `CHANGELOG.md` lists as unreleased.
 |---|---|
 | Targets other than Lua 5.3 and 5.4 (LuaJIT, 5.1, 5.2) | refused |
 | Two implementations of one function (overloads) | refused; overloads belong in `declare` |
-| Explicit type arguments on a method call, `c:children<Enemy>()` | not parsed; inferred ones work, and declared functions take explicit ones |
-| A generic `table<K, V>` parameter does not infer from a table literal (`pick({ a = 1 }, "a")`) | pass a table typed `table<K, V>` |
 | Plain Lua `f(a < b, c > (d))` reads as a generic call, as in TypeScript | refused with "'a' is not a generic type or function"; write `c > d`. Kept on purpose |
 | A local declared with a value keeps its type: `local x = 1` then `x = "s"` is refused, in plain Lua too | as in TypeScript; declare it `local x` or `local x: number \| string`. Kept on purpose |
 | Destructuring a table's fields | only a call's results: `local (a, b) = f()` |

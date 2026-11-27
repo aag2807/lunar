@@ -1,0 +1,32 @@
+-- A match on an enum, or on a union of string literals, covers every
+-- value or has a catch-all arm: a value with no arm gives nil.
+enum Kind
+    Sentry = "sentry"
+    Brute = "brute"
+    Warden = "warden"
+end
+
+local function speed(k: Kind): number
+    return match k with
+        | Kind.Sentry -> 1
+        | Kind.Brute -> 2
+    end
+end
+-- error: match on 'Kind' does not cover Kind.Warden: add an arm for it, or | _ ->
+
+-- An arm with a guard may not match, so it does not cover its value.
+local function guarded(k: Kind, fast: boolean): number
+    return match k with
+        | Kind.Sentry | Kind.Brute -> 1
+        | Kind.Warden when fast -> 2
+    end
+end
+-- error: match on 'Kind' does not cover Kind.Warden
+
+local function mood(m: "calm" | "angry" | "bored"): number
+    return match m with
+        | "calm" -> 0
+        | "angry" -> 1
+    end
+end
+-- error: match on '"calm" | "angry" | "bored"' does not cover "bored"

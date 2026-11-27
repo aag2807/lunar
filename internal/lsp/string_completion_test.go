@@ -28,6 +28,11 @@ func TestCompletionInsideQuotesOffersTheUnionsStrings(t *testing.T) {
 	if labels := completeAt(t, head+"print(\"\")\n", "print(\""); len(labels) != 0 {
 		t.Errorf("in print's string: got %v", labels)
 	}
+	// A string enum's values are no Faction: Faction.Red is.
+	enum := "enum Faction\n    Red = \"red\"\nend\nlocal function join(f: Faction): void\nend\njoin(\"\")\n"
+	if labels := completeAt(t, enum, "join(\""); len(labels) != 0 {
+		t.Errorf("for an enum parameter: got %v", labels)
+	}
 }
 
 // The quotes trigger completion, so that the strings show as one is

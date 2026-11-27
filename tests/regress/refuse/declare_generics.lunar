@@ -13,3 +13,7 @@ local root: Node = { name = "root" }
 local enemies = children<Enemy>(root, "enemy")
 local label: string = enemies[1].hp
 -- error: Cannot assign type 'number' to variable 'label' of type 'string'
+
+declare function pick<K, V>(map: table<K, V>, key: K): V
+local name: string = pick({ imps = 4 }, "imps")
+-- error: Cannot assign type 'number' to variable 'name' of type 'string'

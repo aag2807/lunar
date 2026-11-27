@@ -133,6 +133,13 @@ func (c *Checker) checkFieldDecorators(node *ast.ClassDeclaration, classType *Cl
 			if ok && prop.Type != nil {
 				prop.Choices = StringChoices(declared)
 			}
+			// faction: Faction = Faction.Blue: an enum member is a constant,
+			// its value known when the class is defined.
+			if dot, isDot := prop.Value.(*ast.DotExpression); isDot {
+				if _, isEnum := c.typeOf(dot).(*EnumType); isEnum {
+					prop.ConstantDefault = true
+				}
+			}
 		}
 		for _, d := range prop.Decorators {
 			c.checkDecorator(d)
@@ -164,6 +171,17 @@ func StringChoices(t Type) []string {
 	}
 	if opt, ok := t.(*OptionalType); ok {
 		t = opt.BaseType
+	}
+	// A string enum's values, in the order declared.
+	if enum, ok := t.(*EnumType); ok {
+		if len(enum.StringValues) != len(enum.Order) || len(enum.Order) == 0 {
+			return nil
+		}
+		choices := make([]string, len(enum.Order))
+		for i, name := range enum.Order {
+			choices[i] = enum.StringValues[name]
+		}
+		return choices
 	}
 	union, ok := t.(*UnionType)
 	if !ok {

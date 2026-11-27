@@ -559,6 +559,8 @@ module.exports = grammar({
           field('object', $._prefix_expression),
           ':',
           field('method', $._field_name),
+          // c:children<Enemy>("enemy")
+          optional($.type_arguments),
           field('arguments', $.arguments),
         ),
       ),

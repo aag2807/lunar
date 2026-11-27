@@ -529,6 +529,10 @@ func (s *Server) stringChoicesAt(path, text string, quote int) []string {
 	if lit, ok := param.(*types.StringLiteralType); ok {
 		return []string{lit.Value}
 	}
+	// A string enum's values are not its members: Faction.Red is, "red" is not.
+	if _, isEnum := unwrap(param).(*types.EnumType); isEnum {
+		return nil
+	}
 	return types.StringChoices(param)
 }
 

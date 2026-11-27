@@ -325,7 +325,12 @@ print(g.describe(), g.health, s.describe())
 
 ## Enums
 
-Members without a value count up from the previous number, starting at 0.
+Members without a value count up from the previous number, starting at 0;
+members may also be strings. An enum is its own type: `local k: Kind =
+"brute"` is an error (write `Kind.Brute`), one enum's member is not
+another's, and `Kind.Nope` is refused. A member fits where its value's type
+is expected (`local s: string = Kind.Brute`). At run time an enum is a
+table of its values.
 
 ```lunar
 enum Rank
@@ -334,8 +339,14 @@ enum Rank
     Boss
 end
 
+enum Kind
+    Sentry = "sentry"
+    Brute = "brute"
+end
+
 local r: Rank = Rank.Boss
-assert(Rank.Grunt == 0 and Rank.Boss == 11)
+local k: Kind = Kind.Brute
+assert(Rank.Grunt == 0 and Rank.Boss == 11 and k == "brute")
 ```
 
 ## Pattern matching
@@ -345,7 +356,10 @@ binds the value, `name: Type`, table patterns, a dotted name such as an enum
 member (`State.Idle`), alternatives (`| 1 | 2 ->`), and `when` guards. Its
 value has the type of what its arms give, and a binding has the matched
 value's type. An arm ends at the next `|`; parenthesize a bitwise or inside
-one.
+one. A match on an enum, or on a union of string literals, has an arm for
+every value or a catch-all (`_`, a name): one left out is an error naming
+it, since the match would give nil. An arm with a `when` guard covers
+nothing, as it may not match.
 
 ```lunar
 function area(shape: any): number
@@ -457,9 +471,7 @@ declare function children<T>(parent: Node, kind: string): T[]
 declare function first<T extends Node>(items: T[]): T?
 ```
 
-Explicit type arguments on a method call, `container:children<Enemy>()`,
-are not parsed yet; a declared function or a namespace's function takes
-them.
+Methods take type arguments the same way: `container:children<Enemy>("enemy")`.
 
 ## Async functions
 
@@ -606,8 +618,9 @@ decorators on one field from the bottom up, as on methods.
   `has_default` is false when the initial value is anything else, or there
   is none;
 - `choices`, the strings a union of string literals allows, in the order
-  written (`"sentry" | "brute" | "warden"`, or an alias of one), for a
-  drop-down;
+  written (`"sentry" | "brute" | "warden"`, or an alias of one), or a string
+  enum's values, for a drop-down; an enum member as the initial value
+  (`Faction.Blue`) is the `default`, its value;
 - `line` and `file`, where the field is (`file` relative to `rootDir`, as
   `enemies/guard.lunar`), for messages about it;
 - `doc`, the `--` comment lines directly above the field or its

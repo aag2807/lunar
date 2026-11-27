@@ -177,3 +177,27 @@ assert(infos.plain.doc == nil and infos.plain.line == 160)
 -- Each call gets its own default: changing one leaves the field's alone.
 offset.default[1] = 99
 assert(Spawner().offset[1] == 0)
+
+-- An enum field: its default is the member's value, and a string enum's
+-- values are its choices.
+enum Faction
+    Red = "red"
+    Blue = "blue"
+end
+
+enum Tier
+    Low
+    High
+end
+
+class Banner
+    @keep
+    faction: Faction = Faction.Blue
+
+    @keep
+    tier: Tier = Tier.High
+end
+
+assert(infos.faction.default == "blue" and infos.faction.has_default)
+assert(infos.faction.choices[1] == "red" and infos.faction.choices[2] == "blue" and #infos.faction.choices == 2)
+assert(infos.tier.default == 1 and infos.tier.has_default and infos.tier.choices == nil)

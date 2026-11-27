@@ -133,8 +133,8 @@ Without `--json`, errors go to stderr with a line of context around each.
 
 ### Version
 
-`lunar --version` prints one line, `lunar 2.1.2` followed by the git revision
-it was built from when known: `lunar 2.1.2 (1a2b3c4d5e6f)`. An editor can
+`lunar --version` prints one line, `lunar 2.1.3` followed by the git revision
+it was built from when known: `lunar 2.1.3 (1a2b3c4d5e6f)`. An editor can
 compare the version with the one it expects.
 
 ## Loading the Lua
@@ -206,7 +206,12 @@ end
   emitted as written (`Sprite("hero.png")` stays `Sprite("hero.png")`);
   declare `static new(...)` if the engine's constructor is `Sprite.new`.
 - Overloads are written as several `declare function` signatures with the
-  same name.
+  same name. They are all async or none.
+- Declared functions and methods may be generic, so what the engine hands
+  back keeps its type: `declare function children<T>(parent: Node, kind:
+  string): T[]` makes `children<Enemy>(root, "enemy")` an `Enemy[]`, and a
+  `declare class` method `children<T>(kind: string): T[]` is called as
+  `container:children<Enemy>("enemy")`.
 - Declaring an interface again adds to it, so one file can extend another's.
 
 ## Sharing code between scripts
@@ -318,6 +323,76 @@ function update(dt) -- once a frame
 end
 ```
 
+## Fields an editor shows
+
+A class field may carry decorators, so the engine's editor can learn which
+fields a script wants shown in an inspector, and how. The engine declares
+the decorator, here `export`, once for both forms:
+
+```lunar
+interface FieldInfo
+    type?: string
+    default?: any
+    has_default: boolean
+    choices?: string[]
+    line: number
+    file?: string
+    doc?: string
+end
+
+interface ExportOptions
+    min?: number
+    max?: number
+    group?: string
+end
+
+declare function export(owner: any, name: string, info: FieldInfo): void
+declare function export(options: ExportOptions): (owner: any, name: string, info: FieldInfo) => void
+```
+
+A script then writes:
+
+```lunar fragment
+class Guard
+    @export
+    speed: number = 2.0
+
+    -- How it fights.
+    @export
+    kind: "sentry" | "brute" | "warden" = "brute"
+
+    @export({ min = 0, max = 50, group = "Combat" })
+    health: number = 5
+end
+```
+
+The Lua calls each field's decorators once, as the class is defined (not
+for each instance), for the decorated fields in declaration order and the
+decorators of one field from the bottom up. The field keeps its value:
+
+```lua
+export(Guard, "speed", { type = "number", default = 2.0, has_default = true, line = 3, file = "guard.lunar" })
+export(Guard, "kind", { type = "\"sentry\" | \"brute\" | \"warden\"", default = "brute", has_default = true,
+    choices = { "sentry", "brute", "warden" }, line = 7, file = "guard.lunar", doc = "How it fights." })
+export({min = 0, max = 50, group = "Combat"})(Guard, "health", { type = "number", default = 5, has_default = true, line = 10, file = "guard.lunar" })
+```
+
+`info`, one fresh table per call:
+
+| Key | What it is |
+|---|---|
+| `type` | the declared type as written; absent when the field has none |
+| `default`, `has_default` | the initial value when it is a literal, a table of literals (`{ 0, 1, 0 }`) or an enum member; otherwise `has_default` is false and `default` absent |
+| `choices` | the strings a union of string literals or a string enum allows, in order, for a drop-down |
+| `line`, `file` | where the field is; `file` is relative to `rootDir`, with `/`, as in the build's diagnostics |
+| `doc` | the `--` comment lines directly above the field or its decorators, for a tooltip |
+
+A decorator meant for functions on a field, or a field decorator on a
+function or method, is a compile error naming both. A class decorator may
+also come before `export`; one declared to return `InstanceOf<T>` (a
+singleton) leaves the instance in the class's name, checked as one in every
+module that imports it.
+
 ## Editors
 
 `lunar lsp` is the language server; it reads the same configuration and
@@ -325,6 +400,9 @@ declarations as `lunar build`, so the editor and the build agree. Each open
 file uses the `lunar.config.json` found from its own folder, so the editor
 may open a folder above the game's. A config error is shown on the config
 file and as a message. Rename is refused while any file has a syntax error.
+Inside the quotes of an argument whose parameter is a union of string
+literals (such as a `declare function play(anim: "idle" | "run")`),
+completion offers those strings.
 See `editors/` for Neovim, VS Code and Zed.
 
 Compiling one file (`lunar file.lunar [-o out.lua]`, flags before or after

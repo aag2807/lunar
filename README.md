@@ -4,7 +4,7 @@
 
 Every Lua 5.3/5.4 program is a Lunar program, with two exceptions kept on
 purpose ([below](#plain-lua-that-lunar-reads-differently)). Latest release:
-[**2.1.2**](https://github.com/aag2807/lunar/releases/tag/v2.1.2), with
+[**2.1.3**](https://github.com/aag2807/lunar/releases/tag/v2.1.3), with
 binaries for Linux, macOS and Windows. What works and what does not, with the
 test behind each claim: [`docs/STATUS.md`](docs/STATUS.md).
 
@@ -60,17 +60,32 @@ unsupported.
 - Classes: fields, `private`/`protected`, methods, `static` methods and fields,
   `extends` with `super(...)`, `abstract`, `readonly`, constructor parameter
   properties (`constructor(public x: number)`)
-- Interfaces (`implements`, structural checks for tables), enums, type aliases,
-  union and literal types, type guards (`value is string`), `as` assertions
-- Generics on functions, classes and interfaces (erased at runtime)
-- Utility types: `Pick`, `Omit`, `Partial`, `Readonly`, `Record`
+- Interfaces (`implements`, structural checks for tables, `static` members),
+  type aliases, union and literal types, type guards (`value is string`),
+  `as` assertions
+- Enums, numeric or string (`Brute = "brute"`), typed: `"brute"` is no
+  `Kind`, one enum's member is not another's
+- Generics on functions, methods, classes, interfaces and declarations
+  (erased at runtime), inferred or explicit (`firstOf<number>(xs)`,
+  `c:children<Enemy>("enemy")`)
+- Utility types: `Pick`, `Omit`, `Partial`, `Required`, `Readonly`, `Record`,
+  `InstanceOf`
 - Optional chaining `?.`, `?[`, `?.()` and nullish coalescing `??`
-- `match … with` pattern matching with guards and table patterns
+- `match … with` pattern matching with guards and table patterns; a match
+  on an enum or a string union covers every value or has a catch-all
 - Array and table spread (`{...a, 4}`, `{...defaults, ...overrides}`)
 - Template strings (`` `Hello, ${name}!` ``)
 - Bitwise operators `& | ~ << >>`; `^` is exponentiation, as in Lua
 - `import { a } from "./mod"` / `export function` (exports stay out of the
-  global environment), function decorators, `namespace`
+  global environment), `namespace`
+- Decorators on functions, methods, classes (exported ones too) and class
+  fields, checked against what they decorate. A field decorator runs once,
+  when the class is defined, and is given what types no longer say at run
+  time: the declared type, the default, a string union's or enum's choices,
+  the line and file, and the comment above, for an engine's inspector
+  ([Fields an editor shows](docs/ENGINE_INTEGRATION.md#fields-an-editor-shows)).
+  A singleton decorator returns `InstanceOf<T>`, and the class's name then
+  holds the instance
 - Getters and setters (`get amount(): number`), inherited by subclasses
 - Lua numerals in every form (`0xFF`, `1e-9`, `.5`); conditions test
   truthiness as in Lua, so `while true do` and `if enemy then` work
@@ -118,13 +133,13 @@ Lua compiles unchanged, with two known exceptions, both kept on purpose:
 ## Install
 
 Download the archive for your system from the
-[2.1.2 release](https://github.com/aag2807/lunar/releases/tag/v2.1.2)
+[2.1.3 release](https://github.com/aag2807/lunar/releases/tag/v2.1.3)
 (Linux, macOS and Windows, each for x86-64 and ARM64), unpack it, and put
 `lunar` (`lunar.exe` on Windows) on your `PATH`. `SHA256SUMS` lists the
 archives' checksums.
 
 ```sh
-lunar --version   # lunar 2.1.2, then the revision it was built from
+lunar --version   # lunar 2.1.3, then the revision it was built from
 ```
 
 The binary is self-contained: the standard library declarations are built in.
@@ -235,7 +250,7 @@ document and workspace symbols.
 | Editor | | |
 |---|---|---|
 | Neovim 0.11+ | [`editors/nvim`](editors/nvim) | `vim.lsp`, tree-sitter highlighting, folding and indentation; CI tests it headless on 0.12 |
-| VS Code | [`editors/vscode`](editors/vscode) | the language server and TextMate highlighting; runs in WSL. Install `lunar-2.1.2.vsix` from the release (not on the Marketplace yet) |
+| VS Code | [`editors/vscode`](editors/vscode) | the language server and TextMate highlighting; runs in WSL. Install `lunar-2.1.3.vsix` from the release (not on the Marketplace yet) |
 | Zed | [`editors/zed`](editors/zed) | the language server and tree-sitter highlighting, as a dev extension; it builds in CI but has not been tried inside Zed yet |
 
 The tree-sitter grammar is [`editors/tree-sitter-lunar`](editors/tree-sitter-lunar).
